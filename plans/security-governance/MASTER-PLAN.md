@@ -2,7 +2,7 @@
 
 Planned-with: GLM-5.3（Trae Code）
 Suggested-Impl-Model: SP1 主链路贯通与 SP5 处置面板用中强档；SP2/SP3/SP4/SP6 用中档
-Status: planned（2026-11-11 立项；由业界安全治理框架对表评估驱动，缺口结论见第二节）
+Status: completed（2026-11-11 立项；2026-11-13 六个 SP 全部完成并验收——由业界安全治理框架对表评估驱动，缺口结论见第二节，逐 SP 验收记录见第八节）
 Plan-Id: 2026-11-11-security-governance-master
 
 > **定位：** 把安全对表评估识别出的六个缺口，补成"事前-事中-事后"全链路一体化安全治理，使 agx 在"模型/数据/应用/访问全链路管控"的行业安全治理框架下**逐项可对答、可证明、可演示**。本文档是唯一的状态与验收控制点：sub plan 做完一个提交一个，状态表由本文档回填。
@@ -128,7 +128,7 @@ Plan-Id: 2026-11-11-security-governance-master
 | SP3 | `compliance-moderation` | 合规内容审核：策略引擎新增合规规则包（涉政/色情/暴恐/广告，租户可配数据包，走现有 policy snapshot 热加载）+ 第三方内容安全 API 适配层（provider 可插拔，strict/degraded 两档降级，流式在流尾、非流式在终态调用）；命中沿用 90001/90002 并带规则类别字段 | 无 | M | ✅ |
 | SP4 | `alert-dispatch` | 告警分发通道：AlertDispatcher——源（policy_hit 审计事件/预算告警/审计链校验失败）→ 分级（复用规则 severity，链校验失败=CRITICAL）→ 通道（通用 webhook + 飞书群机器人，SMTP 可选）→ admin-console 租户级通道配置；去重窗口 + 通道级限流防风暴；分发本身落审计 | 无 | S | ✅ |
 | SP5 | `incident-response-loop` | 一键处置与事件记录：处置面板（session 终止/PAT 吊销/用户禁用/模型拉黑；user 级二次确认）+ `security_incidents` 事件记录（三态状态机，trace_id 关联审计链）+ 响应 SOP 写入 `enterprise/SECURITY.md`；所有处置动作先审计后执行 | SP4 | M | ✅ |
-| SP6 | `red-team-drill` | 攻防演练与总验收：≥12 类脚本化攻击（越狱/工具输出注入/凭据外泄/路径穿越/SSRF/shell 注入/跨租户/吊销绕过/预算击穿/审计链篡改/合规内容/会话击杀续用）对真实部署栈演练 → 拦截矩阵报告（攻击→设计拦截层→实测结果→证据），≥90% 在设计层拦截或告警；报告与"行业安全治理框架对表"售前材料同批落盘 | SP1–SP5 | M | ⬜ |
+| SP6 | `red-team-drill` | 攻防演练与总验收：≥12 类脚本化攻击（越狱/工具输出注入/凭据外泄/路径穿越/SSRF/shell 注入/跨租户/吊销绕过/预算击穿/审计链篡改/合规内容/会话击杀续用）对真实部署栈演练 → 拦截矩阵报告（攻击→设计拦截层→实测结果→证据），≥90% 在设计层拦截或告警；报告与"行业安全治理框架对表"售前材料同批落盘 | SP1–SP5 | M | ✅ |
 
 依赖关系：SP1/SP2/SP3/SP4 均无相互前置（各自立足已有底座，可并行）；SP5 需 SP4（处置由告警驱动）；SP6 收尾。**最小可交付集（真 MVP）= SP1 + SP4**：拦截全链路生效 + 有人被通知，构成最小真实防护闭环，自身前置完备、零欠账。单线推进序：SP1 → SP4 → SP2 → SP3 → SP5 → SP6。
 
@@ -148,8 +148,8 @@ Plan-Id: 2026-11-11-security-governance-master
 - [x] SP3：合规规则包命中在请求/响应两侧产生 90001/90002 且带类别字段；第三方 API 适配层 contract 测试过 + degraded 降级路径 E2E（provider 故障→本地规则兜底+CRITICAL 告警）（2026-11-12 完成：snapshot payload.category 零迁移贯通→引擎一等字段→90001/90002 body→审计链；内置四类基线包（暴恐/涉政 block-critical、色情 block-high、广告 warn-medium）走插件播种+快照热加载租户可配；moderation 包 provider 可插拔（通用 JSON 契约）+六处接线（请求侧/非流式终态/流式流尾）；degraded 默认故障降级本地规则+CRITICAL moderation_degraded 告警去重、strict 租户选装 fail-closed；9+5 Go 测试+6 TS 测试+10 console 测试全绿，server/audit/moderation/alertdispatch/quota/policy-engine 回归通过。细节见 SP3 sub plan）
 - [x] SP4：真实 policy_hit 触发飞书卡片送达配置群（E2E 截图留证）；同规则窗口内重复命中去重为一条；通道限流生效；分发动作本身可在审计链查到（2026-11-12 完成：server 级接线 E2E 用 httptest 飞书端点验证卡片送达+去重；10 Go 测试 + 8 console API 测试 + server/audit/quota 回归全绿；真实飞书群送达待 webhook secret 配置后同路径复测。细节见 SP4 sub plan）
 - [x] SP5：模拟外泄攻击→告警→一键处置 E2E 全流程——session 被杀 + PAT 吊销后原凭据请求 401、事件记录三态流转完整、处置动作在审计链可查（2026-11-13 完成：网关 E2E `TestIncidentResponseLeakDispositionE2E` 全链验证——模拟外泄 policy_hit→飞书告警带 user/session/model→POST 处置端点（terminate_session+revoke_pat，先落链再即时吊销）→原 PAT `pat_revoked` + 同 session JWT 401、无关 session 不受影响、链上 incident_action×2 且 VerifyAuditChain 通过；SessionRevocationStore 5 测试（内存即时+snapshot 轮询兜底）；security_incidents 三表 PG/MySQL 迁移；iam-core incident repo 双实现（三态状态机+重开边）12 测试；console 处置编排 16 测试（先审计后执行 callOrder、disable_user 二次确认+级联、snapshot route internal auth）；SECURITY.md 4.5 事件响应 SOP；gateway `go test ./internal/...` 全 ok、iam-core 173 测试 + db-schema 30 测试全绿。细节见 SP5 sub plan）
-- [ ] SP6：≥12 类攻击拦截矩阵报告落盘，≥90% 在设计层拦截或告警，每格附证据；行业安全治理框架对表材料（售前版，脱敏）同批交付
-- [ ] 每个 sub plan 一个 commit + 标准 trailer
+- [x] SP6：≥12 类攻击拦截矩阵报告落盘，≥90% 在设计层拦截或告警，每格附证据；行业安全治理框架对表材料（售前版，脱敏）同批交付（2026-11-13 完成：12 类 32 条脚本化攻击对真实组件栈演练（主链路侧驱动生产 SafetyLayer/InputValidator/AgentRuntime enforce，网关侧组装真实 PAT 验证器/策略引擎/配额/审计链/告警分发）100% 在设计层拦截或检出告警；拦截矩阵 `reports/red-team-drill/drill-1/interception-matrix.md`+`.json` 每格含设计拦截层/实测结果/证据；`run_drill.py` 一条命令季度重演（SECURITY.md 4.5.5）；演练发现并修复真实缺口——ssrf_private_ip 补 link-local/云元数据端点；售前对表 `presale-security-alignment.md`（脱敏）同批落盘；Python 16 测试 + Go 6 测试全绿，gateway 全量与 Python safety 系列 71 passed 回归通过。细节见 SP6 sub plan）
+- [x] 每个 sub plan 一个 commit + 标准 trailer（六 SP 主 commit：SP1 `b1730a1d0`、SP4 `78453ba72`、SP2 `29a3ba769`、SP3 `f44637c5b`、SP5 `5c94c5a6f`、SP6 `18d50dc06`，均带 Plan-Id/Plan-File/Impl-Model: GLM-5.3/Made-with: Damon Li trailer；每个 SP 另有独立 docs commit 回填本计划第六/八节）
 
 ## 九、风险与对策
 
