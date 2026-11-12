@@ -143,6 +143,15 @@
 
 - resolved 后 48 小时内在事件结案说明中补齐：根因、命中规则/告警链路是否如期工作、SOP 改进项。
 - 季度攻防演练（红队）重跑本 SOP 全链路，验证：外泄告警 → 处置 → 原凭据 401 → 链上可查，证据落盘拦截矩阵报告。
+- 演练入口（SP6 red-team-drill，12 类脚本化攻击对真实组件栈）：
+
+```bash
+python3 scripts/red-team-drill/run_drill.py        # 重演两侧 → 拦截矩阵报告（md+json）落盘
+pytest tests/red_team/ -q                          # 主链路侧单独跑（常规 CI 零文件副作用）
+cd enterprise/apps/gateway && go test ./internal/server -run TestRedTeam -v   # 网关侧单独跑
+```
+
+拦截率验收线 ≥90%；首轮（2026-11-13）实测 32/32（100%）。演练 payload 全部为合成词/合成凭据（脱敏纪律），报告落 `reports/red-team-drill/`（版本化 run 目录）。
 
 ---
 
