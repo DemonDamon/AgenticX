@@ -127,7 +127,7 @@ Plan-Id: 2026-11-11-security-governance-master
 | SP2 | `security-eval-and-admission` | 模型安全测评与准入：`agx security-eval` 红队评测线——攻击语料（guard_patterns 规则库反向生成 + 公开越狱基准）× 模型矩阵 → 安全记分卡报告（md+json 落盘）；admin-console 模型启用接准入门槛，低于阈值需记录在案的 override；报告直接可作售前材料 | 无 | M | ✅ |
 | SP3 | `compliance-moderation` | 合规内容审核：策略引擎新增合规规则包（涉政/色情/暴恐/广告，租户可配数据包，走现有 policy snapshot 热加载）+ 第三方内容安全 API 适配层（provider 可插拔，strict/degraded 两档降级，流式在流尾、非流式在终态调用）；命中沿用 90001/90002 并带规则类别字段 | 无 | M | ✅ |
 | SP4 | `alert-dispatch` | 告警分发通道：AlertDispatcher——源（policy_hit 审计事件/预算告警/审计链校验失败）→ 分级（复用规则 severity，链校验失败=CRITICAL）→ 通道（通用 webhook + 飞书群机器人，SMTP 可选）→ admin-console 租户级通道配置；去重窗口 + 通道级限流防风暴；分发本身落审计 | 无 | S | ✅ |
-| SP5 | `incident-response-loop` | 一键处置与事件记录：处置面板（session 终止/PAT 吊销/用户禁用/模型拉黑；user 级二次确认）+ `security_incidents` 事件记录（三态状态机，trace_id 关联审计链）+ 响应 SOP 写入 `enterprise/SECURITY.md`；所有处置动作先审计后执行 | SP4 | M | ⬜ |
+| SP5 | `incident-response-loop` | 一键处置与事件记录：处置面板（session 终止/PAT 吊销/用户禁用/模型拉黑；user 级二次确认）+ `security_incidents` 事件记录（三态状态机，trace_id 关联审计链）+ 响应 SOP 写入 `enterprise/SECURITY.md`；所有处置动作先审计后执行 | SP4 | M | ✅ |
 | SP6 | `red-team-drill` | 攻防演练与总验收：≥12 类脚本化攻击（越狱/工具输出注入/凭据外泄/路径穿越/SSRF/shell 注入/跨租户/吊销绕过/预算击穿/审计链篡改/合规内容/会话击杀续用）对真实部署栈演练 → 拦截矩阵报告（攻击→设计拦截层→实测结果→证据），≥90% 在设计层拦截或告警；报告与"行业安全治理框架对表"售前材料同批落盘 | SP1–SP5 | M | ⬜ |
 
 依赖关系：SP1/SP2/SP3/SP4 均无相互前置（各自立足已有底座，可并行）；SP5 需 SP4（处置由告警驱动）；SP6 收尾。**最小可交付集（真 MVP）= SP1 + SP4**：拦截全链路生效 + 有人被通知，构成最小真实防护闭环，自身前置完备、零欠账。单线推进序：SP1 → SP4 → SP2 → SP3 → SP5 → SP6。
@@ -147,7 +147,7 @@ Plan-Id: 2026-11-11-security-governance-master
 - [x] SP2：≥2 个真实模型的记分卡报告落盘（md+json）；admin-console 准入门槛生效——低分模型启用被阻断，override 路径留痕；报告可脱敏后直接转发售前（2026-11-12 完成：真实双模型评测 MiniMax-M2.7 得 76（A）/glm-5.3-flash 得 69（A），42 条攻击语料（guard 反向生成 20 + 越狱种子 22），记分卡落盘 reports/security-eval/real-matrix-1；准入门槛 22 项 pytest + 29 项 vitest 全绿，真实记分卡→低分阻断→override 留痕 E2E 通过；md 售前版无 endpoint/密钥/原始 payload。细节见 SP2 sub plan）
 - [x] SP3：合规规则包命中在请求/响应两侧产生 90001/90002 且带类别字段；第三方 API 适配层 contract 测试过 + degraded 降级路径 E2E（provider 故障→本地规则兜底+CRITICAL 告警）（2026-11-12 完成：snapshot payload.category 零迁移贯通→引擎一等字段→90001/90002 body→审计链；内置四类基线包（暴恐/涉政 block-critical、色情 block-high、广告 warn-medium）走插件播种+快照热加载租户可配；moderation 包 provider 可插拔（通用 JSON 契约）+六处接线（请求侧/非流式终态/流式流尾）；degraded 默认故障降级本地规则+CRITICAL moderation_degraded 告警去重、strict 租户选装 fail-closed；9+5 Go 测试+6 TS 测试+10 console 测试全绿，server/audit/moderation/alertdispatch/quota/policy-engine 回归通过。细节见 SP3 sub plan）
 - [x] SP4：真实 policy_hit 触发飞书卡片送达配置群（E2E 截图留证）；同规则窗口内重复命中去重为一条；通道限流生效；分发动作本身可在审计链查到（2026-11-12 完成：server 级接线 E2E 用 httptest 飞书端点验证卡片送达+去重；10 Go 测试 + 8 console API 测试 + server/audit/quota 回归全绿；真实飞书群送达待 webhook secret 配置后同路径复测。细节见 SP4 sub plan）
-- [ ] SP5：模拟外泄攻击→告警→一键处置 E2E 全流程——session 被杀 + PAT 吊销后原凭据请求 401、事件记录三态流转完整、处置动作在审计链可查
+- [x] SP5：模拟外泄攻击→告警→一键处置 E2E 全流程——session 被杀 + PAT 吊销后原凭据请求 401、事件记录三态流转完整、处置动作在审计链可查（2026-11-13 完成：网关 E2E `TestIncidentResponseLeakDispositionE2E` 全链验证——模拟外泄 policy_hit→飞书告警带 user/session/model→POST 处置端点（terminate_session+revoke_pat，先落链再即时吊销）→原 PAT `pat_revoked` + 同 session JWT 401、无关 session 不受影响、链上 incident_action×2 且 VerifyAuditChain 通过；SessionRevocationStore 5 测试（内存即时+snapshot 轮询兜底）；security_incidents 三表 PG/MySQL 迁移；iam-core incident repo 双实现（三态状态机+重开边）12 测试；console 处置编排 16 测试（先审计后执行 callOrder、disable_user 二次确认+级联、snapshot route internal auth）；SECURITY.md 4.5 事件响应 SOP；gateway `go test ./internal/...` 全 ok、iam-core 173 测试 + db-schema 30 测试全绿。细节见 SP5 sub plan）
 - [ ] SP6：≥12 类攻击拦截矩阵报告落盘，≥90% 在设计层拦截或告警，每格附证据；行业安全治理框架对表材料（售前版，脱敏）同批交付
 - [ ] 每个 sub plan 一个 commit + 标准 trailer
 
