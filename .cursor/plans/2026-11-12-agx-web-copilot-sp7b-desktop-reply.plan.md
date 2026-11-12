@@ -64,4 +64,7 @@
 
 ## 5. 执行结果
 
-（待执行后填写）
+已完成（sub agent，2026-11-12），**无降级**。交付：browser-bridge.ts 新增 dispatchCopilotChat（真实用户轮 + [来自页面 …](url) 前缀 + SSE drain 聚合 + 30s reply_timeout）+ 提取共享 postStudioChatTurn（dispatchInjectContext 重构复用同一函数）；nm-socket-server.ts 增加 copilot_chat 路由；main.ts 两行接线；tests/browser-bridge-copilot.test.ts 14 用例。
+SSE 聚合：镜像 ChatPane.tsx liveText 先例（data: {"type":"token"} 帧、跨 chunk 半帧缓冲、只聚合 meta agent 的 token、剥 ⏳ 占位、error 帧透传如 session_busy_elsewhere、done 帧结束）——契约按 Studio server.py 实际格式，非虚构。
+验证：新 14/14 + inject 11/11 + 其余 bridge 32/32 + tsc 零错误；主 agent 独立复跑 25/25。
+遗留：真机联调（需桌面端重启加载新 bridge 代码后与扩展实测）；chat_delta 流式留 v2。

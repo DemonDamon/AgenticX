@@ -55,4 +55,7 @@
 
 ## 5. 执行结果
 
-（待执行后填写）
+已完成（sub agent，2026-11-12）。交付：inject.js 第三菜单 agx-copilot-selection（采集前敏感域名 gate 复用 SP4 verdict → activeTab 采集 → copilot_chat → agxSidePanelOpenFn 测试缝包 sidePanel.open，抛错→消息照发+toast，绝不静默；终态记 agx_copilot_selection_last_result）；copilot.js setPanelBehavior(openPanelOnActionClick)（manifest 移除 default_popup）；panel.js markdown-lite 渲染器（先全量 escape 再合成，占位符防串扰）+ 划词预填态 + 来源标注条 + 客户端 30s reply_timeout；scripts/e2e/verify-copilot-selection.mjs。
+验证：verify-copilot-selection 33/33（连跑两次稳定）；verify-copilot-panel 23/23、verify-page-inject 26/26、verify-user-journey 35/35 零回归；主 agent 独立复跑四套件全 PASS。
+偏离：① 敏感域名 gate 前置在 copilot 点击流（既有两菜单本就无此 gate，零改动）；② 补 agx_copilot_pending 广播（面板已开时划词的预填路径，防静默）。
+遗留：超长划词未截断（契约无字段，选区由用户手势限定）；真机 sidePanel.open 手势手测待主 agent 安排。

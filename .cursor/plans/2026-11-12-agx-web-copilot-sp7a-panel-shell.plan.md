@@ -72,4 +72,7 @@
 
 ## 5. 执行结果
 
-（待执行后填写）
+已完成（sub agent，2026-11-12）。交付：manifest（sidePanel permission + side_panel.default_path）、src/copilot.js（SW 路由：agx_copilot_send → NM copilot_chat；copilot_reply 广播；pending request_id 存 chrome.storage.session 防 SW 回收）、panel.html + src/panel.js（busy→idle/error 状态机、纯 textContent、NM 掉线显式错误态）、scripts/e2e/verify-copilot-panel.mjs（真实 unix-socket shim 链路 + hold-reply 确定性 P2）。
+验证：verify-copilot-panel 24/24；verify-page-inject / verify-user-journey 复跑零回归；主 agent 独立复跑确认。
+偏离：① default_popup 保留（SP7c 移除并接 setPanelBehavior）；② 顺手修复 harness 两缺陷（mock server closeAllConnections 缺失、cdpEvaluate 无超时兜底）。
+遗留：面板客户端 reply_timeout（已由 SP7c 补齐）。
