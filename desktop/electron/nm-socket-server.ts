@@ -22,6 +22,14 @@
  *                              {type:"inject_context_result", ...} via
  *                              sendAct() (same fire-and-forget shape as
  *                              act/act_result)
+ *     {type:"copilot_chat", request_id, session_id?, text, source_url?,
+ *                              source_title?}
+ *                              SP7b sidebar chat turn; delivered to the
+ *                              onCopilotChat handler with the transport
+ *                              `type` stripped; the bridge replies
+ *                              asynchronously with the aggregated agent
+ *                              reply as {type:"copilot_reply", ...} via
+ *                              sendAct()
  *   desktop → extension:
  *     {type:"act", request_id, session_id, action, ...} via sendAct()
  *     {type:"active_session", session_id, ...} via sendAct()
@@ -76,6 +84,9 @@ export type NmActResultHandler = (row: Record<string, unknown>) => void;
 /** SP5: receives extension inject_context rows ({session_id?, url, title, text, kind}), transport `type` stripped. */
 export type NmInjectContextHandler = (row: Record<string, unknown>) => void;
 
+/** SP7b: receives extension copilot_chat rows ({request_id, session_id?, text, source_url?, source_title?}), transport `type` stripped. */
+export type NmCopilotChatHandler = (row: Record<string, unknown>) => void;
+
 export type NmSocketServerOptions = {
   /**
    * SP6: enterprise browser-deny domains attached to every pong frame
@@ -99,6 +110,8 @@ export type NmSocketServer = {
   onActResult(handler: NmActResultHandler | null): void;
   /** SP5: set (or clear with null) the handler invoked for inject_context rows. */
   onInjectContext(handler: NmInjectContextHandler | null): void;
+  /** SP7b: set (or clear with null) the handler invoked for copilot_chat rows. */
+  onCopilotChat(handler: NmCopilotChatHandler | null): void;
   close(): Promise<void>;
 };
 
@@ -143,6 +156,7 @@ export function startNmSocketServer(
     let lastPingMs: number | null = null;
     let actResultHandler: NmActResultHandler | null = null;
     let injectContextHandler: NmInjectContextHandler | null = null;
+    let copilotChatHandler: NmCopilotChatHandler | null = null;
 
     const handleLine = (line: string): string | null => {
       let parsed: unknown;
@@ -178,6 +192,14 @@ export function startNmSocketServer(
         // asynchronously with {type:"inject_context_result"} via sendAct().
         const { type: _transportType, ...payload } = row;
         injectContextHandler?.(payload);
+        return null;
+      }
+      if (row.type === "copilot_chat") {
+        // SP7b fire-and-forget, mirroring inject_context: the bridge replies
+        // asynchronously with the aggregated agent reply as
+        // {type:"copilot_reply"} via sendAct().
+        const { type: _transportType, ...payload } = row;
+        copilotChatHandler?.(payload);
         return null;
       }
       // SP1 echo compatibility: unknown messages are echoed verbatim.
@@ -265,6 +287,9 @@ export function startNmSocketServer(
           },
           onInjectContext: (handler) => {
             injectContextHandler = handler;
+          },
+          onCopilotChat: (handler) => {
+            copilotChatHandler = handler;
           },
           close: () =>
             new Promise<void>((closeResolve) => {

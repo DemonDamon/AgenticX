@@ -7829,6 +7829,8 @@ function createWindow(): void {
       // SP5: inject_context dispatch target — the same studio URL/token every
       // other main-process studio call uses; read per request.
       injectContextStudio: { url: getStudioUrl, token: getStudioToken },
+      // SP7b: copilot_chat dispatch target — same studio getters as inject.
+      copilotChatStudio: { url: getStudioUrl, token: getStudioToken },
     });
   } else {
     console.error("[main] startNearBrowserBridge missing; browser bridge skipped");

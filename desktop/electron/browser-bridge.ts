@@ -318,6 +318,42 @@ async function resolveInjectSessionId(
 }
 
 /**
+ * POST one turn through the EXISTING /api/chat entry (the same channel the
+ * desktop composer / IM gateway / automation tasks use) with the shared
+ * error mapping: 404 → session_not_found, other non-2xx →
+ * studio_chat_<status>, transport failure → studio_unreachable. Shared by
+ * dispatchInjectContext (SP5) and dispatchCopilotChat (SP7b) so the two
+ * entries can never drift apart.
+ */
+async function postStudioChatTurn(
+  studio: InjectContextStudio,
+  fetchFn: typeof fetch,
+  body: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<{ ok: false; error: string } | { ok: true; response: Response }> {
+  try {
+    const res = await fetchFn(`${studio.url().replace(/\/+$/, "")}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-agx-desktop-token": studio.token(),
+      },
+      signal,
+      body: JSON.stringify(body),
+    });
+    if (res.status === 404) {
+      return { ok: false, error: "session_not_found" };
+    }
+    if (!res.ok) {
+      return { ok: false, error: `studio_chat_${res.status}` };
+    }
+    return { ok: true, response: res };
+  } catch {
+    return { ok: false, error: "studio_unreachable" };
+  }
+}
+
+/**
  * SP5 dispatch (the single inject_context entry on the desktop side):
  * locate the session → POST /api/chat with the annotated context block.
  * The SSE body is abandoned after the first chunk (user row + context_files
@@ -351,14 +387,10 @@ export async function dispatchInjectContext(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   try {
-    const res = await fetchFn(`${studio.url().replace(/\/+$/, "")}/api/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-agx-desktop-token": studio.token(),
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
+    const posted = await postStudioChatTurn(
+      studio,
+      fetchFn,
+      {
         session_id: sessionId,
         // Gateway precedent (gateway/client.py L1105): a placeholder user
         // turn for attachment-only messages — /api/chat requires ≥1 char and
@@ -369,17 +401,15 @@ export async function dispatchInjectContext(
         // session.context_files and rendered by _build_context_files_block.
         context_files: { [sourceKey]: text },
         keep_runtime_after_disconnect: true,
-      }),
-    });
-    if (res.status === 404) {
-      return { ok: false, session_id: sessionId, error: "session_not_found" };
-    }
-    if (!res.ok) {
-      return { ok: false, session_id: sessionId, error: `studio_chat_${res.status}` };
+      },
+      controller.signal,
+    );
+    if (!posted.ok) {
+      return { ok: false, session_id: sessionId, error: posted.error };
     }
     // Wait for the first SSE chunk: proves the server accepted the turn and
     // merged the context before we drop the stream.
-    const reader = res.body?.getReader();
+    const reader = posted.response.body?.getReader();
     if (reader) {
       await reader.read();
       await reader.cancel().catch(() => {
@@ -388,6 +418,149 @@ export async function dispatchInjectContext(
     }
     return { ok: true, session_id: sessionId };
   } catch {
+    return { ok: false, session_id: sessionId, error: "studio_unreachable" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SP7b · Copilot chat — the ONE new desktop entry for {type:"copilot_chat"}
+// rows arriving from the extension sidebar. Unlike SP5 (first-chunk-then-
+// cancel) the SSE stream is drained to completion and the agent reply is
+// aggregated into copilot_reply.text — no streaming to the panel (plan §0:
+// chat_delta stays v2 backlog).
+// ---------------------------------------------------------------------------
+
+export type CopilotChatResult = {
+  ok: boolean;
+  session_id?: string;
+  text?: string;
+  error?: string;
+};
+
+/**
+ * Drain one /api/chat SSE body and aggregate the assistant reply, mirroring
+ * the ChatPane liveText consumer (src/components/ChatPane.tsx): only
+ * `{"type":"token","data":{...}}` frames with agent_id defaulting to "meta"
+ * contribute their data.text (idle placeholder "⏳" stripped); a
+ * `{"type":"error",...}` frame surfaces data.error; `{"type":"done"}` (or a
+ * closed stream) ends the drain. Frame shape is the studio contract every
+ * other desktop consumer already parses (`data: {json}\n\n`, App.tsx L1783).
+ */
+async function drainSseAssistantText(
+  response: Response,
+): Promise<{ text: string; streamError?: string }> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return { text: "" };
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  let streamError: string | undefined;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      for (;;) {
+        const sep = buffer.indexOf("\n\n");
+        if (sep === -1) break;
+        const frame = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
+        if (!dataLine) continue;
+        let payload: unknown;
+        try {
+          payload = JSON.parse(dataLine.slice(6));
+        } catch {
+          continue;
+        }
+        if (!payload || typeof payload !== "object") continue;
+        const row = payload as { type?: unknown; data?: unknown };
+        const data =
+          row.data && typeof row.data === "object" ? (row.data as Record<string, unknown>) : {};
+        if (row.type === "token") {
+          if (String(data.agent_id ?? "meta") !== "meta") continue;
+          text += String(data.text ?? "").replace(/⏳\s*/g, "");
+        } else if (row.type === "error") {
+          streamError = String(data.error ?? "").trim() || "studio_stream_error";
+        } else if (row.type === "done") {
+          return { text, streamError };
+        }
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {
+      /* server already closed */
+    });
+  }
+  return { text, streamError };
+}
+
+/**
+ * SP7b dispatch: locate the session (same resolver + error mapping as
+ * dispatchInjectContext) → POST the real user turn → drain the SSE reply →
+ * aggregate the agent text. On the 30s timeout the turn is NOT rolled back
+ * (keep_runtime_after_disconnect keeps it running in Studio) and the caller
+ * is told so via reply_timeout.
+ */
+export async function dispatchCopilotChat(
+  payload: Record<string, unknown>,
+  studio: InjectContextStudio | undefined,
+): Promise<CopilotChatResult> {
+  if (!studio) {
+    return { ok: false, error: "copilot_not_configured" };
+  }
+  const text = String(payload.text ?? "").trim();
+  if (!text) {
+    return { ok: false, error: "invalid_copilot_payload" };
+  }
+  const sourceUrl = String(payload.source_url ?? "").trim();
+  const sourceTitle = String(payload.source_title ?? "").trim();
+  const fetchFn = studio.fetchFn ?? fetch;
+  const payloadSessionId = String(payload.session_id ?? "").trim();
+  const resolved = await resolveInjectSessionId(payloadSessionId, studio, fetchFn, 5_000);
+  if (resolved.error || !resolved.sessionId) {
+    return { ok: false, error: resolved.error ?? "no_active_session" };
+  }
+  const sessionId = resolved.sessionId;
+  // Real user turn (not a context_files placeholder): with a page source the
+  // plan-mandated annotation prefix lets the agent see where the question
+  // came from — same block format as SP5 injections.
+  const userInput = sourceUrl
+    ? `${formatInjectSourceKey(sourceTitle, sourceUrl)}\n${text}`
+    : text;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 30_000);
+  try {
+    const posted = await postStudioChatTurn(
+      studio,
+      fetchFn,
+      {
+        session_id: sessionId,
+        user_input: userInput,
+        keep_runtime_after_disconnect: true,
+      },
+      controller.signal,
+    );
+    if (!posted.ok) {
+      return { ok: false, session_id: sessionId, error: posted.error };
+    }
+    const drained = await drainSseAssistantText(posted.response);
+    if (drained.streamError) {
+      return { ok: false, session_id: sessionId, error: drained.streamError };
+    }
+    return { ok: true, session_id: sessionId, text: drained.text };
+  } catch {
+    if (timedOut) {
+      return { ok: false, session_id: sessionId, error: "reply_timeout" };
+    }
     return { ok: false, session_id: sessionId, error: "studio_unreachable" };
   } finally {
     clearTimeout(timer);
@@ -430,6 +603,9 @@ export type NmChannel = {
   /** SP5: optional so pre-SP5 test mocks keep compiling; the real NM socket
    *  server always provides it. */
   onInjectContext?(handler: ((row: Record<string, unknown>) => void) | null): void;
+  /** SP7b: optional so pre-SP7b test mocks keep compiling; the real NM socket
+   *  server always provides it. */
+  onCopilotChat?(handler: ((row: Record<string, unknown>) => void) | null): void;
 };
 
 /**
@@ -453,6 +629,10 @@ export type StartNearBrowserBridgeOptions = {
   /** SP5: inject_context dispatch target. Without it the bridge still
    *  transports the rows but every inject fails with inject_not_configured. */
   injectContextStudio?: InjectContextStudio;
+  /** SP7b: copilot_chat dispatch target (same studio surface as
+   *  injectContextStudio). Without it every copilot_chat row fails with
+   *  copilot_not_configured. */
+  copilotChatStudio?: InjectContextStudio;
 };
 
 const BACKEND_MODES = new Set<string>(["embedded", "extension", "auto"]);
@@ -492,6 +672,7 @@ function createDefaultNmLifecycle(): NmLifecycle {
   let startPromise: Promise<void> | null = null;
   let actResultHandler: ((row: Record<string, unknown>) => void) | null = null;
   let injectContextHandler: ((row: Record<string, unknown>) => void) | null = null;
+  let copilotChatHandler: ((row: Record<string, unknown>) => void) | null = null;
   return {
     channel: {
       extensionOnline: () => started?.extensionOnline() ?? false,
@@ -501,6 +682,9 @@ function createDefaultNmLifecycle(): NmLifecycle {
       },
       onInjectContext: (handler) => {
         injectContextHandler = handler;
+      },
+      onCopilotChat: (handler) => {
+        copilotChatHandler = handler;
       },
     },
     start: () => {
@@ -513,6 +697,7 @@ function createDefaultNmLifecycle(): NmLifecycle {
           started = server;
           server.onActResult((row) => actResultHandler?.(row));
           server.onInjectContext((row) => injectContextHandler?.(row));
+          server.onCopilotChat((row) => copilotChatHandler?.(row));
         })
         .catch((err: unknown) => {
           console.warn(
@@ -588,6 +773,25 @@ export function startNearBrowserBridge(
         if (result.ok && result.session_id) {
           pushActiveSession(nmChannel, { session_id: result.session_id });
         }
+      } catch {
+        /* peer gone; the extension's own NM-down path covers this */
+      }
+    })();
+  });
+
+  // SP7b · copilot chat: one dispatch per copilot_chat row; the aggregated
+  // agent reply goes back as {type:"copilot_reply"} (fire-and-forget, same
+  // transport shape family as inject_context_result). No active_session
+  // push here — a panel chat does not change the cached inject target.
+  nmChannel.onCopilotChat?.((row) => {
+    void (async () => {
+      const result = await dispatchCopilotChat(row, options?.copilotChatStudio);
+      try {
+        nmChannel.sendAct({
+          type: "copilot_reply",
+          request_id: String(row.request_id ?? ""),
+          ...result,
+        });
       } catch {
         /* peer gone; the extension's own NM-down path covers this */
       }
