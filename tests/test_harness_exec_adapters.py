@@ -164,6 +164,9 @@ def fake_codex(tmp_path, monkeypatch):
     log = str(tmp_path / "cx-log.jsonl")
     monkeypatch.setenv("AGX_CODEX_EXECUTABLE", exe)
     monkeypatch.setenv("FAKE_CLI_LOG", log)
+    # Keep the recorded exec --json fallback coverage intact. App-server
+    # streaming is tested in test_codex_app_server.py.
+    monkeypatch.setenv("AGX_CODEX_TRANSPORT", "exec")
     if os.path.exists(log):
         os.remove(log)
     return {"exe": exe, "log": log, "adapter": CodexAdapter()}

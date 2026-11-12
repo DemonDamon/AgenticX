@@ -21,7 +21,8 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
+from collections import deque
 
 import ujson
 
@@ -69,8 +70,17 @@ class ExecCliSession:
     turn_count: int = 0
     last_result_text: str = ""
     last_tail: str = ""
-    # Populated while a turn runs.
+    # Populated while a turn runs (exec --json) or for a long-lived
+    # Codex app-server process that stays up across turns.
     proc: Optional[subprocess.Popen] = None
+    # Mid-turn stream items drained by Near's 200ms SSE pump.
+    midturn_items: Deque[Dict[str, Any]] = field(default_factory=deque)
+    midturn_lock: threading.Lock = field(default_factory=threading.Lock)
+    # Codex app-server bookkeeping (unused by OpenCode).
+    app_server_ready: bool = False
+    app_server_thread_loaded: bool = False
+    app_server_provider: Optional[str] = None
+    app_server_rpc: Any = None
 
 
 class ExecCliHarnessAdapter(HarnessAdapter):
