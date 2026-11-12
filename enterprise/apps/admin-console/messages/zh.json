@@ -1712,6 +1712,33 @@
             "deleted": "已删除",
             "deleteFailed": "删除失败"
           }
+        },
+        "admission": {
+          "title": "模型安全准入（评审制）",
+          "subtitle": "低于安全测评阈值的模型启用将被阻断，需记录在案的例外（override）方可放行",
+          "enabled": "准入已启用",
+          "disabled": "准入未启用",
+          "gateEnabled": "启用准入门槛",
+          "minScore": "最低安全分（0-100）",
+          "requireScorecard": "无记分卡时阻断启用",
+          "save": "保存门槛",
+          "scorecardsTitle": "模型安全记分卡（来自 agx security-eval 导入）",
+          "noScorecards": "尚未导入记分卡：运行 `agx security-eval run` 后在下方 API 导入 scorecard.json",
+          "overridesTitle": "例外记录（override 留痕）",
+          "overrideScore": "当时分数",
+          "overrideTitle": "模型启用被安全准入阻断",
+          "overrideDescription": "模型 {model} 的安全分 {score} 低于准入阈值 {minScore}。如确需启用，请填写例外原因（将记录在案并写入审计）。",
+          "overrideReason": "例外原因（必填）",
+          "overrideReasonPlaceholder": "例如：已在预发环境完成人工评审，业务负责人签字确认（SEC-42）",
+          "overrideTicket": "关联工单（可选）",
+          "overrideCancel": "取消",
+          "overrideConfirm": "确认例外并启用",
+          "overrideReasonRequired": "例外原因至少 5 个字符",
+          "overrideRecorded": "例外已记录在案，模型启用请求已重发",
+          "toast": {
+            "saved": "准入门槛已更新",
+            "saveFailed": "准入门槛保存失败"
+          }
         }
       },
       "channels": {

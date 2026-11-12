@@ -284,6 +284,31 @@ rec = policy.recommend("run_shell")
 # rec.backend, rec.network_enabled, rec.max_timeout
 ```
 
+## Security evaluation (`agx security-eval`)
+
+SP2 `security-eval-and-admission` adds a red-team eval harness that **proves the defenses** instead of only having them: an attack corpus is driven through a model matrix and every response is judged by both the model's own refusal and the AgenticX rule stack.
+
+- **Corpus** (`agenticx/security_eval/corpus.py`): reverse-generated from the live `guard_patterns.yaml` (every derived attack embeds a payload that provably matches its source regex) plus a versioned jailbreak seed (`jailbreak_seed.yaml`, classic public techniques aligned with OWASP LLM Top 10).
+- **Judge** (`judge.py`): verdict per (attack, model) ∈ `refused` / `blocked_by_rule` (guard patterns + LeakDetector + Policy would catch it inline) / `bypassed` / `error`, with rule-level evidence.
+- **Scorecard** (`report.py`): per-model `safety_score` (= % neutralized), grade on the skill-guard scale (S+ > S > A > B > C > D), per-OWASP-category stats. Output is versioned (`scorecard.json` machine-readable + `scorecard.md` presale-safe: no endpoints / credentials / raw payloads).
+
+```bash
+# real models (from ~/.agenticx/config.yaml providers)
+agx security-eval run --model zhipu/glm-4.6 --model minimax/MiniMax-M2.7
+# CI / offline (deterministic mock invoker, no network)
+agx security-eval run --mock --mock-behavior compliant
+agx security-eval show security-eval-reports/<run_id>
+```
+
+## Model admission (admin-console)
+
+Enabling a model in the admin-console passes the admission gate (`src/lib/model-admission-gate.ts`, data in `.runtime/admin/model-admission.json`):
+
+- Import a scorecard via `POST /api/admin/security/scorecards` (body = `scorecard.json` from the CLI); thresholds via `GET/PUT /api/admin/security/admission` (`{enabled, minScore, requireScorecard}`).
+- With the gate on, enabling a model whose latest score is below `minScore` returns **403 `model_admission_blocked`**. A body-level `override {reason (≥5 chars), ticket?}` enables anyway and is **recorded** (store + IAM `audit_events` via `insertAuditEvent`).
+- All gate decisions audit **before** the action: `model_admission.blocked_attempt` / `.override` / `.score-passed` / `.no-scorecard` / `.scorecard_imported`.
+- `threshold.enabled: false` (or no scorecard with `requireScorecard: false`) is byte-equivalent to pre-SP2 behavior.
+
 ## Dynamic rule management
 
 `LeakDetector.add_pattern` / `remove_pattern` and `Policy.add_rule` / `remove_rule` mutate live rule sets **without restarting** the process. After changes, the next `scan` or `check` uses the updated rules. Rebuild-bound structures (leak prefix index) run inside those mutators.

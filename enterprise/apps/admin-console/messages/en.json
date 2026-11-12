@@ -1712,6 +1712,33 @@
             "deleted": "Deleted",
             "deleteFailed": "Delete failed"
           }
+        },
+        "admission": {
+          "title": "Model Security Admission (eval-based)",
+          "subtitle": "Models below the security-eval threshold are blocked from enablement unless a recorded override is provided",
+          "enabled": "Admission ON",
+          "disabled": "Admission OFF",
+          "gateEnabled": "Enable admission gate",
+          "minScore": "Min safety score (0-100)",
+          "requireScorecard": "Block enable without a scorecard",
+          "save": "Save threshold",
+          "scorecardsTitle": "Model safety scorecards (imported from agx security-eval)",
+          "noScorecards": "No scorecards imported yet: run `agx security-eval run` and import scorecard.json via the API below",
+          "overridesTitle": "Recorded overrides",
+          "overrideScore": "Score at override",
+          "overrideTitle": "Model enable blocked by security admission",
+          "overrideDescription": "Model {model} safety score {score} is below the admission threshold {minScore}. To enable anyway, provide an override reason (recorded and audited).",
+          "overrideReason": "Override reason (required)",
+          "overrideReasonPlaceholder": "e.g. reviewed in staging, sign-off attached (SEC-42)",
+          "overrideTicket": "Linked ticket (optional)",
+          "overrideCancel": "Cancel",
+          "overrideConfirm": "Confirm override & enable",
+          "overrideReasonRequired": "Override reason must be at least 5 characters",
+          "overrideRecorded": "Override recorded; enable request re-sent",
+          "toast": {
+            "saved": "Admission threshold updated",
+            "saveFailed": "Failed to save admission threshold"
+          }
         }
       },
       "channels": {

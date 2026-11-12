@@ -520,6 +520,13 @@ try:
 except Exception:
     pass
 
+# 注册 security-eval 子命令 (延迟加载)
+try:
+    from agenticx.cli.security_eval_commands import security_eval_app
+    app.add_typer(security_eval_app)
+except Exception:
+    pass
+
 console = Console()
 
 sandbox_app = typer.Typer(name="sandbox", help="沙箱管理", no_args_is_help=True)
