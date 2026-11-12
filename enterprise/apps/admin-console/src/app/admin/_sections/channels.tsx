@@ -129,6 +129,7 @@ export default function ChannelsPage() {
     baseUrl: "",
     apiKey: "",
     weight: "1",
+    priority: "0",
     models: "",
     providerLabel: "",
     region: "",
@@ -181,6 +182,7 @@ export default function ChannelsPage() {
           baseUrl,
           apiKey: form.apiKey,
           weight: Number(form.weight) || 1,
+          priority: Number(form.priority) || 0,
           supportedModels: models,
           region: form.region.trim() || undefined,
           metadata: buildChannelMetadata({
@@ -203,6 +205,7 @@ export default function ChannelsPage() {
         baseUrl: "",
         apiKey: "",
         weight: "1",
+        priority: "0",
         models: "",
         providerLabel: "",
         region: "",
@@ -559,9 +562,16 @@ export default function ChannelsPage() {
               <Label>{t("modelsLabel")}</Label>
               <Input value={form.models} onChange={(e) => setForm({ ...form, models: e.target.value })} placeholder="deepseek-chat" />
             </div>
-            <div>
-              <Label>{t("weightLabel")}</Label>
-              <Input value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label>{t("weightLabel")}</Label>
+                <Input value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} />
+              </div>
+              <div>
+                <Label>{t("priorityLabel")}</Label>
+                <Input value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} />
+                <p className="mt-1 text-xs text-muted-foreground">{t("priorityHint")}</p>
+              </div>
             </div>
           </div>
           <DialogFooter>
