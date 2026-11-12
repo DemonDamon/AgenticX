@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/adaptor"
+	"github.com/agenticx/enterprise/gateway/internal/alertdispatch"
 	"github.com/agenticx/enterprise/gateway/internal/audit"
 	gatewayauth "github.com/agenticx/enterprise/gateway/internal/auth"
 	"github.com/agenticx/enterprise/gateway/internal/billing"
@@ -71,6 +72,7 @@ type Server struct {
 	adminLoader           *runtimeconfig.Loader
 	virtualLoader         *virtualmodel.Loader
 	quotaTracker          *quota.Tracker
+	alertDispatcher       *alertdispatch.Dispatcher
 	policySnapBodyHash    string
 	policyRemoteCheckedAt time.Time
 	policySnapshotStatus  policySnapshotRuntimeStatus
@@ -254,12 +256,20 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	srv.initMCPHost()
 	srv.initMCPProxy()
 	srv.initChannelRelay()
+	alertCfgLoader := alertdispatch.NewConfigLoader(logger)
+	srv.alertDispatcher = alertdispatch.NewDispatcher(alertCfgLoader, auditWriter, logger)
+	srv.alertDispatcher.Start(nil)
+	alertdispatch.StartChainCheck(nil, cfg.AuditDir, srv.alertDispatcher, logger, 0)
 	if dbHandle != nil {
 		srv.connectorStore = connectorstore.New(dbHandle, logger)
 		if budgetReporter, err := quota.NewBudgetAlertReporter(dbHandle, logger); err != nil {
 			logger.Warn("budget alert reporter unavailable", "error", err)
 		} else {
-			srv.quotaTracker.SetBudgetAlertSink(budgetReporter.Emit)
+			reporter := budgetReporter
+			srv.quotaTracker.SetBudgetAlertSink(func(rec quota.BudgetAlertRecord) {
+				reporter.Emit(rec)
+				srv.dispatchBudgetAlert(rec)
+			})
 		}
 	}
 	srv.errorStore = gwerrors.NewStore()
@@ -881,6 +891,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, openai.Internal("audit write failed"))
 			return
 		}
+		s.dispatchPolicyAlert(identity, "请求侧拦截", req.Model, reqPolicy.Hits)
 		writePolicyError(w, "90001", "请求触发合规拦截", reqPolicy.Hits)
 		return
 	}
@@ -994,6 +1005,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 				writeAPIError(w, openai.Internal("audit write failed"))
 				return
 			}
+			s.dispatchPolicyAlert(identity, "响应侧拦截", req.Model, respPolicy.Hits)
 			writePolicyError(w, "90002", "响应触发合规拦截", respPolicy.Hits)
 			return
 		}
@@ -1763,6 +1775,57 @@ func toAuditPolicyHits(hits []policyengine.HitEvent) []audit.PolicyHit {
 
 func makeID(prefix string) string {
 	return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
+}
+
+// dispatchPolicyAlert 在 policy_hit 审计落链成功后分发告警（alert-dispatch SP4）。
+// 同步段仅查表+判重，发送在后台；无通道配置的租户零行为变化。
+func (s *Server) dispatchPolicyAlert(identity requestIdentity, side string, model string, hits []policyengine.HitEvent) {
+	if s.alertDispatcher == nil || len(hits) == 0 {
+		return
+	}
+	sevs := make([]string, 0, len(hits))
+	rules := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		sevs = append(sevs, hit.Severity)
+		rules = append(rules, hit.RuleID)
+	}
+	s.alertDispatcher.Dispatch(alertdispatch.Alert{
+		TenantID:  identity.TenantID,
+		Source:    "policy_hit",
+		Severity:  alertdispatch.MaxSeverity(sevs),
+		Title:     "策略命中：" + side,
+		Summary:   "规则: " + strings.Join(rules, ", "),
+		TraceID:   identity.TraceID,
+		SessionID: identity.SessionID,
+		UserID:    identity.UserID,
+		Model:     model,
+		DedupKey: fmt.Sprintf("policy_hit|%s|%s|%s", side, strings.Join(rules, ","),
+			identity.TraceID),
+		EventTime: time.Now().UTC(),
+	})
+}
+
+// dispatchBudgetAlert 把预算告警同时送入分发管线（warn→HIGH / block→CRITICAL）。
+func (s *Server) dispatchBudgetAlert(rec quota.BudgetAlertRecord) {
+	if s.alertDispatcher == nil {
+		return
+	}
+	sev := "HIGH"
+	if rec.AlertType == "block" {
+		sev = "CRITICAL"
+	}
+	s.alertDispatcher.Dispatch(alertdispatch.Alert{
+		TenantID: rec.TenantID,
+		Source:   "budget_alert",
+		Severity: sev,
+		Title:    "预算告警：" + rec.AlertType,
+		Summary: fmt.Sprintf("tenant=%s dimension=%s(%s) period=%s used=%.2f/%.2f %s",
+			rec.TenantID, rec.Dimension, rec.DimensionKey, rec.Period, rec.Used, rec.Limit, rec.Unit),
+		UserID:    rec.UserID,
+		DedupKey: fmt.Sprintf("budget|%s|%s|%s|%s|%s", rec.TenantID, rec.Dimension,
+			rec.DimensionKey, rec.Period, rec.AlertType),
+		EventTime: rec.CreatedAt,
+	})
 }
 
 func (s *Server) writeAuditEvent(event audit.Event) error {

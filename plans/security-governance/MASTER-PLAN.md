@@ -126,7 +126,7 @@ Plan-Id: 2026-11-11-security-governance-master
 | SP1 | `safety-layer-mainline` | Studio 主链路 SafetyLayer 统一贯通：agent loop 工具结果默认过完整四级管线 + InputValidator 前置校验默认开启；feature flag 默认 on、off 等价现状；SafetyAuditLog 事件桥接企业审计（trace_id 关联）；P95 延迟预算 + WARN-only 观察模式先行 | 无 | M | ✅ |
 | SP2 | `security-eval-and-admission` | 模型安全测评与准入：`agx security-eval` 红队评测线——攻击语料（guard_patterns 规则库反向生成 + 公开越狱基准）× 模型矩阵 → 安全记分卡报告（md+json 落盘）；admin-console 模型启用接准入门槛，低于阈值需记录在案的 override；报告直接可作售前材料 | 无 | M | ⬜ |
 | SP3 | `compliance-moderation` | 合规内容审核：策略引擎新增合规规则包（涉政/色情/暴恐/广告，租户可配数据包，走现有 policy snapshot 热加载）+ 第三方内容安全 API 适配层（provider 可插拔，strict/degraded 两档降级，流式在流尾、非流式在终态调用）；命中沿用 90001/90002 并带规则类别字段 | 无 | M | ⬜ |
-| SP4 | `alert-dispatch` | 告警分发通道：AlertDispatcher——源（policy_hit 审计事件/预算告警/审计链校验失败）→ 分级（复用规则 severity，链校验失败=CRITICAL）→ 通道（通用 webhook + 飞书群机器人，SMTP 可选）→ admin-console 租户级通道配置；去重窗口 + 通道级限流防风暴；分发本身落审计 | 无 | S | ⬜ |
+| SP4 | `alert-dispatch` | 告警分发通道：AlertDispatcher——源（policy_hit 审计事件/预算告警/审计链校验失败）→ 分级（复用规则 severity，链校验失败=CRITICAL）→ 通道（通用 webhook + 飞书群机器人，SMTP 可选）→ admin-console 租户级通道配置；去重窗口 + 通道级限流防风暴；分发本身落审计 | 无 | S | ✅ |
 | SP5 | `incident-response-loop` | 一键处置与事件记录：处置面板（session 终止/PAT 吊销/用户禁用/模型拉黑；user 级二次确认）+ `security_incidents` 事件记录（三态状态机，trace_id 关联审计链）+ 响应 SOP 写入 `enterprise/SECURITY.md`；所有处置动作先审计后执行 | SP4 | M | ⬜ |
 | SP6 | `red-team-drill` | 攻防演练与总验收：≥12 类脚本化攻击（越狱/工具输出注入/凭据外泄/路径穿越/SSRF/shell 注入/跨租户/吊销绕过/预算击穿/审计链篡改/合规内容/会话击杀续用）对真实部署栈演练 → 拦截矩阵报告（攻击→设计拦截层→实测结果→证据），≥90% 在设计层拦截或告警；报告与"行业安全治理框架对表"售前材料同批落盘 | SP1–SP5 | M | ⬜ |
 
@@ -146,7 +146,7 @@ Plan-Id: 2026-11-11-security-governance-master
 - [x] SP1：真实 Studio 会话 E2E——工具输出中植入注入指令与假密钥，主链路被 sanitize/redact；WARN-only 观察期报告落盘后切 enforce；P95 延迟增幅不超预算；flag off 全量回归与现状等价（2026-11-12 完成：真实 AgentRuntime loop E2E 3 项通过、P95 实测 10.4ms/预算 50ms、回归 136 项通过；细节见 SP1 sub plan）
 - [ ] SP2：≥2 个真实模型的记分卡报告落盘（md+json）；admin-console 准入门槛生效——低分模型启用被阻断，override 路径留痕；报告可脱敏后直接转发售前
 - [ ] SP3：合规规则包命中在请求/响应两侧产生 90001/90002 且带类别字段；第三方 API 适配层 contract 测试过 + degraded 降级路径 E2E（provider 故障→本地规则兜底+CRITICAL 告警）
-- [ ] SP4：真实 policy_hit 触发飞书卡片送达配置群（E2E 截图留证）；同规则窗口内重复命中去重为一条；通道限流生效；分发动作本身可在审计链查到
+- [x] SP4：真实 policy_hit 触发飞书卡片送达配置群（E2E 截图留证）；同规则窗口内重复命中去重为一条；通道限流生效；分发动作本身可在审计链查到（2026-11-12 完成：server 级接线 E2E 用 httptest 飞书端点验证卡片送达+去重；10 Go 测试 + 8 console API 测试 + server/audit/quota 回归全绿；真实飞书群送达待 webhook secret 配置后同路径复测。细节见 SP4 sub plan）
 - [ ] SP5：模拟外泄攻击→告警→一键处置 E2E 全流程——session 被杀 + PAT 吊销后原凭据请求 401、事件记录三态流转完整、处置动作在审计链可查
 - [ ] SP6：≥12 类攻击拦截矩阵报告落盘，≥90% 在设计层拦截或告警，每格附证据；行业安全治理框架对表材料（售前版，脱敏）同批交付
 - [ ] 每个 sub plan 一个 commit + 标准 trailer

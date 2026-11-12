@@ -41,6 +41,7 @@ import { Copy, FileWarning, Filter, Inbox, RefreshCcw, Search, ShieldAlert, Shie
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { auditListLoadPolicy } from "./audit-list-load";
+import { AlertChannelsCard } from "./alert-channels-card";
 
 const AUDIT_EVENT_TYPE_OPTIONS = [
   { value: "", label: "全部" },
@@ -434,6 +435,8 @@ function AuditPageContent({ embedded = false }: { embedded?: boolean }) {
           </>
         }
       />
+
+      <AlertChannelsCard />
 
       <Card>
         <CardContent className="pt-5">

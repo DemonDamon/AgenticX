@@ -20,6 +20,22 @@ type PolicyHit struct {
 	MatchedRule string `json:"matched_rule,omitempty"`
 }
 
+// ChannelOutcome 记录一个告警通道的分发结果（alert-dispatch SP4）。
+type ChannelOutcome struct {
+	Type      string `json:"type"`
+	URLDigest string `json:"url_digest,omitempty"`
+	Outcome   string `json:"outcome"` // sent | failed | rate_limited | filtered
+}
+
+// AlertDispatchRecord 是 alert_dispatch 审计事件的载荷：告警分发动作本身可追溯。
+type AlertDispatchRecord struct {
+	Source   string           `json:"source"` // policy_hit | budget_alert | chain_check
+	Severity string           `json:"severity"`
+	Title    string           `json:"title"`
+	DedupKey string           `json:"dedup_key"`
+	Channels []ChannelOutcome `json:"channels,omitempty"`
+}
+
 type Event struct {
 	ID                 string          `json:"id"`
 	TenantID           string          `json:"tenant_id"`
@@ -61,6 +77,7 @@ type Event struct {
 	Digest             *Digest         `json:"digest,omitempty"`
 	ToolsCalled        []string        `json:"tools_called,omitempty"`
 	PoliciesHit        []PolicyHit     `json:"policies_hit,omitempty"`
+	AlertDispatch      *AlertDispatchRecord `json:"alert_dispatch,omitempty"`
 	MCPStatus          string          `json:"mcp_status,omitempty"`
 	MCPServer          string          `json:"mcp_server,omitempty"`
 	MCPToolName        string          `json:"mcp_tool_name,omitempty"`
