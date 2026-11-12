@@ -166,6 +166,11 @@ if [ -z "${GATEWAY_ADMIN_HEARTBEAT_URL:-}" ] && [ -n "${GATEWAY_REMOTE_PROVIDERS
   export GATEWAY_ADMIN_HEARTBEAT_URL="${GATEWAY_REMOTE_PROVIDERS_URL%/api/internal/providers}/api/internal/gateway-heartbeat"
 fi
 
+# 早期 bootstrap 生成的 .env.local 没有虚拟模型快照地址，管理台保存的虚拟模型到不了 gateway。
+if [ -z "${GATEWAY_REMOTE_VIRTUAL_MODELS_URL:-}" ] && [ -n "${GATEWAY_REMOTE_PROVIDERS_URL:-}" ]; then
+  export GATEWAY_REMOTE_VIRTUAL_MODELS_URL="${GATEWAY_REMOTE_PROVIDERS_URL%/api/internal/providers}/api/internal/virtual-models"
+fi
+
 # 托管智能体凭证库主密钥（本地开发自动生成；生产由部署方注入 MA_VAULT_MASTER_KEY / _FILE）。
 if [ -z "${MA_VAULT_MASTER_KEY:-}" ] && [ -z "${MA_VAULT_MASTER_KEY_FILE:-}" ]; then
   mkdir -p "$ENTERPRISE_DIR/.local-secrets"
