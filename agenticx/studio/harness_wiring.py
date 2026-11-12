@@ -457,8 +457,15 @@ def apply_run_mode_to_harness_options(
 
     Claude Code: ``auto`` → auto_allow; ``ask``/``allowlist`` → queue prompts.
     CodeBuddy: ``auto`` → permission_mode=acceptEdits (no interactive channel).
-    Does not stop a live surface session solely for a policy change mid-turn;
-    new options apply on the next spawn/ensure when the surface is cold.
+    Codex: ``auto`` / 「全部允许」→ workspace-write with network; ``allowlist``
+    → workspace-write without network; ``ask`` → read-only. approvalPolicy
+    stays ``never`` because the Codex adapter has no interactive approval
+    UI and auto-resolves prompts; tightness is the sandbox itself.
+    Live Codex sessions get the new options on the next ensure (options
+    are refreshed in place). App-server applies them via turn/start
+    ``sandboxPolicy``. ``codex exec resume`` still cannot take
+    ``--sandbox`` (#332), so an exec-fallback mid-session mode change may
+    keep the original thread sandbox until a new thread is started.
     """
     from agenticx.studio.harness_permissions import harness_spawn_options_for_run_mode
 
@@ -647,6 +654,14 @@ class HarnessSessionLease:
     started_blank: bool
 
 
+_CODEX_RUN_MODE_OPTION_KEYS = ("sandbox", "network_access", "full_auto")
+
+
+def _codex_run_mode_option_subset(options: Any) -> Dict[str, Any]:
+    data = dict(options or {}) if isinstance(options, dict) else {}
+    return {key: data.get(key) for key in _CODEX_RUN_MODE_OPTION_KEYS}
+
+
 def ensure_harness_session(
     manager: Any, session_id: str, harness_id: str
 ) -> str:
@@ -716,6 +731,22 @@ def ensure_harness_session_lease(
                     pass
                 surface_sid = ""
             else:
+                # Near run_mode can change while the surface is still hot.
+                # Refresh spawn options in place so the next Codex turn
+                # can send an updated sandboxPolicy. Do not drop the
+                # native thread (provider-stamp skip-resume stays intact).
+                refresh = getattr(adapter, "refresh_session_options", None)
+                if callable(refresh):
+                    live_opts = {}
+                    if isinstance(view, dict) and isinstance(view.get("options"), dict):
+                        live_opts = dict(view["options"])
+                    if _codex_run_mode_option_subset(live_opts) != (
+                        _codex_run_mode_option_subset(options)
+                    ):
+                        try:
+                            refresh(surface_sid, options)
+                        except Exception:
+                            pass
                 return HarnessSessionLease(surface_sid, started_blank=False)
 
     if provider_mismatch:
@@ -1088,7 +1119,8 @@ def _run_external_harness_turn_body(
     apply_chat_model_to_harness_options(
         manager, sid, harness_id, chat_model
     )
-    # Near confirm strategy → CC auto_allow / CB permission_mode.
+    # Near confirm strategy → CC auto_allow / CB permission_mode /
+    # Codex sandbox + network_access.
     apply_run_mode_to_harness_options(manager, sid, harness_id)
     provider = str(chat_provider or "").strip()
     if provider:

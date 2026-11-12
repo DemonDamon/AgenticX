@@ -64,6 +64,24 @@ _CODEX_SANDBOXES = frozenset(
     {"read-only", "workspace-write", "danger-full-access"}
 )
 
+# Official 0.167 config override: workspace-write has no network by default.
+_NETWORK_ACCESS_CONFIG = "sandbox_workspace_write.network_access={value}"
+
+
+def _exec_network_access_config_args(opts: Dict[str, Any]) -> List[str]:
+    """``-c sandbox_workspace_write.network_access=...`` for exec argv.
+
+    Only relevant for ``workspace-write``. danger-full-access already has
+    network; read-only ignores this table. An explicit boolean is always
+    written so a user config.toml cannot silently grant or deny network
+    when Near mapped this mode.
+    """
+    sandbox = opts.get("sandbox")
+    if sandbox != "workspace-write":
+        return []
+    enabled = bool(opts.get("network_access"))
+    return ["-c", _NETWORK_ACCESS_CONFIG.format(value="true" if enabled else "false")]
+
 
 def _event_payload(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Return the inner message, supporting both envelope layouts."""
@@ -104,7 +122,7 @@ class CodexAdapter(ExecCliHarnessAdapter):
     # spawn options
     # ------------------------------------------------------------------
     def _validate_options(self, options: Dict[str, Any]) -> None:
-        allowed = {"model", "sandbox", "full_auto"}
+        allowed = {"model", "sandbox", "full_auto", "network_access"}
         # Internal stamps (e.g. model_provider) stay on harness_options
         # for skip-resume, but are not Codex CLI/spawn flags.
         unknown = sorted(set(adapter_spawn_options(options)) - allowed)
@@ -123,6 +141,9 @@ class CodexAdapter(ExecCliHarnessAdapter):
         full_auto = options.get("full_auto")
         if full_auto is not None and not isinstance(full_auto, bool):
             raise ValueError("full_auto must be a boolean")
+        network_access = options.get("network_access")
+        if network_access is not None and not isinstance(network_access, bool):
+            raise ValueError("network_access must be a boolean")
 
     # ------------------------------------------------------------------
     # command shape
@@ -137,11 +158,16 @@ class CodexAdapter(ExecCliHarnessAdapter):
         model = opts.get("model")
         if model:
             common += ["-m", str(model)]
+        network_override = _exec_network_access_config_args(opts)
         if session.native_thread_id:
+            # Resume rejects --sandbox / --full-auto / -C (#332). -c config
+            # overrides are still accepted and can enable network on an
+            # already workspace-write thread.
             return [
                 "exec",
                 "resume",
                 *common,
+                *network_override,
                 session.native_thread_id,
                 text,
             ]
@@ -151,6 +177,7 @@ class CodexAdapter(ExecCliHarnessAdapter):
             tail += ["--sandbox", str(sandbox)]
         if opts.get("full_auto"):
             tail += ["--full-auto"]
+        tail += network_override
         return ["exec", *tail, text]
 
     # ------------------------------------------------------------------
@@ -360,6 +387,7 @@ class CodexAdapter(ExecCliHarnessAdapter):
                             model=opts.get("model"),
                             sandbox=opts.get("sandbox"),
                             full_auto=bool(opts.get("full_auto")),
+                            network_access=opts.get("network_access"),
                         ),
                         timeout=30.0,
                     )
@@ -384,6 +412,9 @@ class CodexAdapter(ExecCliHarnessAdapter):
                         str(thread_id),
                         request.text,
                         model=opts.get("model"),
+                        sandbox=opts.get("sandbox"),
+                        full_auto=bool(opts.get("full_auto")),
+                        network_access=opts.get("network_access"),
                     ),
                     timeout=30.0,
                 )

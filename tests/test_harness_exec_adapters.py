@@ -433,6 +433,38 @@ def test_codex_sandbox_and_model_args(fake_codex):
     assert argv[argv.index("-m") + 1] == "gpt-5.2-codex"
     i = argv.index("-C")
     assert argv[i + 1] == os.getcwd()
+    # workspace-write without network_access must explicitly disable it
+    # so a user config cannot silently grant outbound access.
+    assert argv[argv.index("-c") + 1] == (
+        "sandbox_workspace_write.network_access=false"
+    )
+
+
+def test_codex_auto_run_mode_enables_workspace_write_network(fake_codex):
+    adapter = fake_codex["adapter"]
+    sid = adapter.spawn(
+        os.getcwd(),
+        options={
+            "model": "glm-5.3-flash",
+            "sandbox": "workspace-write",
+            "network_access": True,
+            "full_auto": False,
+        },
+    )["session_id"]
+    adapter.turn(sid, _turn())
+    argv = _read_log(fake_codex["log"])[0]["argv"]
+    assert argv[argv.index("--sandbox") + 1] == "workspace-write"
+    assert argv[argv.index("-c") + 1] == (
+        "sandbox_workspace_write.network_access=true"
+    )
+    assert "--full-auto" not in argv
+    assert "danger-full-access" not in argv
+
+
+def test_codex_spawn_rejects_invalid_network_access(fake_codex):
+    adapter = fake_codex["adapter"]
+    with pytest.raises(ValueError, match="network_access"):
+        adapter.spawn(os.getcwd(), options={"network_access": "yes"})
 
 
 def test_codex_resume_omits_cd_and_puts_options_before_session_id(fake_codex):
@@ -452,6 +484,13 @@ def test_codex_resume_omits_cd_and_puts_options_before_session_id(fake_codex):
     assert "-C" not in second
     assert "--sandbox" not in second
     assert second[second.index("-m") + 1] == "glm-5.3-flash"
+    # first turn had workspace-write without network_access → explicit false
+    assert first[first.index("-c") + 1] == (
+        "sandbox_workspace_write.network_access=false"
+    )
+    assert second[second.index("-c") + 1] == (
+        "sandbox_workspace_write.network_access=false"
+    )
     rid = second.index("thr_fake222")
     assert second.index("--json") < rid
     assert second.index("-m") < rid

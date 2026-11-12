@@ -339,6 +339,20 @@ class ExecCliHarnessAdapter(HarnessAdapter):
     # ------------------------------------------------------------------
     # native thread adoption (SP4 resume tier)
     # ------------------------------------------------------------------
+    def refresh_session_options(
+        self, session_id: str, options: Optional[Dict[str, Any]]
+    ) -> None:
+        """Replace spawn options on a live session without respawning.
+
+        Used when Near run_mode changes mid-session. Codex applies the
+        new sandbox via turn/start ``sandboxPolicy``; exec --json still
+        cannot change ``--sandbox`` on resume (#332).
+        """
+        opts = dict(options or {})
+        self._validate_options(opts)
+        session = self._get(session_id)
+        session.options = opts
+
     def adopt_thread(self, session_id: str, native_thread_id: str) -> None:
         if not (native_thread_id or "").strip():
             raise ValueError("native_thread_id must be non-empty")

@@ -25,8 +25,10 @@ from agenticx.harness.adapters._codex_app_server import (
     build_app_server_argv,
     consume_app_server_message,
     preferred_transport,
+    sandbox_policy_params,
     thread_resume_params,
     thread_start_params,
+    turn_start_params,
 )
 from agenticx.harness.adapters.codex import CodexAdapter
 from agenticx.harness.types import TurnRequest
@@ -77,6 +79,9 @@ for raw in sys.stdin:
     method = msg.get("method")
     msg_id = msg.get("id")
     params = msg.get("params") or {}
+    if log_path and method:
+        with open(log_path, "a") as f:
+            f.write(json.dumps({"rpc": method, "params": params}) + "\n")
     if method == "initialize":
         emit({"id": msg_id, "result": {
             "userAgent": "codex-stub",
@@ -204,6 +209,63 @@ def test_thread_resume_params_omit_cwd_and_sandbox():
     assert start["model"] == "qwen-plus"
     assert start["sandbox"] == "workspace-write"
     assert start["approvalPolicy"] == "never"
+    assert "config" not in start
+
+
+def test_thread_start_params_auto_enables_workspace_write_network():
+    start = thread_start_params(
+        cwd="/tmp/task",
+        sandbox="workspace-write",
+        network_access=True,
+    )
+    assert start["sandbox"] == "workspace-write"
+    assert start["approvalPolicy"] == "never"
+    assert start["config"] == {
+        "sandbox_workspace_write": {"network_access": True}
+    }
+    # 「全部允许」must not silently open the full disk.
+    assert start["sandbox"] != "danger-full-access"
+    loose = thread_start_params(cwd="/tmp/task", full_auto=True)
+    assert loose["sandbox"] == "danger-full-access"
+    assert "config" not in loose
+
+
+def test_thread_start_params_ask_stays_read_only_without_network():
+    start = thread_start_params(
+        cwd="/tmp/task",
+        sandbox="read-only",
+        network_access=False,
+    )
+    assert start["sandbox"] == "read-only"
+    assert start["approvalPolicy"] == "never"
+    assert "config" not in start
+
+
+def test_turn_start_params_include_sandbox_policy_for_resume():
+    auto = turn_start_params(
+        "thr_123",
+        "hello",
+        model="glm-5.3-flash",
+        sandbox="workspace-write",
+        network_access=True,
+    )
+    assert auto["threadId"] == "thr_123"
+    assert auto["model"] == "glm-5.3-flash"
+    assert auto["sandboxPolicy"] == {
+        "type": "workspaceWrite",
+        "networkAccess": True,
+    }
+    allowlist = turn_start_params(
+        "thr_123", "hello", sandbox="workspace-write", network_access=False
+    )
+    assert allowlist["sandboxPolicy"] == {"type": "workspaceWrite"}
+    ask = turn_start_params(
+        "thr_123", "hello", sandbox="read-only", network_access=False
+    )
+    assert ask["sandboxPolicy"] == {"type": "readOnly"}
+    assert sandbox_policy_params("danger-full-access") == {
+        "type": "dangerFullAccess"
+    }
 
 
 def test_consume_deltas_are_incremental_not_one_blob():
@@ -405,7 +467,7 @@ def test_app_server_followup_reuses_thread_without_cwd(fake_app_server):
     second = adapter.turn(sid, _turn("第二轮"))
     assert first.ok and second.ok
     assert adapter.describe(sid)["native_thread_id"] == "thr_app_1"
-    argvs = [row["argv"] for row in _read_log(fake_app_server["log"])]
+    argvs = [row["argv"] for row in _read_log(fake_app_server["log"]) if "argv" in row]
     # One long-lived app-server process for both turns.
     assert len(argvs) == 1
     argv = argvs[0]
@@ -415,6 +477,35 @@ def test_app_server_followup_reuses_thread_without_cwd(fake_app_server):
     assert "-C" not in argv
     assert "--sandbox" not in argv
     assert "model_provider" not in argv
+
+
+def test_app_server_sends_networked_sandbox_on_start_and_turn(fake_app_server):
+    adapter = fake_app_server["adapter"]
+    sid = adapter.spawn(
+        os.getcwd(),
+        options={
+            "model": "glm-5.3-flash",
+            "sandbox": "workspace-write",
+            "network_access": True,
+            "full_auto": False,
+        },
+    )["session_id"]
+    result = adapter.turn(sid, _turn("搜一下"))
+    assert result.ok
+    rows = _read_log(fake_app_server["log"])
+    starts = [row for row in rows if row.get("rpc") == "thread/start"]
+    turns = [row for row in rows if row.get("rpc") == "turn/start"]
+    assert len(starts) == 1
+    assert starts[0]["params"]["sandbox"] == "workspace-write"
+    assert starts[0]["params"]["approvalPolicy"] == "never"
+    assert starts[0]["params"]["config"] == {
+        "sandbox_workspace_write": {"network_access": True}
+    }
+    assert starts[0]["params"]["sandbox"] != "danger-full-access"
+    assert turns and turns[0]["params"]["sandboxPolicy"] == {
+        "type": "workspaceWrite",
+        "networkAccess": True,
+    }
 
 
 def test_app_server_resume_after_restart_omits_cwd(fake_app_server):
@@ -429,7 +520,7 @@ def test_app_server_resume_after_restart_omits_cwd(fake_app_server):
     second = adapter.turn(sid, _turn("继续"))
     assert second.ok
     assert second.detail["native_thread_id"] == "thr_app_1"
-    argvs = [row["argv"] for row in _read_log(fake_app_server["log"])]
+    argvs = [row["argv"] for row in _read_log(fake_app_server["log"]) if "argv" in row]
     assert len(argvs) == 2
     for argv in argvs:
         assert argv[0] == "app-server"
@@ -470,7 +561,7 @@ def test_app_server_handshake_failure_falls_back_to_exec(fake_app_server, monkey
     assert result.ok
     assert result.result_text == "fallback ok"
     assert result.detail["native_thread_id"] == "thr_exec_fallback"
-    argvs = [row["argv"] for row in _read_log(fake_app_server["log"])]
+    argvs = [row["argv"] for row in _read_log(fake_app_server["log"]) if "argv" in row]
     assert argvs[0][0] == "app-server"
     assert argvs[-1][0] == "exec"
     assert "--skip-git-repo-check" in argvs[-1]
