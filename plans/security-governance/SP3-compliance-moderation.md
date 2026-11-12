@@ -2,7 +2,7 @@
 
 Plan-Id: compliance-moderation
 Parent-Plan: plans/security-governance/MASTER-PLAN.md（缺口 G3：合规内容审核空白——策略引擎偏凭据/注入类，涉政/色情/暴恐/广告无规则包、无第三方内容安全 API 适配）
-Status: in_progress（2026-11-12）
+Status: implemented（2026-11-12 实施+测试+E2E 通过，commit f44637c5b）
 
 ## 一、探查结论
 
@@ -105,16 +105,16 @@ manifest.yaml rule.category
 
 ## 四、验收标准（对齐 MASTER-PLAN 第八节）
 
-- [ ] Go：规则包命中——snapshot 带 category 的规则 → 请求/响应两侧 90001/90002 且 hits[].category 正确（server 级 E2E）
-- [ ] Go：httpProvider contract 测试（httptest 断言请求契约 + verdict 解析 + 超时）
-- [ ] Go：blocked → policy_hit 先落审计（含 category）→ 90001/90002 → 告警分发（httptest 收到，summary 带类别）
-- [ ] Go：degraded E2E——provider 故障 → 请求放行（本地规则仍拦）+ CRITICAL moderation_degraded 告警送达 + 去重窗口内不重复
-- [ ] Go：strict 模式——provider 故障 → fail-closed 90001/90002 + 告警
-- [ ] Go：未配置租户零行为变化（不外呼、不阻断）
-- [ ] TS：normalizeRulePayload 保留 category；播种包 payload 带 category；PolicyTestHit 回显
-- [ ] vitest：moderation store/route CRUD + audit 留痕
-- [ ] 回归：policy-engine + server + audit + moderation 包全绿；console 相关测试过
-- [ ] commit 带 Plan-Id/Plan-File/Impl-Model: GLM-5.3/Made-with: Damon Li
+- [x] Go：规则包命中——snapshot 带 category 的规则 → 请求/响应两侧 90001/90002 且 hits[].category 正确（server 级 E2E）— `TestSnapshotRuleCategoryFlowsTo90001Body`
+- [x] Go：httpProvider contract 测试（httptest 断言请求契约 + verdict 解析 + 超时）— `TestHTTPProviderContract` / `TestHTTPProviderBadStatusIsError` / `TestHTTPProviderTimeout`
+- [x] Go：blocked → policy_hit 先落审计（含 category）→ 90001/90002 → 告警分发（httptest 收到，summary 带类别）— `TestServerModerationBlockedWritesAuditAndAlert` + `TestModerationPolicyErrorBodyCarriesCategory`（后者合并入 snapshot category 测试）
+- [x] Go：degraded E2E——provider 故障 → 请求放行（本地规则仍拦）+ CRITICAL moderation_degraded 告警送达 + 去重窗口内不重复 — `TestServerModerationDegradedSendsCriticalAlert`
+- [x] Go：strict 模式——provider 故障 → fail-closed 90001/90002 + 告警 — `TestServerModerationStrictFailsClosed`
+- [x] Go：未配置租户零行为变化（不外呼、不阻断）— `TestServerModerationUnconfiguredTenantNoop` + `TestEnforceUnconfiguredTenantIsNoop` + `TestConfigFileMissingIsEmpty`
+- [x] TS：normalizeRulePayload 保留 category；播种包 payload 带 category；PolicyTestHit 回显 — `tests/rule-category.test.ts`（pg/mysql 双实现 6 项）+ types/BuiltinManifestRule/播种路径实现
+- [x] vitest：moderation store/route CRUD + audit 留痕 — `moderation-route.test.ts`（10 项：含 apiKey 掩码回写保留、mode 校验、DELETE 留痕）
+- [x] 回归：policy-engine + server + audit + moderation 包全绿；console 相关测试过（security/alerts 25 项 4 文件全过；features/policy 既有 snapshot-writer 1 项失败为 pre-existing，stash 验证与本次无关；console tsc 我的文件零错误）
+- [x] commit 带 Plan-Id/Plan-File/Impl-Model: GLM-5.3/Made-with: Damon Li（commit f44637c5b，23 文件 +2017）
 
 ## 五、纪律对齐
 
