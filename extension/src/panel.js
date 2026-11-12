@@ -18,8 +18,9 @@
 
 const AGX_ACTIVE_SESSION_KEY = "agx_active_session";
 const AGX_COPILOT_PENDING_KEY = "agx_copilot_pending";
-/** SP7a 遗留项（SP7c 补齐）：面板客户端 30s 回复超时。 */
-const AGX_REPLY_TIMEOUT_MS = 30000;
+/** SP7c：面板客户端回复超时。真机结论（2026-11-12）：真实 claude-code
+ * turn 首个 token 可能 >30s —— 预算与桌面端 bridge 同步放宽到 90s。 */
+const AGX_REPLY_TIMEOUT_MS = 90000;
 
 const $ = (id) => document.getElementById(id);
 const input = $("input");
@@ -46,6 +47,9 @@ function agxPanelFailureMessage(error) {
   if (code === "copilot_not_configured") return "AGX 桌面端未配置 Studio 连接，消息未发送。";
   if (code === "empty_text") return "请输入内容后再发送。";
   if (code === "reply_timeout") return "已发送到桌面端会话，回答超时。";
+  if (code === "reply_empty") {
+    return "会话正忙或未产生回复：消息可能未送达，请稍后重试，或到桌面端 Studio 查看。";
+  }
   return `发送失败：${code || "unknown"}`;
 }
 

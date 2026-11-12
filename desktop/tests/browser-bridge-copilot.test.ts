@@ -12,7 +12,7 @@
  *   - SSE drain aggregation: multi-chunk token frames concatenated
  *     (agent_id defaulting to meta; "⏳" idle placeholder stripped;
  *     tool_call frames ignored), in-stream error frames surfaced;
- *   - 30s timeout → reply_timeout (the turn already reached the session —
+ *   - 90s timeout → reply_timeout (the turn already reached the session —
  *     keep_runtime_after_disconnect keeps it running in Studio);
  *   - error mapping (session_not_found / studio_chat_5xx /
  *     studio_unreachable / no_active_session) identical to inject;
@@ -212,6 +212,41 @@ describe("SP7b copilot_chat dispatch", () => {
     expect(res.text).toBe("你好，世界");
   });
 
+  it("prefers the authoritative final frame text over token aggregation", async () => {
+    // Real-machine finding (2026-11-12): the studio emits {"type":"final"}
+    // carrying the full reply right before token_usage/done — it wins over
+    // the partial token aggregation.
+    const studio = studioWith([
+      {
+        match: "/api/chat",
+        respond: () =>
+          sseChatResponse([
+            'data: {"type":"token","data":{"text":"部分token","agent_id":"meta"}}\n\n',
+            'data: {"type":"final","data":{"text":"完整的最终回答","turn_terminal":true}}\n\n',
+            'data: {"type":"done","data":{"reason":"harness_turn"}}\n\n',
+          ]),
+      },
+    ]);
+    const res = await dispatchCopilotChat(copilotRow(), studio);
+    expect(res.ok).toBe(true);
+    expect(res.text).toBe("完整的最终回答");
+  });
+
+  it("maps a token-less stream (busy swallow) to reply_empty — never ok with empty text", async () => {
+    // Real-machine finding: a busy session can accept the turn but emit a
+    // stream with no meta tokens and no final text — reporting ok:true with
+    // an empty string would be a silent lie.
+    const studio = studioWith([
+      {
+        match: "/api/chat",
+        respond: () => sseChatResponse(['data: {"type":"done","data":{"reason":"harness_turn"}}\n\n']),
+      },
+    ]);
+    const res = await dispatchCopilotChat(copilotRow(), studio);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("reply_empty");
+  });
+
   it("surfaces in-stream SSE error frames (e.g. session_busy_elsewhere)", async () => {
     const studio = studioWith([
       {
@@ -229,14 +264,15 @@ describe("SP7b copilot_chat dispatch", () => {
     expect(res.error).toBe("session_busy_elsewhere");
   });
 
-  it("30s timeout maps to reply_timeout (the turn already reached the session)", async () => {
+  it("90s timeout maps to reply_timeout (the turn already reached the session)", async () => {
     vi.useFakeTimers();
     const studio = studioWith([
       {
         match: "/api/chat",
         // Reply stream stalls after the first chunk: the turn is accepted
-        // but never finishes within the 30s reply window. The mock stream
-        // errors on abort the way a real fetch body would.
+        // but never finishes within the 90s reply window (real-machine
+        // finding: claude-code harness first-token latency can exceed 30s).
+        // The mock stream errors on abort the way a real fetch body would.
         respond: (init) =>
           sseChatResponse(['data: {"type":"token","data":{"text":"部分","agent_id":"meta"}}\n\n'], {
             abortSignal: init?.signal ?? undefined,
@@ -244,7 +280,7 @@ describe("SP7b copilot_chat dispatch", () => {
       },
     ]);
     const pending = dispatchCopilotChat(copilotRow({ session_id: "s-live" }), studio);
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(90_000);
     const res = await pending;
     expect(res.ok).toBe(false);
     expect(res.session_id).toBe("s-live");

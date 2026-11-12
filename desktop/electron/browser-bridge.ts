@@ -458,6 +458,7 @@ async function drainSseAssistantText(
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
+  let finalFullText = "";
   let streamError: string | undefined;
   try {
     for (;;) {
@@ -484,10 +485,18 @@ async function drainSseAssistantText(
         if (row.type === "token") {
           if (String(data.agent_id ?? "meta") !== "meta") continue;
           text += String(data.text ?? "").replace(/⏳\s*/g, "");
+        } else if (row.type === "final") {
+          // Real-machine finding (2026-11-12): the studio emits a `final`
+          // frame carrying the AUTHORITATIVE full reply text right before
+          // token_usage/done. Prefer it over token aggregation — a stream
+          // can end without meta tokens (busy turn swallow) and tokens
+          // alone can miss content.
+          const finalText = String(data.text ?? "");
+          if (finalText) finalFullText = finalText;
         } else if (row.type === "error") {
           streamError = String(data.error ?? "").trim() || "studio_stream_error";
         } else if (row.type === "done") {
-          return { text, streamError };
+          return { text: finalFullText || text, streamError };
         }
       }
     }
@@ -496,7 +505,7 @@ async function drainSseAssistantText(
       /* server already closed */
     });
   }
-  return { text, streamError };
+  return { text: finalFullText || text, streamError };
 }
 
 /**
@@ -534,10 +543,12 @@ export async function dispatchCopilotChat(
     : text;
   const controller = new AbortController();
   let timedOut = false;
+  // Real-machine finding (2026-11-12): a real claude-code harness turn can
+  // exceed 30s on the first token — 90s is the honest non-streaming budget.
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, 30_000);
+  }, 90_000);
   try {
     const posted = await postStudioChatTurn(
       studio,
@@ -555,6 +566,11 @@ export async function dispatchCopilotChat(
     const drained = await drainSseAssistantText(posted.response);
     if (drained.streamError) {
       return { ok: false, session_id: sessionId, error: drained.streamError };
+    }
+    // Real-machine finding: a busy session swallows the turn as a token-less
+    // stream — never report success with empty text.
+    if (!drained.text) {
+      return { ok: false, session_id: sessionId, error: "reply_empty" };
     }
     return { ok: true, session_id: sessionId, text: drained.text };
   } catch {
