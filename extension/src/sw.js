@@ -16,6 +16,11 @@
 // cache). message.stub === true (the bridge forwards AGX_EXT_STUB=1) keeps the
 // SP2 stub path (executor-stub.js) green for its acceptance run.
 //
+// SP7a · Copilot panel: panel pages send {cmd:"agx_copilot_send"} → the SW
+// assembles the {type:"copilot_chat"} protocol payload (copilot.js) and posts
+// it on the same NM port; desktop replies arrive as {type:"copilot_reply"}
+// and are broadcast back to the panels as agx_copilot_reply.
+//
 // State persisted under chrome.storage.local key "nm":
 // {
 //   status: "connected" | "disconnected",
@@ -37,6 +42,7 @@ importScripts(
   "executor/screenshot.js",
   "executor/index.js",
   "inject.js",
+  "copilot.js",
 );
 
 const HOST_NAME = "com.agenticx.bridge";
@@ -70,8 +76,12 @@ function saveState(patch) {
 
 function recordRtt(pingTs) {
   const rtt = Date.now() - pingTs;
+  // SP7a: first pong after a (re)connect — one NM-status push per revival so
+  // an open panel self-heals (plan §2.3, copilot.js).
+  const reconnected = state.status !== "connected";
   const samples = [...(state.rttSamples ?? []), { ts: Date.now(), rtt }].slice(-RTT_SAMPLES_CAP);
   saveState({ status: "connected", lastPongAt: Date.now(), lastRttMs: rtt, rttSamples: samples });
+  if (reconnected) agxCopilotBroadcastNmStatus();
   return rtt;
 }
 
@@ -148,6 +158,12 @@ function onNativeMessage(message) {
     void agxRecordInjectResult(message);
     return;
   }
+  // SP7a: terminal outcome of a copilot_chat send (fired from the desktop
+  // bridge) → routed to the panel as an agx_copilot_reply broadcast.
+  if (message && message.type === "copilot_reply" && message.request_id) {
+    void agxHandleCopilotReply(message);
+    return;
+  }
   log("message:", message);
 }
 
@@ -163,6 +179,21 @@ function agxNmSendInject(payload) {
     return true;
   } catch (err) {
     log("inject postMessage failed:", err?.message ?? err); // dead port → onDisconnect follows
+    return false;
+  }
+}
+
+/** SP7a transport for the copilot panel: post one copilot_chat payload on
+ *  the live NM port. Returns false when the port is down — mirroring
+ *  agxNmSendInject, that IS the "AGX 未运行" pre-flight (copilot.js turns a
+ *  false return into an nm_disconnected broadcast). */
+function agxNmSendCopilot(payload) {
+  if (!port) return false;
+  try {
+    port.postMessage(payload);
+    return true;
+  } catch (err) {
+    log("copilot postMessage failed:", err?.message ?? err); // dead port → onDisconnect follows
     return false;
   }
 }

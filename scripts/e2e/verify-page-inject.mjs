@@ -476,10 +476,11 @@ async function runScenario(fixtureBase, studio) {
   // ---- T1: both menu items registered -------------------------------------
   // NB: this Chrome build's chrome.contextMenus has NO getAll — inject.js
   // keeps agxInjectMenuIds, populated only from real create() callbacks.
+  // SP7c: the third item (agx-copilot-selection) registers in the same flow.
   const menus = await waitFor(async () => await swEvaluate(`agxInjectMenuIds`), 10_000, "T1 menu registration");
   assert(
-    JSON.stringify(menus) === JSON.stringify(["agx-inject-selection", "agx-inject-page"]),
-    `T1 both context-menu items registered via real create() callbacks (划词: selection, 整页: page) → ${JSON.stringify(menus)}`,
+    JSON.stringify(menus) === JSON.stringify(["agx-inject-selection", "agx-inject-page", "agx-copilot-selection"]),
+    `T1 both context-menu items registered via real create() callbacks + the SP7c 划词问 AGX item (划词: selection, 整页: page) → ${JSON.stringify(menus)}`,
   );
 
   // ---- T2 (判据1): un-granted origin → per-origin request → grant → full chain

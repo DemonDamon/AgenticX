@@ -69,7 +69,7 @@
 - 后续同站点划词不再弹权限
 
 **自动化断言（6 条）**
-- J2-a 两个右键菜单项已注册（`agx-inject-selection` / `agx-inject-page`）
+- J2-a 三个右键菜单项已注册（`agx-inject-selection` / `agx-inject-page` / SP7c 的 `agx-copilot-selection`）
 - J2-b 划词发送成功且结果被记录（防静默失败）
 - J2-c 首次权限申请 origin 恰为 `["http://localhost/*"]`
 - J2-d 注入进入用户当前活跃会话且 key 为 `[来自页面 AGX Page Inject Fixture](<URL>)`

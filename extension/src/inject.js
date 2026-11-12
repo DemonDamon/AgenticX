@@ -27,6 +27,10 @@
 
 const AGX_MENU_SELECTION_ID = "agx-inject-selection";
 const AGX_MENU_PAGE_ID = "agx-inject-page";
+/** SP7c · 划词联动侧边栏菜单（仅此一项新增；既有两项行为不变）。 */
+const AGX_MENU_COPILOT_ID = "agx-copilot-selection";
+/** SP7c · 终态记录 key（与 agx_inject_last_result 同族的防静默契约）。 */
+const AGX_COPILOT_SELECTION_RESULT_KEY = "agx_copilot_selection_last_result";
 /** Plan §1.1: trim collected text to 20k characters. */
 const AGX_INJECT_TEXT_CAP = 20000;
 const AGX_ACTIVE_SESSION_KEY = "agx_active_session";
@@ -37,6 +41,11 @@ let agxPermissionContainsFn = (origins) => chrome.permissions.contains({ origins
 /** Automation seam: defaults to the real chrome.permissions.request
  *  (valid here because context-menu clicks carry the user gesture). */
 let agxPermissionRequestFn = (origins) => chrome.permissions.request({ origins });
+/** SP7c automation seam: defaults to the real chrome.sidePanel.open. MV3 menu
+ *  dispatch often loses the user gesture → open() rejects; e2e forces the
+ *  open-ok / open-throw branches through this mutable global (same pattern as
+ *  the permission seams above). */
+let agxSidePanelOpenFn = (options) => chrome.sidePanel.open(options);
 
 function agxInjectLog(...args) {
   console.log("[agx-inject]", ...args);
@@ -84,7 +93,7 @@ function agxRegisterInjectMenus() {
           return;
         }
         registered.push(item.id);
-        if (registered.length === 2) {
+        if (registered.length === 3) {
           agxInjectMenuIds = registered.slice();
         }
       });
@@ -97,6 +106,11 @@ function agxRegisterInjectMenus() {
       id: AGX_MENU_PAGE_ID,
       title: "整页发给 AGX",
       contexts: ["page"],
+    });
+    register({
+      id: AGX_MENU_COPILOT_ID,
+      title: "划词问 AGX（侧边栏）",
+      contexts: ["selection"],
     });
   });
 }
@@ -196,6 +210,10 @@ async function agxCollectFromTab(tab, kind) {
  *  permission gate runs first so nothing is collected before the grant. */
 async function agxHandleContextMenuClick(info, tab) {
   const menuId = String(info?.menuItemId || "");
+  if (menuId === AGX_MENU_COPILOT_ID) {
+    void agxHandleCopilotSelectionClick(tab);
+    return; // SP7c path — 既有两项菜单的行为在下方保持一行不改
+  }
   const kind = menuId === AGX_MENU_SELECTION_ID ? "selection" : menuId === AGX_MENU_PAGE_ID ? "page" : null;
   if (!kind) return;
   if (!tab || typeof tab.id !== "number") {
@@ -260,6 +278,155 @@ async function agxHandleContextMenuClick(info, tab) {
     agxInjectLog(`sent ${kind} inject (${text.length} chars${truncated ? ", truncated" : ""})`, collected.url);
   } catch (err) {
     void agxRecordInjectResult({ ok: false, kind, error: String(err?.message ?? err), url: String(tab.url || "") });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SP7c · 划词问 AGX（侧边栏）— selection → copilot_chat → sidePanel.open
+// ---------------------------------------------------------------------------
+
+/** SP7c failure copy (mirror of agxInjectFailureMessage — same SP7b error
+ *  family, selection-copilot wording). */
+function agxCopilotSelectionFailureMessage(result) {
+  const error = String(result.error || "");
+  if (error === "nm_disconnected") return "AGX 未运行：无法连接 AGX 桌面端，划词未发送。";
+  if (error === "sensitive_domain") {
+    return `已拦截：敏感站点（${result.category || "sensitive"}）的划词不会发送。`;
+  }
+  if (error === "permission_denied") return "已拒绝该站点的注入权限，划词未发送。";
+  if (error === "empty_text") return "未选取到可发送的内容。";
+  if (error === "unsupported_url") return "该页面类型暂不支持划词发送。";
+  if (error === "no_active_tab") return "未找到可发送的页面标签。";
+  return `划词发送失败：${error || "unknown"}`;
+}
+
+/** SP7c terminal record for every 「划词问 AGX」click — same anti-silent-failure
+ *  contract as agxRecordInjectResult (failures toast AND persist; successes
+ *  persist for e2e/debug visibility, including the sidePanel.open fallback). */
+async function agxRecordCopilotSelectionResult(result) {
+  const row = { ...result, kind: "selection", ts: Date.now() };
+  if (row.ok !== true && !("notified" in row)) {
+    row.notified = agxNotifyUser(agxCopilotSelectionFailureMessage(row));
+  }
+  try {
+    await chrome.storage.local.set({ [AGX_COPILOT_SELECTION_RESULT_KEY]: row });
+  } catch (err) {
+    agxInjectLog("persist copilot selection result failed:", err?.message ?? err);
+  }
+  agxInjectLog("copilot selection result:", JSON.stringify(row));
+}
+
+/** SP7c click flow: 敏感域名 gate（SP4 同一 verdict 函数，采集前拦截）→ activeTab
+ *  采集 selection → 组装 {kind:"selection"} 走 SP7a 的 SW 发送路径
+ *  （copilot.js agxHandleCopilotSend：copilot_chat + pending + 广播）→
+ *  chrome.sidePanel.open({tabId})。
+ *  SP5 教训：MV3 菜单派发常拿不到 user gesture → sidePanel.open 可能抛错；
+ *  open 失败 ⇒ 消息照发 + notifications toast「已发送，点工具栏图标查看回答」
+ *  （绝不静默）；发送失败（NM down）⇒ 记录 + toast，不 open 空面板。 */
+async function agxHandleCopilotSelectionClick(tab) {
+  if (!tab || typeof tab.id !== "number") {
+    void agxRecordCopilotSelectionResult({ ok: false, error: "no_active_tab" });
+    return;
+  }
+  // 敏感域名 gate — 与 SP4 executor 层同一 verdict 函数，非 open 动作按 tab_url 判定。
+  let verdict = null;
+  try {
+    verdict = await agxSensitiveDomainVerdict("copilot_selection", { tab_url: tab.url });
+  } catch (err) {
+    verdict = { domain: "", category: "", tab_url: String(tab.url || "") }; // gate 自身故障 → 按拦截处理
+    agxInjectLog("sensitive-domain verdict failed:", err?.message ?? err);
+  }
+  if (verdict) {
+    void agxRecordCopilotSelectionResult({
+      ok: false,
+      error: "sensitive_domain",
+      domain: verdict.domain,
+      category: verdict.category,
+      url: String(tab.url || ""),
+    });
+    return; // 银行/支付/邮箱/政务页：采集前拦截，不采集不发送
+  }
+  const originPattern = agxBuildOriginPattern(tab.url);
+  if (!originPattern) {
+    void agxRecordCopilotSelectionResult({ ok: false, error: "unsupported_url", url: String(tab.url || "") });
+    return;
+  }
+  try {
+    // 权限姿势照抄既有菜单：activeTab 覆盖本次点击；per-origin 增强在无手势时
+    // 抛错 → 落回 activeTab 路径；显式拒绝 → 不发送。
+    let granted = false;
+    let sawPromptAndDenied = false;
+    try {
+      granted = await agxPermissionContainsFn([originPattern]);
+      if (!granted) {
+        granted = await agxPermissionRequestFn([originPattern]);
+        sawPromptAndDenied = !granted;
+      }
+    } catch (permErr) {
+      granted = false; // gesture absent (expected on MV3 menu dispatch) — activeTab covers this click
+      sawPromptAndDenied = false;
+    }
+    if (sawPromptAndDenied) {
+      void agxRecordCopilotSelectionResult({
+        ok: false,
+        stage: "permission",
+        error: "permission_denied",
+        origin: originPattern,
+      });
+      return;
+    }
+
+    const collected = await agxCollectFromTab(tab, "selection");
+    const text = collected.raw;
+    if (!text) {
+      void agxRecordCopilotSelectionResult({ ok: false, error: "empty_text", url: collected.url });
+      return;
+    }
+
+    // SP7a 发送路径（copilot.js）：组装 {type:"copilot_chat", kind:"selection",
+    // text, source_url, source_title} 落 NM + pending 记录 + 已开面板广播。
+    const sent = await agxHandleCopilotSend({
+      text,
+      kind: "selection",
+      source_url: collected.url,
+      source_title: collected.title,
+    });
+    if (sent !== true) {
+      // nm_disconnected 已广播给已打开的面板；面板未开时由本记录的 toast 兜底，绝不静默。
+      void agxRecordCopilotSelectionResult({ ok: false, error: "nm_disconnected", url: collected.url });
+      return;
+    }
+
+    // sidePanel.open：SP5 教训 — 无 user gesture 时可能同步抛错或 Promise 拒绝。
+    let opened = true;
+    let openError = "";
+    try {
+      await agxSidePanelOpenFn({ tabId: tab.id });
+    } catch (err) {
+      opened = false;
+      openError = String(err?.message ?? err);
+    }
+    if (!opened) {
+      // 消息已照发；open 失败 ⇒ toast 兜底「已发送，点工具栏图标查看回答」。
+      const toastMessage = "已发送，点工具栏图标查看回答";
+      const notified = agxNotifyUser(toastMessage);
+      void agxRecordCopilotSelectionResult({
+        ok: true,
+        opened: false,
+        open_error: openError,
+        toast_message: toastMessage,
+        notified,
+        url: collected.url,
+      });
+      return;
+    }
+    void agxRecordCopilotSelectionResult({ ok: true, opened: true, url: collected.url });
+  } catch (err) {
+    void agxRecordCopilotSelectionResult({
+      ok: false,
+      error: String(err?.message ?? err),
+      url: String(tab.url || ""),
+    });
   }
 }
 

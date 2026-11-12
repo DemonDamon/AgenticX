@@ -725,8 +725,8 @@ async function journeyJ2(fixtureBase, studio) {
 
   const menus = await waitFor(async () => await swEvaluate(`agxInjectMenuIds`), 10_000, "菜单注册");
   assert(
-    JSON.stringify(menus) === JSON.stringify(["agx-inject-selection", "agx-inject-page"]),
-    `J2-a 两个右键菜单项已注册（${JSON.stringify(menus)}）`,
+    JSON.stringify(menus) === JSON.stringify(["agx-inject-selection", "agx-inject-page", "agx-copilot-selection"]),
+    `J2-a 三个右键菜单项已注册（划词/整页 + SP7c 划词问 AGX，${JSON.stringify(menus)}）`,
   );
 
   await openTabAndWait(localPage);
