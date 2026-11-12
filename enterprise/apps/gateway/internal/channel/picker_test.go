@@ -197,6 +197,51 @@ func TestReloadResynthesizesChannelsWhileRemote404(t *testing.T) {
 	}
 }
 
+func TestReloadSynthesizesChannelsFromRemoteProvidersWhenChannelsEmpty(t *testing.T) {
+	const model = "kimi-k2.6"
+	providersBody := `{"providers":[{"id":"p-remote","displayName":"Remote","baseUrl":"https://example.test/v1","apiKey":"test-key","enabled":true,"route":"third-party","models":[{"name":"` + model + `","enabled":true}]}]}`
+	providersSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(providersBody))
+	}))
+	t.Cleanup(providersSrv.Close)
+	t.Setenv("GATEWAY_REMOTE_PROVIDERS_URL", providersSrv.URL)
+	t.Setenv("GATEWAY_ADMIN_PROVIDERS_FILE", "")
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	admin := runtimeconfig.New(logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	admin.Start(ctx)
+	cancel()
+	if _, ok := admin.ResolveByModel(model, ""); !ok {
+		t.Fatal("providers loader missed remote model")
+	}
+
+	channelsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"channels":[]}`))
+	}))
+	t.Cleanup(channelsSrv.Close)
+	t.Setenv("GATEWAY_REMOTE_CHANNELS_URL", channelsSrv.URL)
+	t.Setenv("GATEWAY_ADMIN_CHANNELS_FILE", "")
+
+	reg := NewRegistry(logger, admin)
+	if err := reg.reload(); err != nil {
+		t.Fatal(err)
+	}
+	got := reg.ListByModel("", model)
+	if len(got) == 0 {
+		t.Fatal("expected synthesized channel for remote provider model")
+	}
+	if got[0].ID != "legacy-p-remote" {
+		t.Fatalf("channel id = %q", got[0].ID)
+	}
+	if got[0].APIKey != "test-key" {
+		t.Fatalf("channel apiKey = %q", got[0].APIKey)
+	}
+}
+
 func writeProviderModel(t *testing.T, file, model string) {
 	t.Helper()
 	body := `{"providers":[{"id":"p1","displayName":"P","baseUrl":"https://example.test/v1","apiKey":"k","enabled":true,"route":"third-party","models":[{"name":"` + model + `","enabled":true}]}]}`

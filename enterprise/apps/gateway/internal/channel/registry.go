@@ -235,39 +235,14 @@ func (r *Registry) reportFailure(err error) {
 	r.status.ReportFailure(configstatus.DomainChannels, r.path, err)
 }
 
-// synthesizeFromProviders 把 admin providers 自动转成单 Channel 简写（NFR-1 兼容）。
+// synthesizeFromProviders 把 admin providers 内存快照自动转成单 Channel 简写（NFR-1 兼容）。
+// 快照由 Loader.reload 统一写入，文件与远程两种来源都走这里。
 func synthesizeFromProviders(admin *runtimeconfig.Loader) []Channel {
 	if admin == nil {
 		return nil
 	}
-	// 通过 ResolveByModel 无法枚举；读 providers 文件路径由 admin loader 维护。
-	path := admin.Path()
-	if path == "" || gatewayinternal.IsHTTPURL(path) {
-		return nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var parsed struct {
-		Providers []struct {
-			ID          string `json:"id"`
-			DisplayName string `json:"displayName"`
-			BaseURL     string `json:"baseUrl"`
-			APIKey      string `json:"apiKey"`
-			Enabled     bool   `json:"enabled"`
-			Route       string `json:"route"`
-			Models      []struct {
-				Name    string `json:"name"`
-				Enabled bool   `json:"enabled"`
-			} `json:"models"`
-		} `json:"providers"`
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil
-	}
 	out := make([]Channel, 0)
-	for _, p := range parsed.Providers {
+	for _, p := range admin.Providers() {
 		if !p.Enabled {
 			continue
 		}
