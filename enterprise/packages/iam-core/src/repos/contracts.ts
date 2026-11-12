@@ -3,6 +3,14 @@ import type { DatabaseDialect } from "../database/config";
 import type { IamDb } from "../db";
 import type { AuditInsert } from "./audit";
 import type {
+  SecurityIncidentActionInsert,
+  SecurityIncidentActionRecord,
+  SecurityIncidentInsert,
+  SecurityIncidentRecord,
+  SecurityIncidentStatusUpdate,
+  SecurityIncidentListOptions,
+} from "./incidents";
+import type {
   AdminUserDto,
   AdminUserStatus,
   ListUsersFilter,
@@ -23,6 +31,16 @@ export interface DialectRepository {
 
 export interface AuditRepository extends DialectRepository {
   insertAuditEvent(input: AuditInsert, dbOrTx?: IamDb): Promise<void>;
+}
+
+/** SP5 incident-response：安全事件记录（三态状态机）+ 处置动作明细。 */
+export interface SecurityIncidentRepository extends DialectRepository {
+  createIncident(input: SecurityIncidentInsert, dbOrTx?: IamDb): Promise<SecurityIncidentRecord>;
+  getIncident(tenantId: string, incidentId: string, dbOrTx?: IamDb): Promise<SecurityIncidentRecord | null>;
+  listIncidents(tenantId: string, opts?: SecurityIncidentListOptions, dbOrTx?: IamDb): Promise<SecurityIncidentRecord[]>;
+  updateIncidentStatus(input: SecurityIncidentStatusUpdate, dbOrTx?: IamDb): Promise<SecurityIncidentRecord | null>;
+  insertIncidentAction(input: SecurityIncidentActionInsert, dbOrTx?: IamDb): Promise<SecurityIncidentActionRecord>;
+  listIncidentActions(tenantId: string, incidentId: string, dbOrTx?: IamDb): Promise<SecurityIncidentActionRecord[]>;
 }
 
 export interface UsersRepository extends DialectRepository {

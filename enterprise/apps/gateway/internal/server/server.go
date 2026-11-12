@@ -88,6 +88,7 @@ type Server struct {
 	billingService        *billing.Service
 	patVerifier           *gatewayauth.PATVerifier
 	sessionGrants         *gatewayauth.SessionGrantStore
+	sessionRevocations    *gatewayauth.SessionRevocationStore
 	compliance            *residency.ComplianceStore
 	cacheService          *cache.Service
 	pricing               *metering.PricingTable
@@ -244,6 +245,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		quotaTracker:         quota.NewTracker(quotaCfgPath, quotaUsagePath, dbHandle),
 		patVerifier:          patVerifier,
 		sessionGrants:        gatewayauth.NewSessionGrantStore(dbHandle),
+		sessionRevocations:   gatewayauth.NewSessionRevocationStore(),
 		compliance:           residency.NewComplianceStore(dbHandle),
 		cacheService:         nil,
 		pricingLoader:        initPricingLoader(logger),
@@ -765,6 +767,7 @@ func (s *Server) Router() http.Handler {
 	r.Get("/internal/errors", s.handleInternalErrors)
 	r.Get("/internal/perf", s.handleInternalPerf)
 	r.Post("/internal/channels/{id}/probe", s.handleInternalChannelProbe)
+	r.Post("/internal/security/incident-action", s.handleInternalIncidentAction)
 	r.Post("/v1/chat/completions", s.handleChatCompletions)
 	r.Post("/v1/embeddings", s.handleEmbeddings)
 	r.Post("/v1/desktop/action-audit", s.handleDesktopActionAudit)
@@ -1707,6 +1710,10 @@ func (s *Server) identityFromRequest(r *http.Request) (requestIdentity, error) {
 	fromJWT, err := parseIdentityFromJWT(token)
 	if err != nil {
 		return requestIdentity{}, err
+	}
+	// SP5 incident response: 处置终止的会话即时失效（未配置+无本地吊销 = 零行为变化）。
+	if s.sessionRevocations != nil && s.sessionRevocations.IsRevoked(fromJWT.SessionID) {
+		return requestIdentity{}, errors.New("auth:session_revoked")
 	}
 	return enrichTraceFromRequest(fromJWT, r), nil
 }

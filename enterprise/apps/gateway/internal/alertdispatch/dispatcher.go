@@ -269,6 +269,16 @@ func feishuCardPayload(alert Alert) []byte {
 	if alert.TenantID != "" {
 		lines = append(lines, fmt.Sprintf("tenant: `%s`", alert.TenantID))
 	}
+	// SP5 incident-response：主体信息进卡——处置面板据此一键处置（session/PAT/user/model）。
+	if alert.UserID != "" {
+		lines = append(lines, fmt.Sprintf("user: `%s`", alert.UserID))
+	}
+	if alert.SessionID != "" {
+		lines = append(lines, fmt.Sprintf("session: `%s`", alert.SessionID))
+	}
+	if alert.Model != "" {
+		lines = append(lines, fmt.Sprintf("model: `%s`", alert.Model))
+	}
 	lines = append(lines, fmt.Sprintf("time: %s", alert.EventTime.Format(time.RFC3339)))
 	card := map[string]any{
 		"msg_type": "interactive",
