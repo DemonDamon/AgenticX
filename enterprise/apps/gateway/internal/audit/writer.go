@@ -18,6 +18,8 @@ type PolicyHit struct {
 	Severity    string `json:"severity"`
 	Action      string `json:"action"`
 	MatchedRule string `json:"matched_rule,omitempty"`
+	// Category 合规类别（politics/porn/terrorism/ad/moderation 等，SP3 合规内容审核）。
+	Category string `json:"category,omitempty"`
 }
 
 // ChannelOutcome 记录一个告警通道的分发结果（alert-dispatch SP4）。

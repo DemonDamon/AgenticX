@@ -37,6 +37,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/mcp"
 	"github.com/agenticx/enterprise/gateway/internal/mcphost"
 	"github.com/agenticx/enterprise/gateway/internal/metering"
+	"github.com/agenticx/enterprise/gateway/internal/moderation"
 	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/provider"
@@ -73,6 +74,7 @@ type Server struct {
 	virtualLoader         *virtualmodel.Loader
 	quotaTracker          *quota.Tracker
 	alertDispatcher       *alertdispatch.Dispatcher
+	moderation            *moderation.Service
 	policySnapBodyHash    string
 	policyRemoteCheckedAt time.Time
 	policySnapshotStatus  policySnapshotRuntimeStatus
@@ -260,6 +262,10 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	srv.alertDispatcher = alertdispatch.NewDispatcher(alertCfgLoader, auditWriter, logger)
 	srv.alertDispatcher.Start(nil)
 	alertdispatch.StartChainCheck(nil, cfg.AuditDir, srv.alertDispatcher, logger, 0)
+	// SP3 compliance-moderation：第三方内容安全 provider 适配层（未配置租户 = 现状等价）。
+	moderationCfgLoader := moderation.NewConfigLoader(logger)
+	srv.moderation = moderation.NewService(moderationCfgLoader, logger)
+	moderationCfgLoader.Start(nil)
 	if dbHandle != nil {
 		srv.connectorStore = connectorstore.New(dbHandle, logger)
 		if budgetReporter, err := quota.NewBudgetAlertReporter(dbHandle, logger); err != nil {
@@ -329,6 +335,11 @@ func snapshotManifestsFromRaw(raw []byte, mod time.Time) ([]policyengine.RulePac
 					Severity:  rule.Severity,
 					Message:   rule.Message,
 					AppliesTo: rule.AppliesTo,
+				}
+				// SP3 合规类别：console 侧规则把 category 存在 payload 数据通道里，
+				// 这里提升为引擎一等字段，随 HitEvent 回显到 90001/90002 与审计链。
+				if value, ok := rule.Payload["category"].(string); ok {
+					nextRule.Category = strings.TrimSpace(value)
 				}
 				switch rule.Kind {
 				case policyengine.RuleKindKeyword:
@@ -902,6 +913,15 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if reqPolicy.RedactedText != latestUserText {
 		req.Messages = replaceLastUserMessageContent(req.Messages, reqPolicy.RedactedText)
 	}
+	// SP3 compliance-moderation：本地规则通过后再外呼第三方内容安全 provider。
+	if modRes := s.enforceModeration(r.Context(), identity, "request", latestUserText, req.Model, decision, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+		if modRes.AuditFailed {
+			writeAPIError(w, openai.Internal("audit write failed"))
+			return
+		}
+		writePolicyError(w, "90001", "请求触发合规拦截", []policyengine.HitEvent{modRes.Hit})
+		return
+	}
 	estimatedInputTokens := estimateTextTokens(joinMessages(req.Messages))
 	reserveTokens := estimateTokensWithMax(estimatedInputTokens, maxTokensFromRequest(req))
 	budgetCheck, quotaReservation, ok := s.runChatQuotaGate(w, r, qctx, identity, &req, &decision, estimatedInputTokens, reserveTokens)
@@ -1011,6 +1031,15 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		if respPolicy.RedactedText != openai.ContentText(resp.Choices[0].Message.Content) {
 			resp.Choices[0].Message.Content = openai.NewStringContent(respPolicy.RedactedText)
+		}
+		// SP3 compliance-moderation：非流式在终态外呼第三方内容安全 provider。
+		if modRes := s.enforceModeration(r.Context(), identity, "response", openai.ContentText(resp.Choices[0].Message.Content), req.Model, decision, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+			if modRes.AuditFailed {
+				writeAPIError(w, openai.Internal("audit write failed"))
+				return
+			}
+			writePolicyError(w, "90002", "响应触发合规拦截", []policyengine.HitEvent{modRes.Hit})
+			return
 		}
 	}
 
@@ -1393,6 +1422,32 @@ func (s *Server) handleStream(
 		}
 		_ = push(tailChunk)
 	}
+	// SP3 compliance-moderation：流式在流尾外呼第三方内容安全 provider。
+	if modRes := s.enforceModeration(r.Context(), identity, "response", responseText, req.Model, decision, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+		partialOutputTokens := estimateTextTokens(responseText)
+		s.settleInterruptedStreamUsage(
+			identity,
+			decision,
+			estimatedInputTokens,
+			partialOutputTokens,
+			reservedTokens,
+			&budgetCheck,
+			qctx,
+			spanMeta{
+				DurationMS:     durationMSSince(startedAt),
+				Status:         "error",
+				ErrorMessage:   sanitizeTraceError("moderation blocked stream tail"),
+				PromptText:     inputText,
+				CompletionText: responseText,
+			},
+		)
+		if modRes.AuditFailed {
+			writeStreamError(w, flusher, "audit write failed")
+			return
+		}
+		writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", []policyengine.HitEvent{modRes.Hit})
+		return
+	}
 	inputTokens := estimatedInputTokens
 	outputTokens := estimateTextTokens(responseText)
 	streamUsage := openai.Usage{
@@ -1768,6 +1823,7 @@ func toAuditPolicyHits(hits []policyengine.HitEvent) []audit.PolicyHit {
 			Severity:    hit.Severity,
 			Action:      string(hit.Action),
 			MatchedRule: hit.RuleID,
+			Category:    hit.Category,
 		})
 	}
 	return out

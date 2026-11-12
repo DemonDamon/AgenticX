@@ -42,6 +42,7 @@ import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { auditListLoadPolicy } from "./audit-list-load";
 import { AlertChannelsCard } from "./alert-channels-card";
+import { ModerationCard } from "./moderation-card";
 
 const AUDIT_EVENT_TYPE_OPTIONS = [
   { value: "", label: "全部" },
@@ -437,6 +438,8 @@ function AuditPageContent({ embedded = false }: { embedded?: boolean }) {
       />
 
       <AlertChannelsCard />
+
+      <ModerationCard />
 
       <Card>
         <CardContent className="pt-5">
