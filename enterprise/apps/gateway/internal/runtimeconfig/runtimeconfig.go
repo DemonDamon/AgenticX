@@ -200,6 +200,29 @@ func (l *Loader) reportFailure(err error) {
 	l.status.ReportFailure(configstatus.DomainProviders, l.path, err)
 }
 
+// Providers 返回当前内存快照中 providers 的副本。
+// Loader 为 nil 或快照为空时返回 nil。
+func (l *Loader) Providers() []ProviderRecord {
+	if l == nil {
+		return nil
+	}
+	snap := l.snapshot()
+	if snap == nil || len(snap.providers) == 0 {
+		return nil
+	}
+	out := make([]ProviderRecord, len(snap.providers))
+	copy(out, snap.providers)
+	for i := range out {
+		if len(out[i].Models) == 0 {
+			continue
+		}
+		models := make([]ProviderModel, len(out[i].Models))
+		copy(models, out[i].Models)
+		out[i].Models = models
+	}
+	return out
+}
+
 // ResolveByModel 根据用户请求里的模型名查 admin 配置：
 //   - modelName 形如 "gpt-4o-mini"（来自请求 body.model）；
 //   - explicitProvider 来自上游代理的请求头 x-agenticx-provider，可空。

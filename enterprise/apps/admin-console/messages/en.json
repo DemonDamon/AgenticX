@@ -1748,7 +1748,7 @@
         "newChannel": "New Channel",
         "loading": "Loading…",
         "emptyTitle": "No channels",
-        "emptyDescription": "After creating channels, set GATEWAY_CHANNEL_REGISTRY=on and GATEWAY_REMOTE_CHANNELS_URL on the gateway.",
+        "emptyDescription": "After you create a channel, the gateway routes traffic across available channels by weight and priority.",
         "weightPriority": "Weight {weight} · priority {priority}",
         "models": "Models: ",
         "keyConfigured": "Configured",

@@ -129,6 +129,7 @@ export default function ChannelsPage() {
     baseUrl: "",
     apiKey: "",
     weight: "1",
+    priority: "0",
     models: "",
     providerLabel: "",
     region: "",
@@ -181,6 +182,7 @@ export default function ChannelsPage() {
           baseUrl,
           apiKey: form.apiKey,
           weight: Number(form.weight) || 1,
+          priority: Number(form.priority) || 0,
           supportedModels: models,
           region: form.region.trim() || undefined,
           metadata: buildChannelMetadata({
@@ -203,6 +205,7 @@ export default function ChannelsPage() {
         baseUrl: "",
         apiKey: "",
         weight: "1",
+        priority: "0",
         models: "",
         providerLabel: "",
         region: "",
@@ -323,10 +326,26 @@ export default function ChannelsPage() {
       const res = await fetch(`/api/admin/channels/${id}/probe`, { method: "POST" });
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "probe failed");
-      toast.success(t("toast.probeSuccess"));
-      const models = (json.data?.probe?.supported_models as string[] | undefined) ?? [];
-      if (editing?.id === id && models.length) {
-        setEditing((prev) => (prev ? { ...prev, models: models.join(", ") } : prev));
+      const probe = json.data?.probe as
+        | {
+            last_probe_error?: string;
+            key_health?: Array<{ key_ref: string; status: string; last_error?: string }>;
+            supported_models?: string[];
+          }
+        | undefined;
+      const models = probe?.supported_models ?? [];
+      const lastProbeError = probe?.last_probe_error?.trim() ?? "";
+      const unhealthyKey = probe?.key_health?.find((item) => item.status !== "healthy");
+      if (lastProbeError || unhealthyKey) {
+        const reason =
+          lastProbeError ||
+          [unhealthyKey?.key_ref, unhealthyKey?.last_error].filter((part) => !!part?.trim()).join(": ");
+        toast.error(`${t("toast.probeFailed")}：${reason}`);
+      } else {
+        toast.success(t("toast.probeSuccess"));
+        if (editing?.id === id && models.length) {
+          setEditing((prev) => (prev ? { ...prev, models: models.join(", ") } : prev));
+        }
       }
       await load();
     } catch (e) {
@@ -543,9 +562,16 @@ export default function ChannelsPage() {
               <Label>{t("modelsLabel")}</Label>
               <Input value={form.models} onChange={(e) => setForm({ ...form, models: e.target.value })} placeholder="deepseek-chat" />
             </div>
-            <div>
-              <Label>{t("weightLabel")}</Label>
-              <Input value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label>{t("weightLabel")}</Label>
+                <Input value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} />
+              </div>
+              <div>
+                <Label>{t("priorityLabel")}</Label>
+                <Input value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} />
+                <p className="mt-1 text-xs text-muted-foreground">{t("priorityHint")}</p>
+              </div>
             </div>
           </div>
           <DialogFooter>

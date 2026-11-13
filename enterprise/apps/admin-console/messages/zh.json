@@ -1748,7 +1748,7 @@
         "newChannel": "新建 Channel",
         "loading": "加载中…",
         "emptyTitle": "暂无 Channel",
-        "emptyDescription": "创建 Channel 后，在 Gateway 进程设置 GATEWAY_CHANNEL_REGISTRY=on 并配置 GATEWAY_REMOTE_CHANNELS_URL 指向 internal API。",
+        "emptyDescription": "创建 Channel 后，网关会按权重与优先级自动路由到可用渠道。",
         "weightPriority": "权重 {weight} · 优先级 {priority}",
         "models": "模型：",
         "keyConfigured": "已配置",
