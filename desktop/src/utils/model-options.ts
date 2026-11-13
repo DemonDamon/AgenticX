@@ -1,5 +1,12 @@
 import { formatModelOptionLabel, normalizeBareModelId } from "./model-display";
 
+/** Synthetic provider for opaque ids read from ~/.claude/settings.json. */
+export const CLAUDE_LIVE_SETTINGS_PROVIDER_ID = "__claude_live_settings__";
+
+export function isClaudeLiveSettingsProvider(providerId: string | null | undefined): boolean {
+  return String(providerId ?? "").trim() === CLAUDE_LIVE_SETTINGS_PROVIDER_ID;
+}
+
 export type ProviderCatalogEntry = {
   apiKey: string;
   baseUrl: string;
@@ -63,10 +70,12 @@ export function isModelInProviderCatalog(
   modelId: string,
   providers: Record<string, ProviderCatalogEntry>,
 ): boolean {
-  const entry = providers[providerId];
-  if (!entry || entry.enabled === false) return false;
   const bare = normalizeBareModelId(modelId);
   if (!bare) return false;
+  // Live Claude settings aliases may be selected even when not injected into providers.
+  if (isClaudeLiveSettingsProvider(providerId)) return true;
+  const entry = providers[providerId];
+  if (!entry || entry.enabled === false) return false;
   return listProviderVisibleModelIds(entry).some(
     (candidate) => normalizeBareModelId(candidate) === bare,
   );
@@ -78,6 +87,9 @@ export function isModelSelectable(
   modelId: string,
   providers: Record<string, ProviderCatalogEntry>,
 ): boolean {
+  if (isClaudeLiveSettingsProvider(providerId)) {
+    return Boolean(normalizeBareModelId(modelId));
+  }
   if (!isModelInProviderCatalog(providerId, modelId, providers)) return false;
   const entry = providers[providerId];
   if (!entry) return false;
@@ -143,12 +155,68 @@ export function coerceSelectableModel(
 ): { provider: string; model: string } | null {
   const providerId = provider.trim();
   const bare = normalizeBareModelId(model);
+  if (isClaudeLiveSettingsProvider(providerId) && bare) {
+    return { provider: providerId, model: bare };
+  }
   if (providerId && bare && isModelSelectable(providerId, bare, providers)) {
     const canonical =
       canonicalizeCatalogModel(providerId, bare, providers) ?? bare;
     return { provider: providerId, model: canonical };
   }
   return resolveFallbackModel(providers, preferredProvider || providerId);
+}
+
+/** Resolve WorkPanel subagent picker label/selection when provider is a harness id. */
+
+export type SubAgentModelSelection = {
+  provider: string;
+  model: string;
+  label: string;
+  /** True when provider+model are a real catalog pair the user can keep selected. */
+  selectable: boolean;
+};
+
+/**
+ * CC CLI / harness children often persist ``provider=claude-code`` (engine kind)
+ * with a bare catalog model id. Map that onto a selectable catalog pair for the
+ * WorkPanel picker so the chip does not stick on 「未选模型」.
+ */
+export function resolveSubAgentModelSelection(
+  provider: string | undefined,
+  model: string | undefined,
+  providers: Record<string, ProviderCatalogEntry>,
+): SubAgentModelSelection {
+  const providerId = String(provider ?? "").trim();
+  const bare = normalizeBareModelId(String(model ?? ""));
+  if (providerId && bare && isModelSelectable(providerId, bare, providers)) {
+    const canonical = canonicalizeCatalogModel(providerId, bare, providers) ?? bare;
+    return {
+      provider: providerId,
+      model: canonical,
+      label: formatModelOptionLabel(providerId, canonical, providers[providerId]),
+      selectable: true,
+    };
+  }
+  if (bare) {
+    const options = collectSelectableModelOptions(providers);
+    const hit = options.find((row) => normalizeBareModelId(row.model) === bare);
+    if (hit) {
+      return {
+        provider: hit.provider,
+        model: hit.model,
+        label: hit.label,
+        selectable: true,
+      };
+    }
+    // Known model id outside the current catalog — show bare id, not 「未选模型」.
+    return {
+      provider: providerId,
+      model: bare,
+      label: bare,
+      selectable: false,
+    };
+  }
+  return { provider: providerId, model: "", label: "", selectable: false };
 }
 
 export type SessionBindingModelInput = {

@@ -431,6 +431,17 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("pin-session", payload),
   setSessionModel: async (payload: { sessionId: string; provider: string; model: string }) =>
     ipcRenderer.invoke("set-session-model", payload),
+  setSessionHarness: async (payload: {
+    sessionId: string;
+    harnessId: string | null;
+    options?: Record<string, unknown>;
+  }) => ipcRenderer.invoke("set-session-harness", payload),
+  switchSessionHarness: async (payload: {
+    sessionId: string;
+    harnessId: string;
+    strategy?: string;
+    manualContext?: string;
+  }) => ipcRenderer.invoke("switch-session-harness", payload),
   loadLayout: async () => ipcRenderer.invoke("layout-get"),
   saveUiPrefs: async (payload: { theme?: "dark" | "light" | "dim"; locale?: "zh" | "en" }) =>
     ipcRenderer.invoke("ui-prefs-set", payload) as Promise<{ ok: boolean; error?: string }>,
@@ -1117,7 +1128,14 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   uninstallSkill: async (args: { name: string; source?: string }) =>
     ipcRenderer.invoke("uninstall-skill", args),
 
-  terminalSpawn: async (payload: { id: string; cwd: string; cols?: number; rows?: number }) =>
+  terminalSpawn: async (payload: {
+    id: string;
+    cwd: string;
+    cols?: number;
+    rows?: number;
+    tabId?: string;
+    shellOnly?: boolean;
+  }) =>
     ipcRenderer.invoke("terminal-spawn", payload) as Promise<{ ok: boolean; id?: string; error?: string }>,
   terminalBridgeAttach: async (payload: {
     id: string;
@@ -1136,6 +1154,18 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("terminal-write", payload) as Promise<{ ok: boolean }>,
   terminalWriteByTab: async (payload: { tabId: string; data: string }) =>
     ipcRenderer.invoke("terminal-write-by-tab", payload) as Promise<{ ok: boolean; id?: string }>,
+  terminalWritePtyByTab: async (payload: {
+    tabId: string;
+    data: string;
+    requireRegistered?: boolean;
+  }) =>
+    ipcRenderer.invoke("terminal-write-pty-by-tab", payload) as Promise<{
+      ok: boolean;
+      id?: string;
+      error?: string;
+    }>,
+  terminalHasPtyForTab: async (payload: { tabId: string; requireRegistered?: boolean }) =>
+    ipcRenderer.invoke("terminal-has-pty-for-tab", payload) as Promise<{ ok: boolean; id?: string }>,
   terminalResize: async (payload: { id: string; cols: number; rows: number }) =>
     ipcRenderer.invoke("terminal-resize", payload) as Promise<{ ok: boolean }>,
   terminalKill: async (id: string) => ipcRenderer.invoke("terminal-kill", id) as Promise<{ ok: boolean }>,

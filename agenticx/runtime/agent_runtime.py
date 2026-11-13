@@ -3980,11 +3980,17 @@ class AgentRuntime:
             persisted_metadata: Dict[str, Any] = {
                 "turn_terminal": True,
                 "terminal_reason": terminal_reason,
+                # Builtin AgenticX runtime — so UI can badge the turn even
+                # when the session later switches to an external harness.
+                "harness": "python-agent",
             }
             if terminal_metadata:
                 for key, value in terminal_metadata.items():
                     if key not in {"turn_terminal", "terminal_reason"}:
                         persisted_metadata[str(key)] = value
+            # External / override metadata may already set harness; keep it.
+            if not str(persisted_metadata.get("harness") or "").strip():
+                persisted_metadata["harness"] = "python-agent"
             hist: Dict[str, Any] = {
                 "role": "assistant",
                 "content": body,
@@ -4049,11 +4055,14 @@ class AgentRuntime:
             "text": body,
             "turn_terminal": True,
             "terminal_reason": terminal_reason,
+            "harness": "python-agent",
         }
         if terminal_metadata:
             for key, value in terminal_metadata.items():
                 if key not in {"turn_terminal", "terminal_reason"}:
                     final_data[str(key)] = value
+        if not str(final_data.get("harness") or "").strip():
+            final_data["harness"] = "python-agent"
         if sug_list:
             final_data["suggested_questions"] = list(sug_list)
         if safe_reasoning.strip():
@@ -4605,6 +4614,29 @@ class AgentRuntime:
                     _chat_history_append_deduped(session.chat_history, hist_user)
                     session.current_user_intent = _history_text or user_input
                     _should_mid_turn_persist = True
+                else:
+                    # Regenerate keeps this user row. Restamp its harness when
+                    # the caller names one, so the bubble follows the new turn.
+                    # Deferred import: harness_wiring loads session_manager,
+                    # which imports this module.
+                    harness_stamp = ""
+                    if isinstance(history_user_metadata, dict):
+                        harness_stamp = str(
+                            history_user_metadata.get("harness")
+                            or history_user_metadata.get("harness_id")
+                            or ""
+                        ).strip()
+                    if harness_stamp:
+                        from agenticx.studio.harness_wiring import (
+                            restamp_tail_user_harness,
+                        )
+
+                        if restamp_tail_user_harness(
+                            session.chat_history,
+                            harness_stamp,
+                            expected_text=ui_text,
+                        ):
+                            _should_mid_turn_persist = True
         # FR-1: append visible compaction notice after the user chat_history row
         # so reload order is [user] → [compaction notice] → [assistant].
         if pending_compaction_notice_count is not None:

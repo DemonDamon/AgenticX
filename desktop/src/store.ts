@@ -13,6 +13,10 @@ import {
   reconcilePaneModelsWithSettings as reconcilePaneModelsPure,
   resolveSessionBindingModel,
 } from "./utils/model-options";
+import {
+  coerceModelForHarness,
+  resolveActiveHarnessId,
+} from "./utils/harness-model-compat";
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
 import { nextTaskspacePanelOpenOnSessionBind } from "./utils/workspace-session-visibility";
@@ -55,6 +59,11 @@ import {
 } from "./i18n/locales";
 import type { TurnIntent } from "./utils/turn-intent";
 import { normalizeTurnIntent } from "./utils/turn-intent";
+import {
+  loadPreferredHarnessIdFromStorage,
+  persistPreferredHarnessId,
+  toStoredPreferredHarnessId,
+} from "./utils/preferred-harness";
 import { resolveAppLocale } from "./i18n/resolve-locale";
 import { i18n } from "./i18n/i18n";
 import {
@@ -201,6 +210,8 @@ export type PaneTerminalTab = {
   id: string;
   cwd: string;
   label: string;
+  /** Host PTY only — never attach cc-bridge for this tab. */
+  shellOnly?: boolean;
   /** When set, embed PTY stream from local cc-bridge (visible_tui) instead of a local shell. */
   ccBridgePty?: {
     sessionId: string;
@@ -264,6 +275,18 @@ export type ChatPane = {
   parkedScratchChats?: ScratchChat[];
   /** Harness mode for this pane's session (code_dev vs daily_office). */
   sessionMode?: "code_dev" | "daily_office";
+  /**
+   * Bound coding-agent harness for this pane (harness-control-surface SP5a).
+   * null/undefined = builtin python runtime ("python-agent").
+   */
+  harnessId?: string | null;
+  /**
+   * When false, this chat pinned its own engine via the composer picker.
+   * Settings → default harness never rewrites existing panes; this flag is
+   * kept so a composer pick that matches the default can still "follow" it
+   * for display/coercion helpers.
+   */
+  harnessFollowsPreference?: boolean;
   /** + menu turn intent: default execute / plan first / isolated copy. */
   turnIntent?: TurnIntent;
   /** True after Multitask successfully created a worktree for this pane. */
@@ -285,6 +308,17 @@ export type ChatPane = {
   runDrawerOpen?: boolean;
   /** Run id currently shown in the drawer (persists across restarts so the drawer can restore). */
   runDrawerRunId?: string | null;
+  /**
+   * CodeBuddy OAuth in progress for this session — hide CTA and show authorizing tip.
+   */
+  codebuddyLoginAuthorizingSessionId?: string | null;
+  /**
+   * OAuth finished successfully — user should retry the last message.
+   */
+  codebuddyLoginAwaitingRetrySessionId?: string | null;
+  /** Last OAuth attempt failed for this session (inline failure tip). */
+  codebuddyLoginOAuthFailedSessionId?: string | null;
+  codebuddyLoginOAuthError?: string | null;
 };
 
 /** Lifecycle for merged tool_call + tool_result rows in chat (desktop Meta pane). */
@@ -685,6 +719,8 @@ type AppState = {
   /** Near 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
   agxAccount: { loggedIn: boolean; email: string; displayName: string };
   chatStyle: ChatStyle;
+  /** Default coding-agent harness for newly created sessions (Settings → General). null = builtin. */
+  preferredHarnessId: string | null;
   themeColor: ThemeColor;
   /** Global user nickname shown on all bubbles and sent as context label (empty → 「我」). */
   userNickname: string;
@@ -805,6 +841,7 @@ type AppState = {
   setThemeColor: (color: ThemeColor) => void;
   setAgxAccount: (acct: { loggedIn: boolean; email: string; displayName: string }) => void;
   setChatStyle: (style: ChatStyle) => void;
+  setPreferredHarnessId: (harnessId: string | null) => void;
   setUserNickname: (name: string) => void;
   setUserAvatarUrl: (url: string) => void;
   setUserCubeColorwayId: (colorwayId: string) => void;
@@ -877,6 +914,7 @@ type AppState = {
         | "usage"
         | "modelSelection"
         | "id"
+        | "subAgentCluster"
       >
     > &
       Partial<MessageToolExtras>
@@ -949,6 +987,12 @@ type AppState = {
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
+  setPaneHarness: (
+    paneId: string,
+    harnessId: string | null,
+    followPreference?: boolean,
+    options?: { preserveModel?: boolean },
+  ) => void;
   setPaneTurnIntent: (paneId: string, intent: TurnIntent) => void;
   setPaneIsolateActive: (paneId: string, active: boolean) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
@@ -997,8 +1041,15 @@ type AppState = {
     paneId: string,
     cwd: string,
     labelHint?: string,
-    ccBridgePty?: PaneTerminalTab["ccBridgePty"]
-  ) => void;
+    ccBridgePty?: PaneTerminalTab["ccBridgePty"],
+    opts?: { shellOnly?: boolean },
+  ) => string | null;
+  markCodebuddyLoginAuthorizing: (paneId: string, sessionId: string | null) => void;
+  clearCodebuddyLoginAuthorizing: (paneId: string) => void;
+  markCodebuddyLoginAwaitingRetry: (paneId: string, sessionId: string | null) => void;
+  clearCodebuddyLoginAwaitingRetry: (paneId: string) => void;
+  markCodebuddyLoginOAuthFailed: (paneId: string, sessionId: string | null, error?: string) => void;
+  clearCodebuddyLoginOAuthFailed: (paneId: string) => void;
   removePaneTerminalTab: (paneId: string, tabId: string) => void;
   setActivePaneTerminalTab: (paneId: string, tabId: string | null) => void;
   accumulatePaneTokens: (paneId: string, input: number, output: number, cached?: number) => void;
@@ -1364,6 +1415,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   themeColor: loadThemeColor(),
   agxAccount: { loggedIn: false, email: "", displayName: "" },
   chatStyle: loadChatStyle(),
+  preferredHarnessId: loadPreferredHarnessIdFromStorage(),
   userNickname: loadUserNickname(),
   userAvatarUrl: loadUserAvatarUrl(),
   userCubeColorwayId: loadUserCubeColorwayId(),
@@ -1684,6 +1736,27 @@ export const useAppStore = create<AppState>((set, get) => ({
         // ignore storage errors
       }
       return { chatStyle };
+    }),
+  setPreferredHarnessId: (harnessId) =>
+    set((state) => {
+      const next = toStoredPreferredHarnessId(harnessId);
+      persistPreferredHarnessId(next);
+      // Settings default applies only to NEW chats/panes. Existing panes keep
+      // whatever engine they last used (sticky per conversation).
+      const providers = state.settings.providers;
+      const coercedActive = coerceModelForHarness(
+        providers,
+        next,
+        state.activeProvider,
+        state.activeModel,
+        state.activeProvider,
+      );
+      return {
+        preferredHarnessId: next,
+        // Do not rewrite panes here — open sessions stay on their bound harness.
+        activeProvider: (coercedActive?.provider || state.activeProvider || "").trim(),
+        activeModel: (coercedActive?.model || state.activeModel || "").trim(),
+      };
     }),
   setUserNickname: (name) =>
     set(() => {
@@ -2096,6 +2169,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           historyJumpMessageId: null,
           scratchChats: [],
           parkedScratchChats: [],
+          harnessId: state.preferredHarnessId || null,
+          harnessFollowsPreference: true,
         },
       ],
       activePaneId: paneId,
@@ -2643,6 +2718,54 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === paneId ? { ...pane, sessionMode: mode } : pane
       ),
     })),
+  setPaneHarness: (paneId, harnessId, followPreference, options) =>
+    set((state) => {
+      const nextHarness = harnessId || null;
+      const preserveModel = options?.preserveModel === true;
+      const providers = state.settings.providers;
+      const nextPanes = state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const provider = (pane.modelProvider || "").trim();
+        const model = (pane.modelName || "").trim();
+        let modelProvider = pane.modelProvider;
+        let modelName = pane.modelName;
+        if (!preserveModel && (provider || model)) {
+          const activeHarness = resolveActiveHarnessId(nextHarness, state.preferredHarnessId);
+          const coerced = coerceModelForHarness(
+            providers,
+            activeHarness,
+            provider,
+            model,
+            provider,
+          );
+          if (!coerced) {
+            modelProvider = "";
+            modelName = "";
+          } else {
+            modelProvider = coerced.provider;
+            modelName = coerced.model;
+          }
+        }
+        return {
+          ...pane,
+          harnessId: nextHarness,
+          modelProvider,
+          modelName,
+          ...(followPreference !== undefined
+            ? { harnessFollowsPreference: followPreference }
+            : {}),
+        };
+      });
+      const activePane = nextPanes.find((pane) => pane.id === state.activePaneId);
+      if (!activePane || activePane.id !== paneId) {
+        return { panes: nextPanes };
+      }
+      return {
+        panes: nextPanes,
+        activeProvider: (activePane.modelProvider || "").trim(),
+        activeModel: (activePane.modelName || "").trim(),
+      };
+    }),
   setPaneTurnIntent: (paneId, intent) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
@@ -3072,31 +3195,91 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === paneId ? { ...pane, runDrawerOpen: false, runDrawerRunId: null } : pane
       ),
     })),
-  addPaneTerminalTab: (paneId, cwd, labelHint, ccBridgePty) =>
-    set((state) => {
-      const pane = state.panes.find((p) => p.id === paneId);
-      if (!pane) return state;
-      const trimmed = (cwd || "").trim();
-      if (!trimmed) return state;
-      const baseRaw = (labelHint ?? "").trim() || trimmed.split(/[/\\]/).filter(Boolean).pop() || "terminal";
-      const sameCwd = pane.terminalTabs.filter((t) => t.cwd === trimmed).length;
-      const label = sameCwd === 0 ? baseRaw : `${baseRaw} (#${sameCwd + 1})`;
-      const id = uid();
-      const tab: PaneTerminalTab = ccBridgePty
-        ? { id, cwd: trimmed, label, ccBridgePty }
+  addPaneTerminalTab: (paneId, cwd, labelHint, ccBridgePty, opts) => {
+    const pane = get().panes.find((p) => p.id === paneId);
+    if (!pane) return null;
+    const trimmed = (cwd || "").trim();
+    if (!trimmed) return null;
+    const baseRaw = (labelHint ?? "").trim() || trimmed.split(/[/\\]/).filter(Boolean).pop() || "terminal";
+    const sameCwd = pane.terminalTabs.filter((t) => t.cwd === trimmed).length;
+    const label = sameCwd === 0 ? baseRaw : `${baseRaw} (#${sameCwd + 1})`;
+    const id = uid();
+    const shellOnly = Boolean(opts?.shellOnly) && !ccBridgePty;
+    const tab: PaneTerminalTab = ccBridgePty
+      ? { id, cwd: trimmed, label, ccBridgePty }
+      : shellOnly
+        ? { id, cwd: trimmed, label, shellOnly: true }
         : { id, cwd: trimmed, label };
-      return {
-        panes: state.panes.map((p) =>
-          p.id === paneId
-            ? {
-                ...p,
-                terminalTabs: [...p.terminalTabs, tab],
-                activeTerminalTabId: id,
-              }
-            : p
-        ),
-      };
-    }),
+    set((state) => ({
+      panes: state.panes.map((p) =>
+        p.id === paneId
+          ? {
+              ...p,
+              terminalTabs: [...p.terminalTabs, tab],
+              activeTerminalTabId: id,
+            }
+          : p
+      ),
+    }));
+    return id;
+  },
+  markCodebuddyLoginAuthorizing: (paneId, sessionId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              codebuddyLoginAuthorizingSessionId: sessionId || null,
+              codebuddyLoginOAuthFailedSessionId: null,
+              codebuddyLoginOAuthError: null,
+            }
+          : pane
+      ),
+    })),
+  clearCodebuddyLoginAuthorizing: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, codebuddyLoginAuthorizingSessionId: null } : pane
+      ),
+    })),
+  markCodebuddyLoginAwaitingRetry: (paneId, sessionId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? { ...pane, codebuddyLoginAwaitingRetrySessionId: sessionId || null }
+          : pane
+      ),
+    })),
+  clearCodebuddyLoginAwaitingRetry: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, codebuddyLoginAwaitingRetrySessionId: null } : pane
+      ),
+    })),
+  markCodebuddyLoginOAuthFailed: (paneId, sessionId, error) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              codebuddyLoginOAuthFailedSessionId: sessionId || null,
+              codebuddyLoginOAuthError: error ? String(error).slice(0, 240) : null,
+            }
+          : pane
+      ),
+    })),
+  clearCodebuddyLoginOAuthFailed: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              codebuddyLoginOAuthFailedSessionId: null,
+              codebuddyLoginOAuthError: null,
+            }
+          : pane
+      ),
+    })),
   removePaneTerminalTab: (paneId, tabId) =>
     set((state) => ({
       panes: state.panes.map((pane) => {
@@ -3110,11 +3293,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       }),
     })),
   setActivePaneTerminalTab: (paneId, tabId) =>
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId ? { ...pane, activeTerminalTabId: tabId } : pane
-      ),
-    })),
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      if (!pane || pane.activeTerminalTabId === tabId) return state;
+      return {
+        panes: state.panes.map((item) =>
+          item.id === paneId ? { ...item, activeTerminalTabId: tabId } : item
+        ),
+      };
+    }),
   addMessage: (role, content, agentId, provider, model, attachments, extras) =>
     set((state) => {
       const activePane = state.panes.find((pane) => pane.id === state.activePaneId);

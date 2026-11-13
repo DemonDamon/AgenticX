@@ -157,3 +157,6 @@ docs/agx-rules-knowledge-suite/e2e-shots/**/*.srt
 docs/managed-agent/shots/**/*.png
 docs/managed-agent/shots/**/*.mp4
 docs/managed-agent/shots/**/*.srt
+docs/enterprise-capability-platform/shots/**/*.png
+docs/enterprise-capability-platform/shots/**/*.mp4
+docs/enterprise-capability-platform/shots/**/*.srt

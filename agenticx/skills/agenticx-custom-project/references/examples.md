@@ -241,7 +241,7 @@ python3 scripts/custom_project.py plan --mode depend --stack python --name ontol
 
 `http://127.0.0.1:8765/` 是**启动服务那台机器**上的环回地址。服务跑在助手桌面（远程电脑）时，用户笔记本打不开它；让助手在他的桌面浏览器打开或截图展示。Demo UI 不是全量门户，无鉴权、无多租户，只用于本地看闭环。
 
-第四步：用户嫌页面丑，想换皮。**不要**把设计技能的正文并进 `agenticx-custom-project`；另装一个独立的设计类技能（SkillHub 发现、经用户确认后安装），在业务仓里重做 `apps/portal`。判断仍是：
+第四步：用户嫌页面丑，想换皮。在业务仓按 [frontend-ui.md](frontend-ui.md) 用 shadcn + Bits 重做或升级 `apps/portal`（同一框架，不跨 React/Vue 混装）。可另装独立设计类技能做布局建议，但不要把第三方技能全文并进本技能。判断仍是：
 
 ```bash
 python3 scripts/custom_project.py classify --kind style --where business

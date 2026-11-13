@@ -83,6 +83,12 @@ import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { ContextUsageButton } from "./ContextUsagePopup";
+import { PaneHarnessPicker } from "./HarnessPicker";
+import {
+  bindPreferredHarnessToSession,
+  readSessionHarnessBinding,
+  restorePaneHarnessFromSession,
+} from "../utils/preferred-harness";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import {
   NEAR_WORKSPACE_OPEN_PREVIEW,
@@ -125,6 +131,7 @@ import { parkTrailingReasoningInProcess, resolveProcessFoldRange } from "./messa
 import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
+  isSessionBusyElsewhereError,
 } from "../utils/noisy-chat-messages";
 import {
   ATTACHMENT_ROUTING_OFF,
@@ -188,6 +195,7 @@ import {
 } from "../utils/group-sender-cluster";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
+import { resolveMessageHarnessId, stampUserMessageHarnessMetadata } from "../utils/harness-display";
 import { CitationSourcesCard } from "./messages/WebSearchSources";
 import { GroupExpertActivityCard } from "./messages/GroupExpertActivityCard";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
@@ -340,7 +348,7 @@ import {
   resolvePendingToolName,
   type PendingToolResult,
 } from "../utils/pending-tool-result";
-import { injectLiveSubAgentClusterAnchors } from "../utils/subagent-cluster-inline";
+import { injectLiveSubAgentClusterAnchors, upsertLiveSubAgentClusterAnchor } from "../utils/subagent-cluster-inline";
 import {
   buildSubAgentFromRunRecord,
   hydrateSessionSubAgentsFromDisk,
@@ -432,11 +440,21 @@ import {
 } from "../utils/model-hover-blurb";
 import { getProviderDisplayName } from "../utils/provider-display";
 import {
+  CLAUDE_LIVE_SETTINGS_PROVIDER_ID,
   collectSelectableModelOptions,
   coerceSelectableModel,
+  isClaudeLiveSettingsProvider,
   isModelSelectable,
   isProviderCredentialed,
 } from "../utils/model-options";
+import {
+  coerceModelForHarness,
+  collectHarnessModelOptions,
+  enrichHarnessModelOptionsWithClaudeLive,
+  evaluateModelForHarness,
+  resolveActiveHarnessId,
+  type HarnessModelDisableReason,
+} from "../utils/harness-model-compat";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { shouldAutoApproveConfirm } from "../utils/confirm-scope";
 import { sessionCreateAvatarId } from "../utils/session-create-avatar";
@@ -458,6 +476,19 @@ import {
   stopAllWbBridgeProgressPolls,
   stopWbBridgeProgressPoll,
 } from "../utils/wb-bridge-progress";
+import {
+  pickLoginCwd,
+  assistantTurnNeedsCodebuddyLogin,
+  paneAwaitingCodebuddyLoginRetry,
+  paneCodebuddyLoginSessionActive,
+  sessionShowsCodebuddyLoginPrompt,
+} from "../utils/codebuddy-login";
+import {
+  refreshCodebuddyHarnessAfterOAuth,
+  startCodebuddyOAuthLogin,
+  waitForCodebuddyOAuth,
+} from "../utils/codebuddy-oauth-login";
+import { CodebuddyLoginPrompt } from "./messages/CodebuddyLoginPrompt";
 import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 import {
@@ -1380,15 +1411,34 @@ function clampFixedPopoverTop(top: number, height: number, margin = PANE_MODEL_P
   return nextTop;
 }
 
+
+function harnessModelDisableLabel(
+  reason: HarnessModelDisableReason | undefined,
+  t: (key: string) => string,
+): string {
+  if (reason === "embedding_unsupported") return t("model.harnessEmbeddingUnsupported");
+  if (reason === "ollama_unsupported") return t("model.harnessOllamaUnsupported");
+  return t("model.harnessNoModelOption");
+}
+
 function PaneModelPicker({ paneId }: { paneId: string }) {
   const { t } = useTranslation("chat");
   const settings = useAppStore((s) => s.settings);
+  const apiBase = useAppStore((s) => s.apiBase);
+  const apiToken = useAppStore((s) => s.apiToken);
   const pickerLock = modelPickerLock(useAppStore((s) => s.attachmentRoutingLock));
   const setPaneModel = useAppStore((s) => s.setPaneModel);
+  const clearCodebuddyLoginAwaitingRetry = useAppStore((s) => s.clearCodebuddyLoginAwaitingRetry);
   const setPaneReasoningEffort = useAppStore((s) => s.setPaneReasoningEffort);
   const setPaneThinkingEnabled = useAppStore((s) => s.setPaneThinkingEnabled);
   const setPaneContextWindow = useAppStore((s) => s.setPaneContextWindow);
   const paneModel = useAppStore((s) => s.panes.find((pane) => pane.id === paneId));
+  const preferredHarnessId = useAppStore((s) => s.preferredHarnessId);
+  const activeHarnessId = useMemo(
+    () => resolveActiveHarnessId(paneModel?.harnessId, preferredHarnessId),
+    [paneModel?.harnessId, preferredHarnessId],
+  );
+  const [claudeLiveModelIds, setClaudeLiveModelIds] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -1430,8 +1480,39 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (activeHarnessId !== "claude-code") {
+      setClaudeLiveModelIds([]);
+      return;
+    }
+    const base = String(apiBase ?? "").trim().replace(/\/$/, "");
+    if (!base) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const headers: Record<string, string> = {};
+        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
+        const resp = await fetch(`${base}/api/claude-code/settings/live-models`, { headers });
+        if (!resp.ok) return;
+        const data = (await resp.json()) as { ok?: boolean; models?: unknown };
+        if (cancelled || !data?.ok || !Array.isArray(data.models)) return;
+        setClaudeLiveModelIds(
+          data.models.map((m) => String(m ?? "").trim()).filter(Boolean),
+        );
+      } catch {
+        if (!cancelled) setClaudeLiveModelIds([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeHarnessId, apiBase, apiToken, open]);
+
   const handleSelect = (provider: string, model: string) => {
     setPaneModel(paneId, provider, model);
+    if (activeHarnessId === "codebuddy") {
+      clearCodebuddyLoginAwaitingRetry(paneId);
+    }
     setOpen(false);
     // Persist the current pane model as global fallback for restarts.
     void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model });
@@ -1441,12 +1522,109 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     if (sid) {
       void window.agenticxDesktop.setSessionModel({ sessionId: sid, provider, model });
     }
+    // cc-switch: sync Near provider+model into the active harness native config
+    // (Claude Code / Codex / CodeBuddy). Never for builtin or live aliases.
+    const syncableHarness =
+      activeHarnessId === "claude-code"
+      || activeHarnessId === "codex"
+      || activeHarnessId === "codebuddy";
+    if (
+      syncableHarness
+      && !(activeHarnessId === "claude-code" && isClaudeLiveSettingsProvider(provider))
+    ) {
+      const base = String(apiBase ?? "").trim().replace(/\/$/, "");
+      if (base) {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
+        void fetch(`${base}/api/harness/settings/apply`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            harness_id: activeHarnessId,
+            provider,
+            model,
+          }),
+        })
+          .then(async (resp) => {
+            if (!resp.ok) return;
+            if (activeHarnessId !== "claude-code") return;
+            try {
+              const data = (await resp.json()) as { models?: unknown };
+              if (Array.isArray(data.models)) {
+                setClaudeLiveModelIds(
+                  data.models.map((m) => String(m ?? "").trim()).filter(Boolean),
+                );
+              }
+            } catch {
+              /* ignore */
+            }
+          })
+          .catch(() => {
+            /* non-blocking */
+          });
+      }
+    }
   };
 
-  const options = useMemo(
-    () => collectSelectableModelOptions(settings.providers),
-    [settings.providers],
+  const options = useMemo(() => {
+    const base = collectHarnessModelOptions(settings.providers, activeHarnessId);
+    return enrichHarnessModelOptionsWithClaudeLive(
+      base,
+      activeHarnessId,
+      claudeLiveModelIds,
+    );
+  }, [settings.providers, activeHarnessId, claudeLiveModelIds]);
+  const availableOptions = useMemo(
+    () => options.filter((row) => row.available),
+    [options],
   );
+
+  // Preferred/pane harness changed → drop selections the new harness cannot use.
+  useEffect(() => {
+    const provider = (paneModel?.modelProvider || "").trim();
+    const model = (paneModel?.modelName || "").trim();
+    if (!provider && !model) return;
+    const verdict = evaluateModelForHarness(
+      activeHarnessId,
+      provider,
+      model,
+      settings.providers,
+    );
+    if (verdict.available) return;
+    const fallback = coerceModelForHarness(
+      settings.providers,
+      activeHarnessId,
+      provider,
+      model,
+      provider,
+    );
+    if (!fallback) {
+      setPaneModel(paneId, "", "");
+      return;
+    }
+    if (fallback.provider === provider && fallback.model === model) return;
+    setPaneModel(paneId, fallback.provider, fallback.model);
+    void window.agenticxDesktop.saveConfig({
+      activeProvider: fallback.provider,
+      activeModel: fallback.model,
+    });
+    const sid = String(paneModel?.sessionId ?? "").trim();
+    if (sid) {
+      void window.agenticxDesktop.setSessionModel({
+        sessionId: sid,
+        provider: fallback.provider,
+        model: fallback.model,
+      });
+    }
+  }, [
+    activeHarnessId,
+    paneId,
+    paneModel?.modelName,
+    paneModel?.modelProvider,
+    paneModel?.sessionId,
+    setPaneModel,
+    settings.providers,
+  ]);
 
   /**
    * Group by vendor. Seed every enabled+credentialed provider first so「已启动」渠道
@@ -1459,6 +1637,9 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
       if (!isProviderCredentialed(entry)) continue;
       byProvider.set(provider, []);
     }
+    if (options.some((opt) => isClaudeLiveSettingsProvider(opt.provider))) {
+      byProvider.set(CLAUDE_LIVE_SETTINGS_PROVIDER_ID, []);
+    }
     for (const opt of options) {
       const bucket = byProvider.get(opt.provider);
       if (bucket) bucket.push(opt);
@@ -1466,10 +1647,12 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     }
     return [...byProvider.entries()].map(([provider, items]) => ({
       provider,
-      providerLabel: getProviderDisplayName(provider, settings.providers[provider]),
+      providerLabel: isClaudeLiveSettingsProvider(provider)
+        ? t("model.claudeLiveSettings")
+        : getProviderDisplayName(provider, settings.providers[provider]),
       items,
     }));
-  }, [options, settings.providers]);
+  }, [options, settings.providers, t]);
 
   /** Same model id served by several vendors — only then does the row need its vendor spelled out. */
   const ambiguousModelNames = useMemo(() => {
@@ -1488,15 +1671,29 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   const currentSelectable =
     Boolean(currentModel)
     && Boolean(currentProvider)
-    && isModelSelectable(currentProvider, currentModel, settings.providers);
+    && evaluateModelForHarness(
+      activeHarnessId,
+      currentProvider,
+      currentModel,
+      settings.providers,
+    ).available;
   const currentParts = useMemo(() => {
     if (!currentSelectable) return null;
+    if (isClaudeLiveSettingsProvider(currentProvider)) {
+      return {
+        modelName: currentModel,
+        providerLabel: t("model.claudeLiveSettings"),
+      };
+    }
     return formatModelDisplayParts(currentProvider, currentModel, settings.providers[currentProvider]);
-  }, [currentSelectable, currentModel, currentProvider, settings.providers]);
+  }, [currentSelectable, currentModel, currentProvider, settings.providers, t]);
   const currentLabel = useMemo(() => {
     if (!currentModel) return t("model.unselected");
     if (!currentProvider) return currentModel;
     if (!currentSelectable) return t("model.unselected");
+    if (isClaudeLiveSettingsProvider(currentProvider)) {
+      return `${t("model.claudeLiveSettings")}/${currentModel}`;
+    }
     const entry = settings.providers[currentProvider];
     return formatModelOptionLabel(currentProvider, currentModel, entry);
   }, [currentModel, currentProvider, currentSelectable, settings.providers, t]);
@@ -1744,6 +1941,10 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                               const isActive =
                                 opt.provider === currentProvider && opt.model === currentModel;
                               const isHover = hoverKey === rowKey;
+                              const disabled = !opt.available;
+                              const disableReason = disabled
+                                ? harnessModelDisableLabel(opt.reason, t)
+                                : "";
                               const { modelName } = formatModelDisplayParts(
                                 opt.provider,
                                 opt.model,
@@ -1756,21 +1957,34 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                                   type="button"
                                   role="option"
                                   aria-selected={isActive}
+                                  aria-disabled={disabled}
+                                  disabled={disabled}
+                                  title={disabled ? disableReason : undefined}
                                   className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2.5 text-left text-[13px] leading-5 transition-colors ${
-                                    isActive || isHover
-                                      ? "bg-surface-cardStrong"
-                                      : "hover:bg-surface-hover"
+                                    disabled
+                                      ? "cursor-not-allowed opacity-40"
+                                      : isActive || isHover
+                                        ? "bg-surface-cardStrong"
+                                        : "hover:bg-surface-hover"
                                   }`}
                                   onMouseEnter={(e) => {
+                                    if (disabled) return;
                                     cancelClearHover();
                                     setHoverKey(rowKey);
                                     setHoverSubMenu(null);
                                     setHoverRowTop(e.currentTarget.getBoundingClientRect().top);
                                   }}
-                                  onClick={() => handleSelect(opt.provider, opt.model)}
+                                  onClick={() => {
+                                    if (disabled) return;
+                                    handleSelect(opt.provider, opt.model);
+                                  }}
                                 >
                                   <ProviderGlyph provider={opt.provider} model={opt.model} />
-                                  <span className="min-w-0 flex-1 truncate pl-px font-semibold text-text-strong">
+                                  <span
+                                    className={`min-w-0 flex-1 truncate pl-px font-semibold ${
+                                      disabled ? "text-text-faint" : "text-text-strong"
+                                    }`}
+                                  >
                                     {modelName}
                                   </span>
                                   <span className="flex w-3.5 shrink-0 justify-end">
@@ -1792,6 +2006,13 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                 )}
               </div>
               <div className="shrink-0 border-t border-border p-1.5">
+                {options.length > 0 && availableOptions.length < options.length ? (
+                  <div className="mb-1.5 px-1 text-center text-[11px] leading-relaxed text-text-faint">
+                    {availableOptions.length === 0
+                      ? t("model.harnessNoneCompatible")
+                      : t("model.harnessFilteredHint")}
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-surface-cardStrong px-2.5 py-2 text-[12.5px] font-medium text-text-strong transition-colors hover:bg-surface-hover"
@@ -2972,6 +3193,75 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const { t: tw } = useTranslation("workspace");
   const locale = useAppStore((s) => s.locale);
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
+  const markCodebuddyLoginAuthorizing = useAppStore((s) => s.markCodebuddyLoginAuthorizing);
+  const clearCodebuddyLoginAuthorizing = useAppStore((s) => s.clearCodebuddyLoginAuthorizing);
+  const markCodebuddyLoginAwaitingRetry = useAppStore((s) => s.markCodebuddyLoginAwaitingRetry);
+  const clearCodebuddyLoginAwaitingRetry = useAppStore((s) => s.clearCodebuddyLoginAwaitingRetry);
+  const markCodebuddyLoginOAuthFailed = useAppStore((s) => s.markCodebuddyLoginOAuthFailed);
+  const clearCodebuddyLoginOAuthFailed = useAppStore((s) => s.clearCodebuddyLoginOAuthFailed);
+  const codebuddyLoginAuthorizing = useMemo(
+    () =>
+      paneCodebuddyLoginSessionActive(
+        pane.sessionId,
+        pane.codebuddyLoginAuthorizingSessionId,
+      ),
+    [pane.sessionId, pane.codebuddyLoginAuthorizingSessionId],
+  );
+  const codebuddyLoginAwaitingRetry = useMemo(
+    () =>
+      paneAwaitingCodebuddyLoginRetry(
+        pane.sessionId,
+        pane.codebuddyLoginAwaitingRetrySessionId,
+      ),
+    [pane.sessionId, pane.codebuddyLoginAwaitingRetrySessionId],
+  );
+  const codebuddyLoginOAuthFailed = useMemo(
+    () =>
+      paneCodebuddyLoginSessionActive(
+        pane.sessionId,
+        pane.codebuddyLoginOAuthFailedSessionId,
+      ),
+    [pane.sessionId, pane.codebuddyLoginOAuthFailedSessionId],
+  );
+
+  useEffect(() => {
+    if (!pane.codebuddyLoginAwaitingRetrySessionId) return;
+    const rows = pane.messages ?? [];
+    if (!sessionShowsCodebuddyLoginPrompt(rows, pane.harnessId)) {
+      clearCodebuddyLoginAwaitingRetry(pane.id);
+    }
+  }, [
+    clearCodebuddyLoginAwaitingRetry,
+    pane.codebuddyLoginAwaitingRetrySessionId,
+    pane.harnessId,
+    pane.id,
+    pane.messages,
+  ]);
+
+  const showCodebuddyLogin = useMemo(() => {
+    const rows = pane.messages ?? [];
+    if (codebuddyLoginAuthorizing || codebuddyLoginAwaitingRetry || codebuddyLoginOAuthFailed) {
+      return false;
+    }
+    if (!sessionShowsCodebuddyLoginPrompt(rows, pane.harnessId)) return false;
+    let lastAssistant: (typeof rows)[number] | undefined;
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      if (rows[index]?.role === "assistant") {
+        lastAssistant = rows[index];
+        break;
+      }
+    }
+    if (lastAssistant && assistantTurnNeedsCodebuddyLogin(lastAssistant, rows, pane.harnessId)) {
+      return false;
+    }
+    return true;
+  }, [
+    pane.messages,
+    pane.harnessId,
+    codebuddyLoginAuthorizing,
+    codebuddyLoginAwaitingRetry,
+    codebuddyLoginOAuthFailed,
+  ]);
   const { deliverExpertInstruction } = usePaneNavigation();
   const paneSortableListeners = usePaneSortableHandle();
   const panes = useAppStore((s) => s.panes);
@@ -3024,6 +3314,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const openSidePanel = useAppStore((s) => s.openSidePanel);
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
+  const setActivePaneTerminalTab = useAppStore((s) => s.setActivePaneTerminalTab);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const addPaneMessage = useAppStore((s) => s.addPaneMessage);
   const updatePaneMessageByToolCallId = useAppStore((s) => s.updatePaneMessageByToolCallId);
@@ -3337,6 +3628,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const loadingOlderMessagesRef = useRef(false);
   const sessionBootstrapRef = useRef("");
   const freshlyCreatedSessionRef = useRef("");
+  /** Skip sticky restore while a brand-new session is still receiving Settings preferred. */
+  const stickyHarnessSkipRef = useRef("");
   const sessionBootstrapInflightRef = useRef("");
   const sessionBootstrapAttemptRef = useRef(0);
   const [sessionBootstrapRetryNonce, setSessionBootstrapRetryNonce] = useState(0);
@@ -3635,6 +3928,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [sessionFindOpen, setSessionFindOpen] = useState(false);
   /** One-shot focus for WorkPanel tabs (summary / workspace / terminal / browser). */
   const [workPanelFocus, setWorkPanelFocus] = useState<WorkPanelFocus>(null);
+  const clearWorkPanelFocus = useCallback(() => setWorkPanelFocus(null), []);
   const [destinationChooserOpen, setDestinationChooserOpen] = useState(false);
   const [railKind, setRailKind] = useState<DestinationKind | null>(null);
   /** Trae-style: enlarge work panel to dominate the chat pane (main content). */
@@ -3662,6 +3956,90 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [crewSettingsAvatarId, isDedicatedAvatarPane, pane?.avatarId, avatars]);
   const paneRef = useRef<HTMLDivElement | null>(null);
   const [paneWidth, setPaneWidth] = useState(0);
+  const startCodebuddyLogin = useCallback(() => {
+    void (async () => {
+      const sid = String(pane.sessionId || "").trim();
+      let cwd = "~";
+      if (sid && typeof window.agenticxDesktop?.listTaskspaces === "function") {
+        try {
+          const listed = await window.agenticxDesktop.listTaskspaces(sid);
+          if (listed.ok && Array.isArray(listed.workspaces)) {
+            cwd = pickLoginCwd(listed.workspaces, pane.activeTaskspaceId);
+          }
+        } catch {
+          cwd = "~";
+        }
+      }
+      clearCodebuddyLoginOAuthFailed(pane.id);
+      clearCodebuddyLoginAwaitingRetry(pane.id);
+      const started = await startCodebuddyOAuthLogin({
+        apiBase,
+        apiToken,
+        cwd,
+      });
+      const jobId = started.snapshot?.job_id;
+      if (!started.ok || !jobId) {
+        markCodebuddyLoginOAuthFailed(pane.id, pane.sessionId, started.error || started.snapshot?.error);
+        setAttachToastMessage(
+          started.error || started.snapshot?.error || t("harness.codebuddyLogin.oauthStartFailed"),
+        );
+        setAttachToastOpen(true);
+        return;
+      }
+      const final = await waitForCodebuddyOAuth({
+        apiBase,
+        apiToken,
+        jobId,
+        onAuthorizing: () => markCodebuddyLoginAuthorizing(pane.id, pane.sessionId),
+        openAuthorizeUrl: (url) => {
+          const opened = ensureInAppBrowserOpenRef.current(url);
+          if (opened.ok) return { ok: true as const };
+          if (typeof window.agenticxDesktop?.openExternal === "function") {
+            void window.agenticxDesktop.openExternal(url);
+            return { ok: true as const };
+          }
+          return { ok: false as const, error: opened.error || "browser_open_failed" };
+        },
+      });
+      clearCodebuddyLoginAuthorizing(pane.id);
+      if (final.status === "success") {
+        const sid = String(pane.sessionId || "").trim();
+        if (sid) {
+          const refreshed = await refreshCodebuddyHarnessAfterOAuth({
+            apiBase,
+            apiToken,
+            sessionId: sid,
+          });
+          if (!refreshed.ok) {
+            setAttachToastMessage(
+              refreshed.error || t("harness.codebuddyLogin.harnessRefreshFailed"),
+            );
+            setAttachToastOpen(true);
+          }
+        }
+        markCodebuddyLoginAwaitingRetry(pane.id, pane.sessionId);
+        return;
+      }
+      markCodebuddyLoginOAuthFailed(
+        pane.id,
+        pane.sessionId,
+        final.error || t("harness.codebuddyLogin.oauthFailedGeneric"),
+      );
+    })();
+  }, [
+    apiBase,
+    apiToken,
+    clearCodebuddyLoginAwaitingRetry,
+    clearCodebuddyLoginAuthorizing,
+    clearCodebuddyLoginOAuthFailed,
+    markCodebuddyLoginAuthorizing,
+    markCodebuddyLoginAwaitingRetry,
+    markCodebuddyLoginOAuthFailed,
+    pane.activeTaskspaceId,
+    pane.id,
+    pane.sessionId,
+    t,
+  ]);
   const openScratchFromDraft = useCallback(
     (draft: ScratchChatDraft) => {
       const { chatId } = upsertScratchChat(pane.id, draft);
@@ -8214,6 +8592,32 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [pane.sessionId, syncStreamingUiForCurrentSession]
   );
 
+  const restoreStickyHarness = useCallback(
+    async (paneIdForBind: string, sessionIdForBind: string) => {
+      const base = useAppStore.getState().apiBase || apiBase;
+      const token = useAppStore.getState().apiToken || apiToken;
+      await restorePaneHarnessFromSession(paneIdForBind, sessionIdForBind, {
+        getPane: () => useAppStore.getState().panes.find((item) => item.id === paneIdForBind),
+        readBinding: () => readSessionHarnessBinding(base, token, sessionIdForBind),
+        setPaneHarness: (id, harnessId, follow, options) =>
+          useAppStore.getState().setPaneHarness(id, harnessId, follow, options),
+        rebindSessionHarness: (harnessId) =>
+          window.agenticxDesktop.setSessionHarness({
+            sessionId: sessionIdForBind,
+            harnessId,
+          }),
+      });
+    },
+    [apiBase, apiToken],
+  );
+
+  useEffect(() => {
+    const sid = (pane.sessionId || "").trim();
+    if (!sid) return;
+    if (stickyHarnessSkipRef.current === sid) return;
+    void restoreStickyHarness(pane.id, sid);
+  }, [pane.id, pane.sessionId, restoreStickyHarness]);
+
   const retryUserMessage = useCallback(
     async (msg: Message) => {
       if (msg.role !== "user") return;
@@ -8255,7 +8659,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (idx < 0) return;
         const userOccurrence = countUserOccurrenceThrough(msgs, idx, msg.content);
         const expectRemoved = hasTrailingTurnMessages(msgs, idx);
-        const remainingRetry = msgs.slice(0, idx + 1);
+        await restoreStickyHarness(pane.id, sid);
+        const harnessForStamp = useAppStore.getState().panes.find((item) => item.id === pane.id)?.harnessId;
+        const remainingRetry = msgs.slice(0, idx + 1).map((row, rowIdx) => {
+          if (rowIdx !== idx || harnessForStamp === undefined) return row;
+          return {
+            ...row,
+            metadata: stampUserMessageHarnessMetadata(row.metadata, harnessForStamp),
+          };
+        });
         const streamWasActive = Boolean(sessionStreamStateRef.current[sid]?.active);
 
         // Optimistic: drop trailing turns and show generating chrome before any persist.
@@ -8316,6 +8728,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       setPaneMessages,
       syncStreamingUiForCurrentSession,
       truncateSessionAtUserMessage,
+      restoreStickyHarness,
     ]
   );
 
@@ -8985,6 +9398,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         omitSuggestedQuestions?: boolean;
         actionRhythmBodyTail?: boolean;
         holdToolGroupProgress?: boolean;
+        turnHarnessId?: string | null;
       }
     ) => {
       const reactCol = opts.reactWorkColumn ?? false;
@@ -8994,6 +9408,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const omitSuggestedQuestions = opts.omitSuggestedQuestions ?? false;
       const actionRhythmBodyTail = opts.actionRhythmBodyTail ?? false;
       const holdToolGroupProgress = opts.holdToolGroupProgress ?? false;
+      const turnHarnessId = opts.turnHarnessId ?? null;
       if (row.kind === "message") {
         const message = row.message;
         const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
@@ -9082,6 +9497,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 }
                 setWorkPanelFocus(replayFocus);
               }}
+              turnHarnessId={
+                message.role === "user"
+                  ? (turnHarnessId ?? resolveMessageHarnessId(message.metadata))
+                  : null
+              }
               assistantName={imAssistantName}
               assistantAvatarUrl={imAssistantAvatarUrl}
               userName={imUserName}
@@ -9179,6 +9599,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               onResolveActionConfirmation={(confirmation, decision) =>
                 void resolveActionConfirmation(confirmation, decision, "button")
               }
+              activeHarnessId={pane.harnessId}
+              onCodebuddyLogin={startCodebuddyLogin}
+              codebuddyLoginAwaitingRetry={codebuddyLoginAwaitingRetry}
+              codebuddyLoginAuthorizing={codebuddyLoginAuthorizing}
+              codebuddyLoginOAuthFailed={codebuddyLoginOAuthFailed}
+              codebuddyLoginOAuthError={pane.codebuddyLoginOAuthError}
             />
             </MarkdownContext.Provider>
           </div>
@@ -9227,7 +9653,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       topLevelRowsIm !== null
         ? topLevelRowsIm.map((seg, segIdx) => {
             if (seg.kind === "user") {
-              return renderGroupedRow({ kind: "message", message: seg.message }, segIdx, {});
+              const next = topLevelRowsIm?.[segIdx + 1];
+              let replyHarness: string | null = resolveMessageHarnessId(seg.message.metadata);
+              if (!replyHarness && next?.kind === "react") {
+                for (let i = next.block.workMessages.length - 1; i >= 0; i--) {
+                  const m = next.block.workMessages[i];
+                  if (m.role !== "assistant") continue;
+                  replyHarness = resolveMessageHarnessId(m.metadata);
+                  if (replyHarness) break;
+                }
+              }
+              return renderGroupedRow(
+                { kind: "message", message: seg.message },
+                segIdx,
+                { turnHarnessId: replyHarness },
+              );
             }
             const { workMessages, finalAssistant } = seg.block;
             const groupedWork = parkTrailingReasoningInProcess(groupConsecutiveToolMessages(workMessages));
@@ -9512,11 +9952,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               (acc, groupedRow, index) => (groupedRow.kind === "tool_group" ? index : acc),
               -1,
             );
+            let turnHarnessId: string | null = null;
+            if (row.kind === "message" && row.message.role === "user") {
+              turnHarnessId = resolveMessageHarnessId(row.message.metadata);
+              if (!turnHarnessId) {
+                for (let j = rowIdx + 1; j < groupedVisibleMessages.length; j++) {
+                  const later = groupedVisibleMessages[j];
+                  if (later.kind === "message" && later.message.role === "user") break;
+                  if (later.kind === "message" && later.message.role === "assistant") {
+                    turnHarnessId = resolveMessageHarnessId(later.message.metadata);
+                    if (turnHarnessId) break;
+                  }
+                }
+              }
+            }
             return renderGroupedRow(row, rowIdx, {
               holdToolGroupProgress:
                 row.kind === "tool_group" &&
                 rowIdx === lastToolGroupIdx &&
                 shouldHoldToolGroupProgress(pane.messages ?? [], row.messages, isStreamingCurrentSession),
+              turnHarnessId,
             });
           });
 
@@ -10016,6 +10471,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const pendingSpaceIdRef = useRef<string | null>(null);
 
   /** Materialize a lazy session (fresh topic / no sessionId yet) with full create params. */
+
+  const applyPreferredHarness = useCallback(
+    async (paneIdForBind: string, sessionIdForBind: string) => {
+      const sid = sessionIdForBind.trim();
+      if (sid) stickyHarnessSkipRef.current = sid;
+      const state = useAppStore.getState();
+      const current = state.panes.find((item) => item.id === paneIdForBind);
+      try {
+        await bindPreferredHarnessToSession(paneIdForBind, sessionIdForBind, {
+          getPreferredHarnessId: () =>
+            current && current.harnessId !== undefined
+              ? current.harnessId
+              : state.preferredHarnessId,
+          setPaneHarness: state.setPaneHarness,
+          setSessionHarness: (payload) => window.agenticxDesktop.setSessionHarness(payload),
+        });
+      } finally {
+        if (sid && stickyHarnessSkipRef.current === sid) stickyHarnessSkipRef.current = "";
+      }
+    },
+    [],
+  );
+
+
   const materializeLazySession = useCallback(async (): Promise<string | null> => {
     const existing = (pane.sessionId || "").trim();
     if (existing) return existing;
@@ -10047,6 +10526,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         provider: chatProvider || undefined,
         model: chatModel || undefined,
       });
+      await applyPreferredHarness(pane.id, newSessionId);
       clearPaneAwaitingFreshSession(pane.id);
       useAppStore.getState().bumpSessionCatalogRevision();
       window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
@@ -10086,6 +10566,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setPaneSessionId,
     setPaneSessionMode,
     setPaneContextInherited,
+    applyPreferredHarness,
   ]);
 
   const composerWorkspace = useComposerWorkspaceFolders({
@@ -10464,6 +10945,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           pollSessionSidRef.current = requestSessionId;
           freshlyCreatedSessionRef.current = requestSessionId;
           setPaneSessionId(pane.id, requestSessionId);
+          void applyPreferredHarness(pane.id, requestSessionId);
           addPaneMessage(pane.id, "tool", "⚠️ 检测到会话冲突，已自动切换到独立会话。", "meta");
         }
       } catch (err) {
@@ -10588,6 +11070,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
     }
 
+    if (requestSessionId && !isContinuation) {
+      await restoreStickyHarness(pane.id, requestSessionId);
+    }
+
     if (targetAgentId === "meta") {
       if (!suppressUserEcho) {
         const userEchoContent =
@@ -10606,6 +11092,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             metadata: {
               client_turn_id: clientTurnId,
               ...(options?.commandName ? { command_name: options.commandName } : {}),
+              ...(() => {
+                const liveHarness = useAppStore.getState().panes.find((item) => item.id === pane.id)?.harnessId;
+                if (liveHarness === undefined) return {};
+                return stampUserMessageHarnessMetadata(undefined, liveHarness);
+              })(),
             },
             ...(() => {
               const payload = buildQuotedPayload();
@@ -11103,6 +11594,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           requestSessionId = created.session_id;
           freshlyCreatedSessionRef.current = requestSessionId;
           setPaneSessionId(pane.id, requestSessionId);
+          void applyPreferredHarness(pane.id, requestSessionId);
 
           try {
             const rw = await window.agenticxDesktop.loadWechatBinding();
@@ -11154,6 +11646,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
+      let pendingFinalHarness: string | undefined;
+      let pendingCodebuddyLoginRequired = false;
       /** Last-round truncation marker (rounds_exhausted) carried by FINAL data. */
       let pendingFinalRoundsExhausted: { round: number; maxRounds: number } | null = null;
       let pendingReferences: SearchReference[] = [];
@@ -12711,6 +13205,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                           : "已启动",
                     }
                   );
+                  // Cross-harness CB↔CC: also pin a live Agent 蜂群 card even if
+                  // synthetic spawn_subagent tool rows are delayed/missed.
+                  const clusterId = String(payload.data?.cluster_id ?? "").trim();
+                  if (clusterId) {
+                    const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+                    if (pan && isTargetSessionStillActive()) {
+                      const next = upsertLiveSubAgentClusterAnchor(
+                        pan.messages,
+                        {
+                          clusterId,
+                          runIds: [String(subId)],
+                          title: String(payload.data?.cluster_title ?? "").trim() || undefined,
+                        },
+                        requestSessionId || undefined,
+                      );
+                      if (next !== pan.messages) setPaneMessages(pane.id, next);
+                    }
+                  }
                 }
                 if (isDelegation && avatarSessionId && !isGroupPane) {
                   const dlgName = String(payload.data?.name ?? "").trim();
@@ -12823,6 +13335,49 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
             }
             if (payload.type === "final") {
+              // Near CB↔CC final may carry subagent_cluster for Agent 蜂群 card.
+              if (eventAgentId === "meta") {
+                const rawCluster = payload.data?.subagent_cluster;
+                if (rawCluster && typeof rawCluster === "object") {
+                  const clusterId = String(
+                    (rawCluster as { cluster_id?: unknown; clusterId?: unknown }).cluster_id
+                      ?? (rawCluster as { clusterId?: unknown }).clusterId
+                      ?? "",
+                  ).trim();
+                  const rawRunIds =
+                    (rawCluster as { run_ids?: unknown; runIds?: unknown }).run_ids
+                    ?? (rawCluster as { runIds?: unknown }).runIds
+                    ?? [];
+                  const runIds = Array.isArray(rawRunIds)
+                    ? rawRunIds.map((x) => String(x ?? "").trim()).filter(Boolean)
+                    : [];
+                  if (clusterId && runIds.length > 0) {
+                    const title = String(
+                      (rawCluster as { title?: unknown }).title ?? "",
+                    ).trim();
+                    const createdAtRaw = Number(
+                      (rawCluster as { created_at?: unknown; createdAt?: unknown }).created_at
+                        ?? (rawCluster as { createdAt?: unknown }).createdAt,
+                    );
+                    const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+                    if (pan && isTargetSessionStillActive()) {
+                      const next = upsertLiveSubAgentClusterAnchor(
+                        pan.messages,
+                        {
+                          clusterId,
+                          runIds,
+                          ...(title ? { title } : {}),
+                          ...(Number.isFinite(createdAtRaw) && createdAtRaw > 0
+                            ? { createdAt: createdAtRaw }
+                            : {}),
+                        },
+                        requestSessionId || undefined,
+                      );
+                      if (next !== pan.messages) setPaneMessages(pane.id, next);
+                    }
+                  }
+                }
+              }
               receivedFinalEvent = true;
               setStallWait(null);
               if (eventAgentId === "meta") {
@@ -12837,6 +13392,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 pendingSuggestedQuestions = normalizedFinal.suggestedQuestions;
                 pendingFinalTurnTerminal = normalizedFinal.turnTerminal;
                 pendingFinalTerminalReason = normalizedFinal.terminalReason;
+                {
+                  const harnessRaw =
+                    payload.data?.harness ?? payload.data?.harness_id ?? null;
+                  const harnessId = String(harnessRaw ?? "").trim();
+                  if (harnessId) pendingFinalHarness = harnessId;
+                  if (payload.data?.codebuddy_login_required === true) {
+                    pendingCodebuddyLoginRequired = true;
+                  }
+                }
                 if (payload.data?.rounds_exhausted === true) {
                   pendingFinalRoundsExhausted = {
                     round: Number(payload.data?.round ?? 0) || 0,
@@ -12873,9 +13437,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 }
                 // Final payload is authoritative. Replacing (instead of merging) avoids
                 // duplicate concatenation when token stream shape differs from final text.
-                if (finalText.trim() && !isThinkingPlaceholderText(finalText)) {
+                if (
+                  finalText.trim() &&
+                  !isThinkingPlaceholderText(finalText) &&
+                  !(
+                    pendingCodebuddyLoginRequired &&
+                    /\[harness\s+\S+\s+turn\s+(?:error|failed|exited|timeout|blocked)\]/i.test(finalText)
+                  )
+                ) {
                   full = finalText;
                   cumulativeFull = finalText;
+                } else if (pendingCodebuddyLoginRequired) {
+                  full = "";
+                  cumulativeFull = "";
                 } else if (!assistantVisibleBodyForUi(full).trim()) {
                   full = "";
                   cumulativeFull = "";
@@ -12943,6 +13517,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 setPaneIsolateActive(pane.id, false);
                 setAttachToastMessage(t("composer.modeMultitaskNeedGit"));
                 setAttachToastOpen(true);
+                continue;
+              }
+              // External-harness / cross-replica single-flight: soft toast only.
+              // Do not append a ❌ tool row with the raw English UUID exception.
+              if (isSessionBusyElsewhereError(payload.data?.error)) {
+                setStallHintToast(
+                  errText.trim() && !/already has an external-harness turn/i.test(errText)
+                    ? errText
+                    : t("toast.sessionBusyElsewhere"),
+                );
                 continue;
               }
               const severity = String(payload.data?.severity ?? "").trim();
@@ -13073,6 +13657,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ...(pendingFinalTerminalReason
                 ? { terminal_reason: pendingFinalTerminalReason }
                 : {}),
+              ...(pendingFinalHarness ? { harness: pendingFinalHarness } : { harness: "python-agent" }),
+              ...(pendingCodebuddyLoginRequired ? { codebuddy_login_required: true } : {}),
               ...(pendingFinalRoundsExhausted
                 ? {
                     rounds_exhausted: true,
@@ -13462,6 +14048,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           provider: chatProvider || undefined,
           model: chatModel || undefined,
         });
+        void applyPreferredHarness(pane.id, result.session_id);
         setPaneSessionMode(pane.id, result.session_mode ?? pendingMode);
         clearPanePendingSessionMode(pane.id);
         clearPaneAwaitingFreshSession(pane.id);
@@ -15144,6 +15731,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
             </div>
           ) : null}
+          {showCodebuddyLogin ? <CodebuddyLoginPrompt onLogin={startCodebuddyLogin} /> : null}
           {voiceInputHint ? (
             <div className="mb-2 flex justify-center px-1">
               <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[12px] text-amber-100/95 [html[data-theme=light]_&]:border-amber-600/50 [html[data-theme=light]_&]:bg-amber-500/15 [html[data-theme=light]_&]:text-amber-900">
@@ -15604,6 +16192,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       isStreaming={isStreamingCurrentSession}
                     />
                   ) : null}
+                  <PaneHarnessPicker
+                    paneId={pane.id}
+                    apiBase={apiBase}
+                    apiToken={apiToken}
+                    disabled={isStreamingCurrentSession}
+                  />
                   <PaneModelPicker paneId={pane.id} />
                 </div>
                 <ActionCircleButton
@@ -15742,7 +16336,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             onToggleExpand={compactSidePanels ? undefined : toggleWorkPanelExpand}
             tintColor={paneTint}
             focusRequest={workPanelFocus}
-            onFocusRequestHandled={() => setWorkPanelFocus(null)}
+            onFocusRequestHandled={clearWorkPanelFocus}
             onPickFileForReference={(taskspaceId, path) => {
               void insertWorkspaceFileReference(taskspaceId, path);
             }}

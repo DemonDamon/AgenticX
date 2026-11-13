@@ -97,6 +97,7 @@ import {
 } from "./desktop-notify";
 import { applyRunOutcome, applyUserEnableToggle, markInterruptedOnStartup, markRunStarted } from "./automation-run-health";
 import { startNearBrowserBridge, stopNearBrowserBridge } from "./browser-bridge";
+import { installNmHost } from "./native-messaging-host";
 import { registerChromeCookieImportIpc } from "./chrome-cookie-import";
 import { pickLocalFsPathCandidate } from "./local-fs-path";
 import {
@@ -170,6 +171,17 @@ import {
   readSessionMessagesTailFromDisk,
 } from "./session-messages-disk";
 import { writeLocalTextFileAtomic } from "./write-local-text-file";
+import {
+  isBareCodebuddyReplLoginPayload,
+  isBridgeTerminalSessionId,
+  isLikelyCodebuddyLoginPayload,
+  registerShellTabPty,
+  resolveNativeShellPtySessionId,
+  resolveRegisteredShellPtySessionId,
+  resolveTabWriteSessionId,
+  shellTabPtyByTabId,
+  unregisterShellTabPtyForSession,
+} from "./terminal-shell-routing";
 import {
   previewLimitExceededMessage,
   previewMaxBytesForHost,
@@ -7477,6 +7489,7 @@ function requireNodePty(): typeof import("node-pty") | null {
 function killTerminalSession(id: string): void {
   const sess = terminalSessions.get(id);
   if (!sess) return;
+  unregisterShellTabPtyForSession(id);
   terminalSessions.delete(id);
   if (sess.kind === "bridge") {
     try {
@@ -7497,6 +7510,7 @@ function killAllTerminalSessions(): void {
   for (const id of [...terminalSessions.keys()]) {
     killTerminalSession(id);
   }
+  shellTabPtyByTabId.clear();
 }
 
 /** Escape minimal HTML for inline error pages (load failures). */
@@ -7811,9 +7825,24 @@ function createWindow(): void {
     }
   });
   if (typeof startNearBrowserBridge === "function") {
-    startNearBrowserBridge(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null));
+    startNearBrowserBridge(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null), {
+      // SP5: inject_context dispatch target — the same studio URL/token every
+      // other main-process studio call uses; read per request.
+      injectContextStudio: { url: getStudioUrl, token: getStudioToken },
+      // SP7b: copilot_chat dispatch target — same studio getters as inject.
+      copilotChatStudio: { url: getStudioUrl, token: getStudioToken },
+    });
   } else {
     console.error("[main] startNearBrowserBridge missing; browser bridge skipped");
+  }
+  // SP6: keep the Chrome/Edge NM host registration in sync with the running
+  // app (idempotent overwrite; dev = repo shim + system node, installed =
+  // bundled shim + ELECTRON_RUN_AS_NODE). Matches scripts/install-extension-dev.sh
+  // output so the two paths never fight over the same files.
+  try {
+    installNmHost({ mode: app.isPackaged ? "installed" : "dev" });
+  } catch (err) {
+    console.warn("[main] NM host install failed (browser extension channel stays unregistered):", err);
   }
 }
 
@@ -10487,6 +10516,56 @@ function registerIpc(): void {
         body: JSON.stringify({
           provider: String(payload?.provider || "").trim(),
           model: String(payload?.model || "").trim(),
+        }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("set-session-harness", async (_event, payload: { sessionId: string; harnessId: string | null; options?: Record<string, unknown> }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/harness`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+        body: JSON.stringify({
+          harness_id: payload?.harnessId ?? null,
+          options: payload?.options ?? undefined,
+        }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  // Mid-session harness switch with context handoff (harness-control-surface SP5b).
+  // Busy (turn in flight) fails with HTTP 409; plan failures fail with 400 and
+  // the session keeps its previous binding (fail closed).
+  ipcMain.handle("switch-session-harness", async (_event, payload: { sessionId: string; harnessId: string; strategy?: string; manualContext?: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    const harnessId = String(payload?.harnessId || "").trim();
+    if (!harnessId) return { ok: false, error: "harnessId is required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/harness/switch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+        body: JSON.stringify({
+          harness_id: harnessId,
+          strategy: payload?.strategy || undefined,
+          manual_context: payload?.manualContext || undefined,
         }),
       });
       if (!resp.ok) {
@@ -14311,7 +14390,17 @@ function registerIpc(): void {
 
   ipcMain.handle(
     "terminal-spawn",
-    async (event, payload: { id: string; cwd: string; cols?: number; rows?: number }) => {
+    async (
+      event,
+      payload: {
+        id: string;
+        cwd: string;
+        cols?: number;
+        rows?: number;
+        tabId?: string;
+        shellOnly?: boolean;
+      },
+    ) => {
       const ptyMod = requireNodePty();
       if (!ptyMod) return { ok: false as const, error: "node-pty unavailable" };
       // Fall back to home dir if the requested cwd no longer exists
@@ -14355,6 +14444,10 @@ function registerIpc(): void {
           })(),
         });
         terminalSessions.set(id, { kind: "pty", pty: ptyProcess, wc });
+        const bindTabId = String(payload.tabId ?? "").trim();
+        if (bindTabId && payload.shellOnly) {
+          registerShellTabPty(bindTabId, id);
+        }
         ptyProcess.onData((data) => {
           if (!wc.isDestroyed()) {
             wc.send("terminal-data", { id, data });
@@ -14392,23 +14485,83 @@ function registerIpc(): void {
   ipcMain.handle("terminal-write-by-tab", async (_event, payload: { tabId: string; data: string }) => {
     const tabId = (payload.tabId || "").trim();
     if (!tabId) return { ok: false };
-    const prefix = `${tabId}:`;
+    const sessionKinds = new Map<string, "pty" | "bridge">();
     for (const [id, sess] of terminalSessions.entries()) {
-      if (!id.startsWith(prefix)) continue;
-      if (sess.kind === "bridge") {
-        const url = `${sess.baseUrl}/v1/sessions/${encodeURIComponent(sess.sessionId)}/write`;
-        const ok = await ccBridgeHttpPostJson(url, sess.token, { data: payload.data });
-        return { ok, id };
+      sessionKinds.set(id, sess.kind);
+    }
+    const id = resolveTabWriteSessionId(tabId, sessionKinds, false);
+    if (!id) return { ok: false };
+    const sess = terminalSessions.get(id);
+    if (!sess) return { ok: false };
+    if (sess.kind === "bridge") {
+      if (isLikelyCodebuddyLoginPayload(payload.data) || isBareCodebuddyReplLoginPayload(payload.data)) {
+        return { ok: false, id, error: "codebuddy_login_requires_native_shell" };
+      }
+      const url = `${sess.baseUrl}/v1/sessions/${encodeURIComponent(sess.sessionId)}/write`;
+      const ok = await ccBridgeHttpPostJson(url, sess.token, { data: payload.data });
+      return { ok, id };
+    }
+    try {
+      sess.pty.write(payload.data);
+      return { ok: true, id };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  /** Write only to a native shell PTY for this tab — never CodeBuddy/cc-bridge REPL. */
+  ipcMain.handle(
+    "terminal-write-pty-by-tab",
+    async (
+      _event,
+      payload: { tabId: string; data: string; requireRegistered?: boolean },
+    ) => {
+      const tabId = (payload.tabId || "").trim();
+      if (!tabId) return { ok: false, error: "missing_tab" };
+      if (isBareCodebuddyReplLoginPayload(payload.data)) {
+        return { ok: false, error: "bare_login_refused" };
+      }
+      const sessionKinds = new Map<string, "pty" | "bridge">();
+      for (const [id, sess] of terminalSessions.entries()) {
+        sessionKinds.set(id, sess.kind);
+      }
+      const requireRegistered = payload.requireRegistered === true;
+      const id = requireRegistered
+        ? resolveRegisteredShellPtySessionId(tabId, sessionKinds)
+        : resolveNativeShellPtySessionId(tabId, sessionKinds);
+      if (!id || isBridgeTerminalSessionId(id)) {
+        return { ok: false, error: "native_shell_pty_missing" };
+      }
+      const sess = terminalSessions.get(id);
+      if (!sess || sess.kind !== "pty") {
+        return { ok: false, error: "native_shell_pty_missing" };
       }
       try {
         sess.pty.write(payload.data);
         return { ok: true, id };
       } catch {
-        return { ok: false };
+        return { ok: false, error: "pty_write_failed" };
       }
-    }
-    return { ok: false };
-  });
+    },
+  );
+
+  ipcMain.handle(
+    "terminal-has-pty-for-tab",
+    async (_event, payload: { tabId: string; requireRegistered?: boolean }) => {
+      const tabId = (payload.tabId || "").trim();
+      if (!tabId) return { ok: false };
+      const sessionKinds = new Map<string, "pty" | "bridge">();
+      for (const [id, sess] of terminalSessions.entries()) {
+        sessionKinds.set(id, sess.kind);
+      }
+      const id =
+        payload.requireRegistered === true
+          ? resolveRegisteredShellPtySessionId(tabId, sessionKinds)
+          : resolveNativeShellPtySessionId(tabId, sessionKinds);
+      if (!id || isBridgeTerminalSessionId(id)) return { ok: false };
+      return { ok: true, id };
+    },
+  );
 
   ipcMain.handle("terminal-resize", async (_event, payload: { id: string; cols: number; rows: number }) => {
     const sess = terminalSessions.get(payload.id);

@@ -52,6 +52,7 @@ import {
 import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
+  isSessionBusyElsewhereError,
 } from "../utils/noisy-chat-messages";
 import { isStreamToolLabelOnlyText, shouldSkipFormattedToolResultFallback } from "../utils/orphan-formatted-tool";
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
@@ -1457,6 +1458,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
+      let pendingFinalHarness: string | undefined;
       let pendingReferences: SearchReference[] = [];
       let pendingSearchedQueries: string[] = [];
       const syncTurnRefsSnapshot = () => {
@@ -1931,6 +1933,12 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               pendingSuggestedQuestions = normalizedFinal.suggestedQuestions;
               pendingFinalTurnTerminal = normalizedFinal.turnTerminal;
               pendingFinalTerminalReason = normalizedFinal.terminalReason;
+              {
+                const harnessRaw =
+                  payload.data?.harness ?? payload.data?.harness_id ?? null;
+                const harnessId = String(harnessRaw ?? "").trim();
+                if (harnessId) pendingFinalHarness = harnessId;
+              }
               const appliedRefs = applyFinalReferencePayload(
                 pendingReferences,
                 pendingSearchedQueries,
@@ -2065,6 +2073,10 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               const errText = String(payload.data?.text ?? "未知错误");
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
+              if (isSessionBusyElsewhereError(payload.data?.error)) {
+                // Soft notice only — never dump the raw harness UUID exception as a ❌ tool row.
+                continue;
+              }
               if (
                 eventAgentId === "meta"
                 && detector === "widget_flow_guard"
@@ -2136,6 +2148,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               ...(pendingFinalTerminalReason
                 ? { terminal_reason: pendingFinalTerminalReason }
                 : {}),
+              ...(pendingFinalHarness ? { harness: pendingFinalHarness } : { harness: "python-agent" }),
             },
           }
         : { metadata: { turn_terminal: false } };

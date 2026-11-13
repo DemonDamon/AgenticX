@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/agenticx/enterprise/gateway/internal/configstatus"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 )
 
@@ -27,11 +28,21 @@ type snapshot struct {
 
 // Loader polls local JSON or admin internal API for MCP server definitions.
 type Loader struct {
-	path   string
-	remote bool
-	logger *slog.Logger
-	reg    *Registry
+	path    string
+	remote  bool
+	logger  *slog.Logger
+	reg     *Registry
 	current atomic.Pointer[snapshot]
+	status  *configstatus.Registry
+	hasGood atomic.Bool
+}
+
+// SetConfigStatus 在 Start 之前注入生效状态登记点。
+func (l *Loader) SetConfigStatus(status *configstatus.Registry) {
+	if l == nil {
+		return
+	}
+	l.status = status
 }
 
 func NewLoader(logger *slog.Logger, reg *Registry) *Loader {
@@ -86,49 +97,80 @@ func (l *Loader) snapshot() []MCPServer {
 }
 
 func (l *Loader) reload() error {
-	servers, err := l.loadRemoteOrFile()
+	servers, raw, applied, err := l.loadRemoteOrFile()
 	if err != nil {
+		l.reportFailure(err)
 		return err
 	}
 	l.current.Store(&snapshot{servers: servers})
 	l.reg.Replace(servers)
+	if applied {
+		l.hasGood.Store(true)
+		l.reportSuccess(raw)
+	}
 	return nil
 }
 
-func (l *Loader) loadRemoteOrFile() ([]MCPServer, error) {
-	var bytes []byte
-	var err error
+func (l *Loader) loadRemoteOrFile() (servers []MCPServer, raw []byte, applied bool, err error) {
 	if l.remote {
-		var code int
-		bytes, code, err = gatewayinternal.HTTPGet(l.path)
-		if err != nil {
-			return nil, err
+		body, code, getErr := gatewayinternal.HTTPGet(l.path)
+		if getErr != nil {
+			return nil, nil, false, getErr
 		}
 		if code == http.StatusNotFound {
-			return []MCPServer{}, nil
+			if l.hasGood.Load() {
+				return nil, nil, false, configstatus.ErrRemote404Keep
+			}
+			return []MCPServer{}, nil, false, nil
 		}
 		if code < 200 || code >= 300 {
-			return nil, fmt.Errorf("remote mcp servers: http %d", code)
+			return nil, nil, false, fmt.Errorf("remote mcp servers: http %d", code)
 		}
-	} else {
-		bytes, err = os.ReadFile(l.path)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return []MCPServer{}, nil
-			}
-			return nil, err
+		parsed, decErr := decodeMCPServers(body)
+		if decErr != nil {
+			return nil, nil, false, decErr
 		}
+		return parsed, body, true, nil
 	}
+	body, readErr := os.ReadFile(l.path)
+	if readErr != nil {
+		if errors.Is(readErr, os.ErrNotExist) {
+			return []MCPServer{}, nil, false, nil
+		}
+		return nil, nil, false, readErr
+	}
+	parsed, decErr := decodeMCPServers(body)
+	if decErr != nil {
+		return nil, nil, false, decErr
+	}
+	return parsed, body, true, nil
+}
+
+func decodeMCPServers(body []byte) ([]MCPServer, error) {
 	var parsed struct {
 		Servers []MCPServer `json:"servers"`
 	}
-	if err := json.Unmarshal(bytes, &parsed); err != nil {
+	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, err
 	}
 	if parsed.Servers == nil {
 		parsed.Servers = []MCPServer{}
 	}
 	return parsed.Servers, nil
+}
+
+func (l *Loader) reportSuccess(raw []byte) {
+	if l.status == nil {
+		return
+	}
+	l.status.ReportSuccess(configstatus.DomainMCPServers, l.path, configstatus.HashBytes(raw), "")
+}
+
+func (l *Loader) reportFailure(err error) {
+	if l.status == nil {
+		return
+	}
+	l.status.ReportFailure(configstatus.DomainMCPServers, l.path, err)
 }
 
 // HostingEnabled reports whether MCP proxy routes should be registered.

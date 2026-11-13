@@ -76,6 +76,7 @@ import type { AppLocale } from "../i18n/locales";
 import { UNRESTRICTED_CAPABILITY_LOCKS } from "../utils/enterprise-capability-policy";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { UserCubeColorwayPicker } from "./settings/UserCubeColorwayPicker";
+import { PreferredHarnessPicker } from "./HarnessPicker";
 import {
   RECOMMENDED_SKILLS,
   type RecommendedSkillTier,
@@ -7377,6 +7378,10 @@ export function SettingsPanel({
                         );
                       })()}
                     </div>
+
+                    <div className="h-px bg-[var(--border-muted)]" aria-hidden="true" />
+
+                    <PreferredHarnessPicker apiBase={apiBase} apiToken={apiToken} />
 
                     <div className="h-px bg-[var(--border-muted)]" aria-hidden="true" />
 

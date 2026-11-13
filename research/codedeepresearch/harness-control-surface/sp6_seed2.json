@@ -1,0 +1,180 @@
+{
+  "seed": 2,
+  "keys": [
+    "NADIR-5C3",
+    "ZENITH-7H8",
+    "ECHO-4R2"
+  ],
+  "turns": 6,
+  "switches": [
+    {
+      "to": "codex",
+      "status": 200,
+      "strategy": "full_summary"
+    },
+    {
+      "to": "opencode",
+      "status": 200,
+      "strategy": "resume",
+      "native_thread_resumed": true
+    },
+    {
+      "to": "codex",
+      "status": 200,
+      "strategy": "resume"
+    },
+    {
+      "to": "opencode",
+      "status": 200,
+      "strategy": "resume"
+    }
+  ],
+  "survival": {
+    "recalled": [
+      "NADIR-5C3",
+      "ZENITH-7H8",
+      "ECHO-4R2"
+    ],
+    "missing": []
+  },
+  "completion": true,
+  "final_answer": "NADIR-5C3 ZENITH-7H8 ECHO-4R2\nSections 1 (队列定义) and 2 (流失归因) are finished.",
+  "summary_checks": [
+    {
+      "handoff_id": "ho_2612a88abc4a45cb",
+      "from": "opencode",
+      "to": "codex",
+      "status": "superseded",
+      "strategy": "full_summary",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    },
+    {
+      "handoff_id": "ho_8aaccd1e9e4d4b9a",
+      "from": "codex",
+      "to": "opencode",
+      "status": "superseded",
+      "strategy": "resume",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    },
+    {
+      "handoff_id": "ho_79802f997e1b47bd",
+      "from": "opencode",
+      "to": "codex",
+      "status": "superseded",
+      "strategy": "resume",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    },
+    {
+      "handoff_id": "ho_68499c0b4e67411d",
+      "from": "codex",
+      "to": "opencode",
+      "status": "active",
+      "strategy": "resume",
+      "goal_nonempty": true,
+      "goal_carries_task": true,
+      "goal_carries_anchor": true,
+      "eight_sections_present": true,
+      "eight_sections_filled": true,
+      "decisions_carries_activity": true,
+      "task_state_carried": true
+    }
+  ],
+  "planted": true,
+  "completion_detail": {
+    "keys_ok": true,
+    "order_ok": true,
+    "sections_ok": true
+  },
+  "raw_summaries": [
+    {
+      "handoff_id": "ho_2612a88abc4a45cb",
+      "strategy": "full_summary",
+      "from": "opencode",
+      "to": "codex",
+      "summary": {
+        "goal": "We are working on a customer churn analysis deck. The first access key is NADIR-5C3. We have finished section 1: 队列定义. Reply with exactly: NOTED",
+        "decisions": "- NOTED\n- UPDATED",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "2 run(s) in scope (full thread); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    },
+    {
+      "handoff_id": "ho_8aaccd1e9e4d4b9a",
+      "strategy": "resume",
+      "from": "codex",
+      "to": "opencode",
+      "summary": {
+        "goal": "We are working on a customer churn analysis deck. The first access key is NADIR-5C3. We have finished section 1: 队列定义. Reply with exactly: NOTED",
+        "decisions": "- CODEX-STUB-DONE",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "1 run(s) in scope (delta since message 4); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    },
+    {
+      "handoff_id": "ho_79802f997e1b47bd",
+      "strategy": "resume",
+      "from": "opencode",
+      "to": "codex",
+      "summary": {
+        "goal": "We are working on a customer churn analysis deck. The first access key is NADIR-5C3. We have finished section 1: 队列定义. Reply with exactly: NOTED",
+        "decisions": "- NADIR-5C3\nZENITH-7H8\nECHO-4R2",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "1 run(s) in scope (delta since message 6); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    },
+    {
+      "handoff_id": "ho_68499c0b4e67411d",
+      "strategy": "resume",
+      "from": "codex",
+      "to": "opencode",
+      "summary": {
+        "goal": "We are working on a customer churn analysis deck. The first access key is NADIR-5C3. We have finished section 1: 队列定义. Reply with exactly: NOTED",
+        "decisions": "- CODEX-STUB-DONE",
+        "changed_files": "(none recorded)",
+        "commands_and_tests": "(none recorded)",
+        "plan_and_todos": "(none recorded)",
+        "open_approvals": "(none recorded)",
+        "checkpoint_diff": "1 run(s) in scope (delta since message 8); 0 file(s) changed.",
+        "known_failures": "(none recorded)",
+        "memory_snapshot": "",
+        "knowledge_snapshot": ""
+      }
+    }
+  ]
+}

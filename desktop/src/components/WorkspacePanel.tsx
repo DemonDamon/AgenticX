@@ -1861,7 +1861,12 @@ export function WorkspacePanel({
                     }`}
                     aria-hidden={!isVisible}
                   >
-                    <TerminalEmbed tabId={tab.id} cwd={tab.cwd} ccBridgePty={tab.ccBridgePty} />
+                    <TerminalEmbed
+                      tabId={tab.id}
+                      cwd={tab.cwd}
+                      shellOnly={tab.shellOnly}
+                      ccBridgePty={tab.ccBridgePty}
+                    />
                   </div>
                 );
               })}

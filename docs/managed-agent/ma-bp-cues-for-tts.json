@@ -1,0 +1,98 @@
+{
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "rate": "+8%",
+  "tts_cache_dir": ".runtime/agx-ma-bp-demo-tts",
+  "out_mp4": "docs/managed-agent/shots/ma-best-practice-demo.mp4",
+  "cues": [
+    {
+      "id": "open-title",
+      "vo": "大家好。今天不走功能导览，而是按真实落地路径，现场创建并发布一个托管智能体，再在门户房间里用艾特把它跑起来，最后到管理台看事件回放。",
+      "caption": "Best Practice · 创建 → 验跑 → 事件回放",
+      "holdAfterMs": 250
+    },
+    {
+      "id": "open-why",
+      "vo": "为什么要这条路径？因为只有真正跑通一轮会话，管理台才会留下托管会话和事件回放。点两下介绍功能，看不到智能体在干活。",
+      "caption": "要看到智能体在跑，不能只点功能",
+      "holdAfterMs": 220
+    },
+    {
+      "id": "admin-login",
+      "vo": "先登录管理台。侧栏里智能体运行管定义和观测，资源配置管环境和凭证。今天主线只碰模型和智能体。",
+      "caption": "管理台登录 → 智能体运行 / 资源配置",
+      "holdAfterMs": 280,
+      "focus": "nav, aside, [data-testid='admin-dashboard'], main, body",
+      "focusScale": 1.35
+    },
+    {
+      "id": "models-ready",
+      "vo": "落地第一步：打开平台模型页，确认至少有一个已启用模型。没有模型，新建智能体和门户验跑都会被拦住。",
+      "caption": "平台 → 模型：至少一个已启用",
+      "holdAfterMs": 320,
+      "focus": "main",
+      "focusScale": 1.35
+    },
+    {
+      "id": "agent-create",
+      "vo": "打开智能体页，点新建。名称用最佳实践演示助手，标识填 bp-demo-bot。运行方式保持云端，选一个已启用模型，写一句自我介绍的系统提示词。不要勾 MCP，也不填知识库地址，保证走托管运行时干净路径。",
+      "caption": "新建智能体 · 云端 · 无 MCP / 无知识库",
+      "holdAfterMs": 400,
+      "focus": "[role='dialog'], main",
+      "focusScale": 1.35
+    },
+    {
+      "id": "agent-publish",
+      "vo": "保存后还是草稿。在列表里点发布，命中可见范围的成员才能在门户房间里用到它。",
+      "caption": "列表 → 发布",
+      "holdAfterMs": 360,
+      "focus": "main",
+      "focusScale": 1.35
+    },
+    {
+      "id": "portal-room",
+      "vo": "切到门户，登录后进协作房间，新建一间演示房。门户要开托管运行时开关，房间里的云端智能体才会打到本机 agent-runtime。",
+      "caption": "门户 → 新建协作房间",
+      "holdAfterMs": 360,
+      "focus": "main, body",
+      "focusScale": 1.3
+    },
+    {
+      "id": "room-add-agent",
+      "vo": "右侧成员栏找到添加智能体，把刚刚发布的 bp-demo-bot 拉进房间。",
+      "caption": "房间侧栏 → 添加 bp-demo-bot",
+      "holdAfterMs": 320,
+      "focus": "aside, main",
+      "focusScale": 1.3
+    },
+    {
+      "id": "room-live-run",
+      "vo": "在输入框艾特它，发一句：请用一句话自我介绍。等智能体气泡出来——这一步是真跑，不是演示动画。",
+      "caption": "@bp-demo-bot 一句话自我介绍（真跑）",
+      "holdAfterMs": 450,
+      "focus": "form, main",
+      "focusScale": 1.25
+    },
+    {
+      "id": "sessions-list",
+      "vo": "回到管理台会话页，刷新列表。刚才那一轮托管会话应该已经落库，可以按智能体或时间找到。",
+      "caption": "管理台 → 会话 · 刷新",
+      "holdAfterMs": 320,
+      "focus": "main",
+      "focusScale": 1.3
+    },
+    {
+      "id": "session-trace",
+      "vo": "点进这条会话，看事件回放。用户消息、模型请求、智能体回复，整条链路都能回看。注意：这是托管会话详情里的事件回放，不是计量里的 Near 轨迹页。",
+      "caption": "会话详情 → 事件回放",
+      "holdAfterMs": 400,
+      "focus": "main",
+      "focusScale": 1.25
+    },
+    {
+      "id": "closing",
+      "vo": "演示到这儿。模型就绪，创建并发布云端智能体，门户房间艾特验跑，管理台事件回放回头看。这就是托管智能体的最佳实践主路径。谢谢各位。",
+      "caption": "谢谢 · Best Practice 主路径",
+      "holdAfterMs": 400
+    }
+  ]
+}

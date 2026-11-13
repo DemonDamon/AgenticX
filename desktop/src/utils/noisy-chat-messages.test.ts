@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
   isEphemeralStopErrorText,
+  isSessionBusyElsewhereError,
   isInterruptedAssistantPlaceholder,
   isNoisyToolStatusMessage,
 } from "./noisy-chat-messages.ts";
@@ -103,6 +104,15 @@ test("isEphemeralStopErrorText matches runtime STOP_MESSAGE variants", () => {
   assert.equal(isEphemeralStopErrorText("已中断当前生成"), true);
   assert.equal(isEphemeralStopErrorText("❌ 已中断当前生成"), true);
   assert.equal(isEphemeralStopErrorText("Runtime error: timeout"), false);
+});
+
+test("isSessionBusyElsewhereError matches harness busy codes only", () => {
+  assert.equal(isSessionBusyElsewhereError("session_busy_elsewhere"), true);
+  assert.equal(isSessionBusyElsewhereError("harness_turn_busy"), true);
+  assert.equal(isSessionBusyElsewhereError("session_busy"), true);
+  assert.equal(isSessionBusyElsewhereError("not_git"), false);
+  assert.equal(isSessionBusyElsewhereError(""), false);
+  assert.equal(isSessionBusyElsewhereError(undefined), false);
 });
 
 test("isInterruptedAssistantPlaceholder hides barge-in assistant rows", () => {

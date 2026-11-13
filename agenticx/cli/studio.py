@@ -73,6 +73,17 @@ class StudioSession:
     session_id: str = ""
     # Harness mode: code_dev (4-layer context) vs daily_office (default).
     session_mode: str = "daily_office"
+    # Harness binding (harness-control-surface SP3): which coding-agent
+    # harness this session is bound to ("claude-code" / "codebuddy" / ...).
+    # None = builtin python runtime. The native thread handle + spawn
+    # options enable resume / re-spawn in the SP4 handoff engine.
+    harness_id: Optional[str] = None
+    harness_thread_id: Optional[str] = None
+    harness_options: Optional[Dict[str, Any]] = None
+    # Unified-surface session id (SP5b): the id the bound adapter uses to
+    # address this session on the harness control surface. Re-created on
+    # cold start (spawn + adopt_thread) from harness_thread_id.
+    harness_session_id: Optional[str] = None
     # Per-server latest operation state for Desktop MCP cards.
     # Example: {"github": {"phase": "connecting", "message": "连接中…", "updated_at": 1710000000.0}}
     mcp_server_ops: Dict[str, Dict[str, object]] = field(default_factory=dict)

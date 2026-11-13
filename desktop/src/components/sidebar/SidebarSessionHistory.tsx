@@ -32,6 +32,7 @@ import {
   cacheSessionTail,
 } from "../../utils/session-tail-cache";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../../utils/session-message-map";
+import { toStoredPreferredHarnessId } from "../../utils/preferred-harness";
 import { LoopReviewCard } from "../session/LoopReviewCard";
 import {
   SIDEBAR_HISTORY_COLLAPSE_KEY,
@@ -148,6 +149,7 @@ export function SidebarSessionHistory() {
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
+  const setPaneHarness = useAppStore((s) => s.setPaneHarness);
   const setPaneSessionMode = useAppStore((s) => s.setPaneSessionMode);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const setPaneLoadingMessages = useAppStore((s) => s.setPaneLoadingMessages);
@@ -755,6 +757,12 @@ export function SidebarSessionHistory() {
         provider: row.provider,
         model: row.model,
       });
+      // Only an external sticky id pins the composer. A missing/null field
+      // must not lock builtin before message-metadata backfill.
+      const stickyHarness = toStoredPreferredHarnessId(row.harness_id);
+      if (stickyHarness) {
+        setPaneHarness(paneId, stickyHarness, false, { preserveModel: true });
+      }
       if (row.session_mode === "code_dev" || row.session_mode === "daily_office") {
         setPaneSessionMode(paneId, row.session_mode);
       }
@@ -845,6 +853,7 @@ export function SidebarSessionHistory() {
       setPaneMessagePaging,
       setPaneMessages,
       setPaneSessionId,
+      setPaneHarness,
       setPaneSessionMode,
     ]
   );
@@ -869,6 +878,10 @@ export function SidebarSessionHistory() {
       provider: row.provider,
       model: row.model,
     });
+    const stickyHarness = toStoredPreferredHarnessId(row.harness_id);
+    if (stickyHarness) {
+      setPaneHarness(paneId, stickyHarness, false, { preserveModel: true });
+    }
     if (row.session_mode === "code_dev" || row.session_mode === "daily_office") {
       setPaneSessionMode(paneId, row.session_mode);
     }

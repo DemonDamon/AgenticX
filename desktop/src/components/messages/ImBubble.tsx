@@ -61,9 +61,12 @@ import {
 } from "../../constants/meta-avatar";
 import { isNearCubePortraitUrl } from "../../utils/theme-portrait";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
+import { hasVisibleReactNode } from "../../utils/visible-react-node";
 import { isGroupStreamMessageId, stripTrailingFinalMarker } from "../../utils/group-stream-text";
 import { MessageTimestamp } from "./MessageTimestamp";
 import { MessageTurnMeta } from "./MessageTurnMeta";
+import { HarnessAvatarBadge } from "./HarnessAvatarBadge";
+import { resolveMessageHarnessId } from "../../utils/harness-display";
 import { Shimmer } from "../ds/Shimmer";
 import { MaybeConversationBubble, MaybeConversationContent } from "./Conversation";
 import { GroupTalkReportCard } from "./GroupTalkReportCard";
@@ -71,9 +74,18 @@ import { usePacedStreamText } from "./usePacedStreamText";
 import { splitGroupTalkFromReport } from "../../utils/group-talk-report";
 import { isLongUserQuery } from "../../utils/long-user-query";
 import { splitAutomationExecutionContract } from "../../utils/automation-contract-display";
+import {
+  assistantShowsResolvedCodebuddyLoginNotice,
+  assistantTurnNeedsCodebuddyLogin,
+  shouldSuppressCodebuddyHarnessErrorBody,
+} from "../../utils/codebuddy-login";
+import { CodebuddyLoginPrompt } from "./CodebuddyLoginPrompt";
+import { CodebuddyLoginPendingTip } from "./CodebuddyLoginPendingTip";
 
 type Props = {
   message: Message;
+  /** Harness that answered this user turn (badge on user bubble). */
+  turnHarnessId?: string | null;
   /** When message.references is empty, inherit from same-turn tool_result / embedded JSON. */
   resolvedReferences?: SearchReference[];
   highlightTerms?: string[];
@@ -143,6 +155,16 @@ type Props = {
   sessionWebRefs?: SearchReference[];
   /** Also collapse a long user query when the caller opts in explicitly. */
   collapseLongUserQuery?: boolean;
+  /** Near session harness id for CodeBuddy login detection. */
+  activeHarnessId?: string | null;
+  /** Full pane transcript for per-turn login detection. */
+  conversationMessages?: Message[];
+  onCodebuddyLogin?: () => void;
+  /** User already launched shell login; show retry guidance instead of the CTA. */
+  codebuddyLoginAwaitingRetry?: boolean;
+  codebuddyLoginAuthorizing?: boolean;
+  codebuddyLoginOAuthFailed?: boolean;
+  codebuddyLoginOAuthError?: string | null;
 };
 
 function ExecutionContractNote({ lines }: { lines: string[] }) {
@@ -333,9 +355,10 @@ export function ChatImAvatar({
   const char = label.slice(0, 1) || "?";
   const rounded = variant === "rounded-square" ? "rounded-[6px]" : "rounded-full";
   const dim = size === "sm" ? "h-7 w-7 text-[11px]" : "h-8 w-8 text-xs";
+  let face: ReactNode;
   if (resolvedImage) {
     if (isBundledMetaAvatarUrl(resolvedImage)) {
-      return (
+      face = (
         <span
           className={`agx-im-avatar ${dim} relative inline-flex shrink-0 overflow-hidden ${rounded}`}
           data-avatar-fit="logo"
@@ -347,9 +370,8 @@ export function ChatImAvatar({
           />
         </span>
       );
-    }
-    if (isNearCubePortraitUrl(resolvedImage)) {
-      return (
+    } else if (isNearCubePortraitUrl(resolvedImage)) {
+      face = (
         <span
           className={`agx-im-avatar ${dim} relative inline-flex shrink-0 overflow-visible`}
           data-avatar-fit="cube"
@@ -361,37 +383,41 @@ export function ChatImAvatar({
           />
         </span>
       );
+    } else {
+      face = (
+        <ThemedAvatarImage
+          src={resolvedImage}
+          alt={label}
+          className={`agx-im-avatar ${dim} shrink-0 object-cover ${rounded}`}
+        />
+      );
     }
-    return (
-      <ThemedAvatarImage
-        src={resolvedImage}
-        alt={label}
-        className={`agx-im-avatar ${dim} shrink-0 object-cover ${rounded}`}
-      />
+  } else {
+    const tintClass = avatarId ? `${avatarBgClass(resolvedColor)} ${avatarFgClass(resolvedColor)}` : "";
+    face = (
+      <div
+        className={`agx-im-avatar flex ${dim} shrink-0 items-center justify-center font-bold ${rounded} ${tintClass}`}
+        style={
+          avatarId
+            ? undefined
+            : {
+                background: "var(--chat-im-avatar-bg)",
+                color: "var(--chat-im-avatar-fg, var(--text-strong))",
+              }
+        }
+      >
+        {char}
+      </div>
     );
   }
-  const tintClass = avatarId ? `${avatarBgClass(resolvedColor)} ${avatarFgClass(resolvedColor)}` : "";
-  return (
-    <div
-      className={`agx-im-avatar flex ${dim} shrink-0 items-center justify-center font-bold ${rounded} ${tintClass}`}
-      style={
-        avatarId
-          ? undefined
-          : {
-              background: "var(--chat-im-avatar-bg)",
-              color: "var(--chat-im-avatar-fg, var(--text-strong))",
-            }
-      }
-    >
-      {char}
-    </div>
-  );
+  return face;
 }
 
 const MESSAGE_CONTEXT_MENU_MARGIN = 8;
 
 export function ImBubble({
   message,
+  turnHarnessId,
   resolvedReferences,
   highlightTerms,
   badge,
@@ -434,6 +460,13 @@ export function ImBubble({
   onOpenWorkspaceRefs,
   sessionWebRefs,
   collapseLongUserQuery = false,
+  activeHarnessId,
+  conversationMessages,
+  onCodebuddyLogin,
+  codebuddyLoginAwaitingRetry = false,
+  codebuddyLoginAuthorizing = false,
+  codebuddyLoginOAuthFailed = false,
+  codebuddyLoginOAuthError = null,
 }: Props) {
   const { t } = useTranslation("chat");
   void _senderAvatarVariant;
@@ -483,10 +516,37 @@ export function ImBubble({
     : (userQuoteDisplay?.body ?? message.content);
   /** Drop leading `---` so Meta/PM reports don't leave a hole under the expert label. */
   const strippedBody = !isUser ? stripTrailingFinalMarker(String(rawBodyText ?? "")) : rawBodyText;
+  const loginTranscript = conversationMessages ?? [];
+  const turnNeedsCodebuddyLogin =
+    !isUser && assistantTurnNeedsCodebuddyLogin(message, loginTranscript, activeHarnessId);
+  const showInlineCodebuddyLogin =
+    turnNeedsCodebuddyLogin
+    && Boolean(onCodebuddyLogin)
+    && !codebuddyLoginAwaitingRetry
+    && !codebuddyLoginAuthorizing
+    && !codebuddyLoginOAuthFailed;
+  const codebuddyLoginTipPhase = codebuddyLoginAuthorizing
+    ? "authorizing"
+    : codebuddyLoginAwaitingRetry
+      ? "success"
+      : codebuddyLoginOAuthFailed
+        ? "failed"
+        : null;
+  const showCodebuddyLoginPendingTip =
+    turnNeedsCodebuddyLogin && codebuddyLoginTipPhase !== null;
+  const showResolvedCodebuddyLoginNotice =
+    !isUser &&
+    assistantShowsResolvedCodebuddyLoginNotice(message, loginTranscript, activeHarnessId);
+  const suppressHarnessLoginError = shouldSuppressCodebuddyHarnessErrorBody(
+    message,
+    loginTranscript,
+    activeHarnessId,
+  );
+  const strippedForDisplay = suppressHarnessLoginError ? "" : strippedBody;
   const bodyText =
     isGroupAssistant
-      ? String(strippedBody ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
-      : strippedBody;
+      ? String(strippedForDisplay ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
+      : strippedForDisplay;
   const commandName = isUser ? String(message.command_name ?? "").trim() : "";
   const commandParts = commandName ? splitCommandBody(String(bodyText ?? "")) : null;
   const groupStreamActive = isGroupAssistant && isStreaming;
@@ -527,7 +587,12 @@ export function ImBubble({
     ? (message.attachments ?? []).filter((attachment) => !isWorkspaceReferenceAttachment(attachment))
     : [];
   const hasBody =
-    !!bodyText?.trim() || displayQuotedItems.length > 0 || hasImageBlock(message.blocks);
+    !!bodyText?.trim() ||
+    displayQuotedItems.length > 0 ||
+    hasImageBlock(message.blocks) ||
+    showInlineCodebuddyLogin ||
+    showCodebuddyLoginPendingTip ||
+    showResolvedCodebuddyLoginNotice;
   const renderInlineBlocks = hasImageBlock(message.blocks);
   const bubbleStyle: CSSProperties = isUser
     ? {
@@ -543,6 +608,8 @@ export function ImBubble({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [menuLayout, setMenuLayout] = useState<{ x: number; y: number } | null>(null);
+  const menuLayoutRef = useRef(menuLayout);
+  menuLayoutRef.current = menuLayout;
   const [menuHasSelection, setMenuHasSelection] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const msgContentRef = useRef<HTMLDivElement | null>(null);
@@ -644,9 +711,17 @@ export function ImBubble({
     };
   }, [menuOpen]);
 
+  // Presence only. Function identities change on every ChatPane render (login opens
+  // the terminal and re-renders the thread). Depending on the functions re-ran this
+  // effect and setState(null) nested until React aborted.
+  const menuActionPresence =
+    (onEditMessage ? 1 : 0) + (onQuoteToNewPane ? 2 : 0) + (onRetryMessage ? 4 : 0);
   useLayoutEffect(() => {
     if (!menuOpen) {
-      setMenuLayout(null);
+      if (menuLayoutRef.current !== null) {
+        menuLayoutRef.current = null;
+        setMenuLayout(null);
+      }
       return;
     }
 
@@ -672,13 +747,18 @@ export function ImBubble({
           : menuPos.y - rect.height >= MESSAGE_CONTEXT_MENU_MARGIN
             ? menuPos.y - rect.height
             : maxTop;
-      setMenuLayout((prev) => (prev?.x === left && prev.y === top ? prev : { x: left, y: top }));
+      setMenuLayout((prev) => {
+        if (prev?.x === left && prev.y === top) return prev;
+        const next = { x: left, y: top };
+        menuLayoutRef.current = next;
+        return next;
+      });
     };
 
     reposition();
     window.addEventListener("resize", reposition);
     return () => window.removeEventListener("resize", reposition);
-  }, [menuOpen, menuPos, menuHasSelection, onEditMessage, onQuoteToNewPane, onRetryMessage]);
+  }, [menuOpen, menuPos, menuActionPresence]);
 
   useEffect(() => {
     // NOTE: Keyword highlight used to mutate React-managed DOM nodes directly,
@@ -742,6 +822,13 @@ export function ImBubble({
         maxWidth: "100%",
       }
     : bubbleStyle;
+
+  const showHarnessNest =
+    isUser &&
+    Boolean(
+      (turnHarnessId && String(turnHarnessId).trim()) ||
+        resolveMessageHarnessId(message.metadata ?? undefined),
+    );
 
   const assistantIconButtons = shouldShowAssistantIconButtons({
     hideActions,
@@ -898,6 +985,7 @@ export function ImBubble({
   // that row sit 4px higher/lower than the committed rows above it — the uneven
   // line spacing reported in production. Neutralize them for rail rows only.
   const railRow = compactAssistant && noBubbleBorder;
+  const hasAfterBody = hasVisibleReactNode(afterBody);
   const assistantActionRhythmStack = !isUser && showAssistantFollowups;
   const tightenAssistantBodyLeading = assistantActionRhythmStack || actionRhythmBodyTail;
   const assistantBodyLeadingClass = tightenAssistantBodyLeading ? "leading-snug" : "leading-relaxed";
@@ -1034,9 +1122,10 @@ export function ImBubble({
               </div>
             ) : null}
             {hasBody || message.forwardedHistory || contentBadge ? (
+            <div className="agx-im-user-bubble-nest">
             <MaybeConversationContent
               active={showSenderIdentity}
-              className="agx-im-user-bubble agx-im-body-type relative min-w-0 max-w-full border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+              className={`agx-im-user-bubble agx-im-body-type relative min-w-0 max-w-full overflow-visible border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed${showHarnessNest ? " agx-im-user-bubble--harness-nest" : ""}`}
               style={userBubbleStyle}
             >
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
@@ -1091,10 +1180,17 @@ export function ImBubble({
                 ) : null}
               </div>
             </MaybeConversationContent>
+            {showHarnessNest ? (
+              <HarnessAvatarBadge
+                harnessId={turnHarnessId}
+                metadata={message.metadata}
+              />
+            ) : null}
+            </div>
             ) : (
               <div ref={msgContentRef} className="hidden" aria-hidden />
             )}
-            {hideActions ? null : (
+            {hideActions || !(hasBody || message.forwardedHistory || contentBadge) ? null : (
               <div className="agx-im-user-actions">
                 <div className="agx-im-user-actions-icons">
                   <MessageTimestamp ts={message.timestamp} align="right" />
@@ -1357,6 +1453,18 @@ export function ImBubble({
                         <StreamingDots compact={compactAssistant && noBubbleBorder} />
                       )
                     ) : null}
+                    {showInlineCodebuddyLogin ? (
+                      <CodebuddyLoginPrompt variant="inline" onLogin={onCodebuddyLogin!} />
+                    ) : showCodebuddyLoginPendingTip && codebuddyLoginTipPhase ? (
+                      <CodebuddyLoginPendingTip
+                        phase={codebuddyLoginTipPhase}
+                        error={codebuddyLoginOAuthError}
+                      />
+                    ) : showResolvedCodebuddyLoginNotice ? (
+                      <p className="mt-2 text-[13px] leading-relaxed text-text-muted">
+                        {t("harness.codebuddyLogin.resolvedNotice")}
+                      </p>
+                    ) : null}
                     {!showMetaCitation && webReferences.length > 0 ? (
                       <div className="mt-2">
                         <CitationSourcesCard references={webReferences} />
@@ -1373,7 +1481,7 @@ export function ImBubble({
                 onRevealPath={onRevealPath}
               />
             ) : null}
-            {afterBody ? (
+            {hasAfterBody ? (
               <div className="agx-artifact-action-row mt-2 flex w-full min-w-0 items-center gap-1.5 px-3">
                 <div className="min-w-0 flex-1">{afterBody}</div>
                 {assistantIconButtons && !showAssistantFollowups ? (
@@ -1398,7 +1506,7 @@ export function ImBubble({
                 {assistantFollowupChipButtons}
               </div>
             ) : null}
-            {hideActions || showAssistantFollowups || !assistantIconButtons || afterBody ? null : (
+            {hideActions || showAssistantFollowups || !assistantIconButtons || hasAfterBody ? null : (
               <div className={actionOnlyClass}>
                 {assistantActionLine}
               </div>

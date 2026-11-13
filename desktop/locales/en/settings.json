@@ -2142,5 +2142,16 @@
     "linkOnly": "Link only",
     "openFile": "Open file",
     "connectionExists": "A connection with this endpoint and credential already exists: \"{{name}}\""
+  },
+  "harness": {
+    "title": "Default coding engine",
+    "hint": "Only seeds new chats and tasks. Existing conversations keep the engine they last used; changing this does not rebind them.",
+    "builtin": "Built-in Runtime",
+    "unavailable": "Local CLI not installed, unavailable",
+    "loading": "Loading engines…",
+    "loadFailed": "Failed to load engines",
+    "empty": "No engines available",
+    "builtinHint": "Near built-in runtime — ready out of the box",
+    "unavailableOption": "{{name}} (local CLI not installed)"
   }
 }

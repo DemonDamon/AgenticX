@@ -2,14 +2,14 @@
 name: agenticx-custom-project
 slug: agenticx-custom-project
 displayName: AgenticX 定制项目助手
-version: "1.1.0"
-summary: 帮助基于 AgenticX 初始化定制项目，并判断 bug 或新功能该留在自己的仓库还是给官方提 Issue / PR；含 depend 模式自研业务闭环分层、本地 Demo UI 归属与设计技能组合约定。
+version: "1.2.0"
+summary: 帮助基于 AgenticX 初始化定制项目，并判断 bug 或新功能该留在自己的仓库还是给官方提 Issue / PR；含 depend 模式自研业务闭环分层、本地 Demo UI 归属，以及默认前端栈 shadcn + Bits。
 license: Apache-2.0
 homepage: https://www.agxbuilder.com/
 description: Use when a user builds a custom or client project on AgenticX, or asks whether a bug or feature should stay in their repo or become an upstream issue or pull request. 用户说「帮我初始化项目」「这个 bug 要不要提给官方」「新功能该留在自己仓库还是提 PR」「怎么 fork」「连不上 GitHub」「Windows 找不到命令」时启用。也用于起草 Issue 或 PR。不用于只在 Near 里聊天，或只想写第一段示例智能体。
 metadata:
   author: Damon Li
-  version: "1.1.0"
+  version: "1.2.0"
 ---
 
 # AgenticX 定制项目助手
@@ -31,7 +31,7 @@ metadata:
 | 帮我给官方开一个 Issue / PR | 写草稿，满足条件再提交 |
 | pip 超时、GitHub 打不开、Windows 说找不到命令 | 先看报错对照 |
 | 基于 AgenticX 做领域 Demo / 最小可跑闭环（不改框架） | 初始化（depend）+ 业务分层指引 |
-| Demo UI 要换皮 / 想把设计技能并进来 | 初始化后的业务 style；设计技能按兄弟技能组合，不并入本技能 |
+| Demo UI 要换皮 / 想做漂亮门户 | 初始化后的业务 style；默认按本技能 `references/frontend-ui.md`（shadcn + Bits）；第三方设计技能可并列，勿把其全文粘进本技能 |
 | 门户、管理台、网关里的问题能不能直接改代码提 PR | 判断，结论是先开 Issue |
 
 ## 什么时候不用
@@ -104,11 +104,32 @@ python3 scripts/custom_project.py plan --mode depend --stack python --name my-ag
 - 让用户在**运行服务那台机器**的浏览器里打开，或由助手截图展示。只有服务真的在用户本机时，才说「在你电脑上打开 localhost」。
 - Demo UI 的主题、文案、布局是业务 style：`--kind style --where business`，留在业务仓，不提上游 PR。
 
-#### 组合其他技能，不合并正文
+#### Demo UI 默认前端栈（埋在本技能里）
 
-- UI 美化、设计系统指引用**独立**的设计类技能，与本技能并列组合使用；国内优先经 SkillHub 发现和安装。
-- **禁止**把第三方设计技能的正文合并进 `agenticx-custom-project`，也不要把本技能内容并进别人的技能。
-- 安装任何技能前，先汇总来源、版本、风险，征得用户确认。
+要做本地 Demo 门户或展示页时，**默认**用 shadcn（常规 UI）+ Bits（动效），共用一套 Tailwind。完整步骤、各框架 registry 与兼容性检查见 [references/frontend-ui.md](references/frontend-ui.md)。
+
+| 层 | 选型 |
+| --- | --- |
+| 按钮 / 表单 / 弹窗 | shadcn/ui、shadcn-vue 或 shadcn-svelte |
+| 极光 / 文字动画 / 鼠标特效 | React Bits、Vue Bits 或 Svelte Bits |
+| 规则 | 同一项目只装一套框架；不把 React/Vue/Svelte 组件混进同一页面 |
+
+快速记忆（React）：
+
+```bash
+npx shadcn@latest init
+# components.json 合并 registries["@react-bits"] = "https://reactbits.dev/r/{name}.json"
+npx shadcn@latest add button
+npx shadcn@latest add @react-bits/SplitText-TS-TW
+```
+
+组件名以官网变体为准（如 `SplitText-TS-TW`），不要猜小写串；装前核对 peer 依赖。换皮仍是业务仓：`--kind style --where business`。
+
+#### 组合其他技能，不合并第三方正文
+
+- 布局文案、品牌规范等仍可另装**独立**设计类技能，与本技能并列；国内优先经 SkillHub 发现和安装。
+- **禁止**把第三方设计技能的全文粘进 `agenticx-custom-project`；本技能只维护上面这套默认前端栈说明。也不要把本技能内容并进别人的技能。
+- 安装任何外部技能前，先汇总来源、版本、风险，征得用户确认。
 
 ### 2. 判断 bug 或新功能
 
@@ -283,7 +304,7 @@ python3 scripts/custom_project.py self-test
 
 **助手在他的电脑上启动了 Demo UI，我笔记本打不开 127.0.0.1？** `127.0.0.1` 是**运行服务那台机器**的环回。在助手桌面浏览器打开，或让助手截图。详见 [references/faq.md](references/faq.md)。
 
-**能把设计技能的正文并进这个技能吗？** 不能。设计技能按兄弟技能组合（SkillHub 安装），业务 UI 换皮判 `--kind style --where business`，不提上游。
+**能把第三方设计技能全文并进这个技能吗？** 不能。默认前端栈（shadcn + Bits）已写在本技能 [references/frontend-ui.md](references/frontend-ui.md)；其它设计技能按兄弟技能并列。业务 UI 换皮判 `--kind style --where business`，不提上游。
 
 **各个业务仓必须锁同一个 AgenticX 版本吗？** 不必。各仓库使用自己验证过的版本。
 
@@ -307,6 +328,7 @@ python3 scripts/custom_project.py self-test
 | 文件 | 什么时候打开 |
 | --- | --- |
 | `scripts/custom_project.py` | 检查环境、初始化、判断、草稿、提交、自检 |
+| [references/frontend-ui.md](references/frontend-ui.md) | 搭 Demo 门户 / 换皮：shadcn + Bits |
 | [references/examples.md](references/examples.md) | 要对照一个完整案例 |
 | [references/faq.md](references/faq.md) | 用户问「为什么不能」 |
 | [references/troubleshooting.md](references/troubleshooting.md) | 命令失败，需要按报错往下做 |

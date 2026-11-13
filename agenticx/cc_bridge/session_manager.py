@@ -24,6 +24,10 @@ from agenticx.cc_bridge.ndjson import (
     line_looks_like_result_success,
     parse_control_request,
 )
+from agenticx.cc_bridge.pending_permissions import (
+    PendingPermission,
+    pending_permission_from_control_request,
+)
 from agenticx.cc_bridge.tui_parser import ANCHOR_PREFIX, monotonic_now, parse_visible_tui_tail
 
 _LOG = logging.getLogger(__name__)
@@ -43,9 +47,13 @@ class BridgeSession:
     done: threading.Event = field(default_factory=threading.Event)
     exit_code: Optional[int] = None
     auto_allow: bool = False
+    # Near confirm strategy for headless can_use_tool: ask | allowlist | auto
+    permission_policy: str = "ask"
+    pending_permissions: Dict[str, PendingPermission] = field(default_factory=dict)
     log_path: str = ""
     log_lock: threading.Lock = field(default_factory=threading.Lock)
     session_kind: str = "headless"  # headless | visible_tui
+    model: Optional[str] = None  # CLI --model when spawn requested one
     pty_master_fd: Optional[int] = None
     pty_listeners: List[queue.Queue[Optional[bytes]]] = field(default_factory=list)
     pty_listener_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -53,6 +61,16 @@ class BridgeSession:
     _tui_send_started: float = field(default=0.0, repr=False)
     _tui_last_line_count: int = field(default=0, repr=False)
     _tui_last_activity_mono: float = field(default=0.0, repr=False)
+    # Headless follow-up watermark: ignore result/success lines at indices
+    # below this value (set in send_user_message before writing stdin).
+    _result_wait_watermark: int = field(default=0, repr=False)
+    # Mid-turn visible-text + tool-progress streaming (Near SSE pump).
+    # Bumped in send_user_message; drain_* no-ops until then.
+    _stream_generation: int = field(default=0, repr=False)
+    _visible_generation: int = field(default=0, repr=False)
+    _visible_cursor: int = field(default=0, repr=False)
+    _visible_tracker: Any = field(default=None, repr=False)
+    _tool_tracker: Any = field(default=None, repr=False)
 
     def append_line(self, line: str) -> None:
         with self.lock:
@@ -210,8 +228,10 @@ class BridgeSessionManager:
             "poll": poll,
             "log_path": s.log_path,
             "mode": s.session_kind,
+            "model": s.model,
             "state": "running" if running else "stopped",
             "interactive_waiting": bool(s.session_kind == "visible_tui" and running),
+            "pending_permission_count": len(s.pending_permissions),
         }
 
     def get(self, session_id: str) -> Optional[BridgeSession]:
@@ -221,19 +241,37 @@ class BridgeSessionManager:
     def _on_control_request(self, session: BridgeSession, req: Dict[str, Any]) -> None:
         if session.session_kind == "visible_tui":
             return
-        if not session.auto_allow:
+        pending = pending_permission_from_control_request(req)
+        if pending is None:
             return
-        request_id = str(req.get("request_id") or "")
-        inner = req.get("request")
-        if not isinstance(inner, dict) or not request_id:
+        # Global auto_allow (spawn / env) still auto-answers everything.
+        if session.auto_allow:
+            line = build_control_response_allow(
+                pending.request_id,
+                pending.tool_input,
+                pending.tool_use_id or None,
+            )
+            self._write_stdin(session, line)
             return
-        tool_input = inner.get("input")
-        if not isinstance(tool_input, dict):
-            tool_input = {}
-        tool_use_id = inner.get("tool_use_id")
-        tid = str(tool_use_id) if tool_use_id is not None else None
-        line = build_control_response_allow(request_id, tool_input, tid)
-        self._write_stdin(session, line)
+        # 按需确认: auto-allow low-risk Read/Glob/Grep without Near UI.
+        policy = str(session.permission_policy or "ask").strip().lower()
+        if policy == "allowlist" and pending.risk == "low":
+            line = build_control_response_allow(
+                pending.request_id,
+                pending.tool_input,
+                pending.tool_use_id or None,
+            )
+            self._write_stdin(session, line)
+            return
+        with session.lock:
+            session.pending_permissions[pending.request_id] = pending
+        _LOG.info(
+            "queued can_use_tool request_id=%s tool=%s display=%s session=%s",
+            pending.request_id,
+            pending.tool_name,
+            pending.display_name,
+            session.session_id,
+        )
 
     def _write_stdin(self, session: BridgeSession, data: str) -> None:
         if session.pty_master_fd is not None:
@@ -259,13 +297,25 @@ class BridgeSessionManager:
         cwd: str,
         *,
         auto_allow_permissions: Optional[bool] = None,
+        permission_policy: Optional[str] = None,
         mode: str = "headless",
+        model: Optional[str] = None,
     ) -> BridgeSession:
         if mode not in {"headless", "visible_tui"}:
             mode = "headless"
+        model_id = str(model or "").strip() or None
         if mode == "visible_tui":
-            return self._start_session_visible_tui(cwd, auto_allow_permissions=auto_allow_permissions)
-        return self._start_session_headless(cwd, auto_allow_permissions=auto_allow_permissions)
+            return self._start_session_visible_tui(
+                cwd,
+                auto_allow_permissions=auto_allow_permissions,
+                model=model_id,
+            )
+        return self._start_session_headless(
+            cwd,
+            auto_allow_permissions=auto_allow_permissions,
+            permission_policy=permission_policy,
+            model=model_id,
+        )
 
     def _log_path_for_sid(self, sid: str) -> str:
         log_dir = Path(os.environ.get("CC_BRIDGE_LOG_DIR", "~/.agenticx/logs/cc-bridge")).expanduser()
@@ -280,10 +330,18 @@ class BridgeSessionManager:
         cwd: str,
         *,
         auto_allow_permissions: Optional[bool] = None,
+        permission_policy: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> BridgeSession:
         exe = os.environ.get("CC_BRIDGE_EXECUTABLE", "claude").strip() or "claude"
         if auto_allow_permissions is None:
             auto_allow_permissions = _env_truthy("CC_BRIDGE_AUTO_ALLOW_PERMISSIONS", "0")
+        policy = str(permission_policy or "").strip().lower()
+        if policy not in {"ask", "allowlist", "auto"}:
+            policy = "auto" if auto_allow_permissions else "ask"
+        if policy == "auto":
+            auto_allow_permissions = True
+        model_id = str(model or "").strip() or None
 
         path = Path(cwd).resolve()
         path.mkdir(parents=True, exist_ok=True)
@@ -296,9 +354,12 @@ class BridgeSessionManager:
             "stream-json",
             "--output-format",
             "stream-json",
+            "--include-partial-messages",
             "--permission-prompt-tool",
             "stdio",
         ]
+        if model_id:
+            args.extend(["--model", model_id])
 
         env = os.environ.copy()
         env.setdefault("CLAUDE_CODE_ENVIRONMENT_KIND", "agx_cc_bridge")
@@ -321,10 +382,15 @@ class BridgeSessionManager:
             cwd=str(path),
             proc=proc,
             auto_allow=bool(auto_allow_permissions),
+            permission_policy=policy,
             log_path=log_path,
             session_kind="headless",
+            model=model_id,
         )
-        session.append_log(f"[bridge] started headless session_id={sid} pid={proc.pid} cwd={path}")
+        session.append_log(
+            f"[bridge] started headless session_id={sid} pid={proc.pid} cwd={path}"
+            + (f" model={model_id}" if model_id else "")
+        )
 
         assert proc.stdout is not None
         assert proc.stderr is not None
@@ -351,6 +417,7 @@ class BridgeSessionManager:
         cwd: str,
         *,
         auto_allow_permissions: Optional[bool] = None,
+        model: Optional[str] = None,
     ) -> BridgeSession:
         try:
             import pty  # noqa: F401
@@ -359,6 +426,7 @@ class BridgeSessionManager:
 
         _ = auto_allow_permissions  # TUI: interactive permission in terminal; NDJSON auto_allow N/A
         exe = os.environ.get("CC_BRIDGE_EXECUTABLE", "claude").strip() or "claude"
+        model_id = str(model or "").strip() or None
         path = Path(cwd).resolve()
         path.mkdir(parents=True, exist_ok=True)
 
@@ -374,8 +442,11 @@ class BridgeSessionManager:
         env.setdefault("CLAUDE_CODE_ENVIRONMENT_KIND", "agx_cc_bridge")
         env.setdefault("TERM", "xterm-256color")
 
+        argv = [exe]
+        if model_id:
+            argv.extend(["--model", model_id])
         proc = subprocess.Popen(
-            [exe],
+            argv,
             cwd=str(path),
             stdin=slave_fd,
             stdout=slave_fd,
@@ -399,9 +470,13 @@ class BridgeSessionManager:
             auto_allow=False,
             log_path=log_path,
             session_kind="visible_tui",
+            model=model_id,
             pty_master_fd=master_write_fd,
         )
-        session.append_log(f"[bridge] started visible_tui session_id={sid} pid={proc.pid} cwd={path}")
+        session.append_log(
+            f"[bridge] started visible_tui session_id={sid} pid={proc.pid} cwd={path}"
+            + (f" model={model_id}" if model_id else "")
+        )
 
         threading.Thread(
             target=_pty_reader_thread,
@@ -441,6 +516,21 @@ class BridgeSessionManager:
             session.append_log(anchor)
             self._write_stdin(session, text + "\r")
             return
+        # Watermark before stdin write so wait_for_success_result ignores
+        # prior-turn result/success lines already buffered in session.lines.
+        # Also reset the visible-text tracker so Near can stream this turn only.
+        from agenticx.harness.stream_json_text import (
+            ToolProgressTracker,
+            VisibleTextTracker,
+        )
+
+        with session.lock:
+            session._result_wait_watermark = len(session.lines)
+            session._stream_generation = int(session._stream_generation or 0) + 1
+            session._visible_generation = session._stream_generation
+            session._visible_cursor = session._result_wait_watermark
+            session._visible_tracker = VisibleTextTracker()
+            session._tool_tracker = ToolProgressTracker()
         line = build_user_message_line(text)
         self._write_stdin(session, line)
 
@@ -459,11 +549,20 @@ class BridgeSessionManager:
             raise KeyError("unknown session")
         if session.session_kind == "visible_tui":
             raise KeyError("permission API not supported for visible_tui; approve in TUI")
+        rid = str(request_id or "").strip()
+        queued: Optional[PendingPermission] = None
+        with session.lock:
+            queued = session.pending_permissions.pop(rid, None)
+        # Prefer stored input / tool_use_id when the caller omits them.
+        if tool_input is None and queued is not None:
+            tool_input = queued.tool_input
+        if not tool_use_id and queued is not None and queued.tool_use_id:
+            tool_use_id = queued.tool_use_id
         if allow:
             inp = tool_input if isinstance(tool_input, dict) else {}
-            line = build_control_response_allow(request_id, inp, tool_use_id)
+            line = build_control_response_allow(rid, inp, tool_use_id)
         else:
-            line = build_control_response_deny(request_id, deny_message, tool_use_id)
+            line = build_control_response_deny(rid, deny_message, tool_use_id)
         self._write_stdin(session, line)
 
     def stop_session(self, session_id: str) -> bool:
@@ -537,24 +636,200 @@ class BridgeSessionManager:
         winsize = struct.pack("HHHH", r, c, 0, 0)
         fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
 
+    def list_pending_permissions(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return all unanswered can_use_tool prompts for a session."""
+        session = self.get(session_id)
+        if session is None:
+            return []
+        with session.lock:
+            return [p.to_public_dict() for p in session.pending_permissions.values()]
+
+    def drain_pending_permissions(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return newly-queued permissions not yet emitted to Near SSE.
+
+        Marks each returned row as emitted so the SSE pump can re-poll without
+        re-opening the same ConfirmDialog. Rows stay in ``pending_permissions``
+        until :meth:`respond_permission` clears them.
+        """
+        session = self.get(session_id)
+        if session is None:
+            return []
+        out: List[Dict[str, Any]] = []
+        with session.lock:
+            for pending in session.pending_permissions.values():
+                if pending.emitted:
+                    continue
+                pending.emitted = True
+                row = pending.to_public_dict()
+                # Keep tool_input for allow response (not shown in bubble).
+                row["tool_input"] = dict(pending.tool_input)
+                out.append(row)
+        return out
+
+    def drain_midturn_stream_items(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return ordered mid-turn text/tool items since the last drain (or []).
+
+        Safe to call from the studio SSE loop while ``wait_for_success_result``
+        blocks on another thread. No-ops until ``send_user_message`` arms the
+        per-turn trackers (avoids replaying a prior turn into the bubble).
+        """
+        from agenticx.harness.stream_json_text import (
+            ToolProgressTracker,
+            VisibleTextTracker,
+            drain_midturn_items_from_lines,
+        )
+
+        session = self.get(session_id)
+        if session is None:
+            return []
+        with session.lock:
+            if int(session._visible_generation or 0) != int(session._stream_generation or 0):
+                return []
+            if int(session._stream_generation or 0) <= 0:
+                return []
+            text_tracker = session._visible_tracker
+            if text_tracker is None:
+                text_tracker = VisibleTextTracker()
+                session._visible_tracker = text_tracker
+            tool_tracker = session._tool_tracker
+            if tool_tracker is None:
+                tool_tracker = ToolProgressTracker()
+                session._tool_tracker = tool_tracker
+            cursor = int(session._visible_cursor or 0)
+            chunk_lines = list(session.lines)
+        items, new_cursor = drain_midturn_items_from_lines(
+            chunk_lines,
+            start_index=cursor,
+            text_tracker=text_tracker,
+            tool_tracker=tool_tracker,
+        )
+        with session.lock:
+            # Only advance if generation is still the same turn.
+            if int(session._visible_generation or 0) == int(session._stream_generation or 0):
+                session._visible_cursor = new_cursor
+        out: List[Dict[str, Any]] = []
+        for item in items:
+            if item.kind == "text":
+                if item.text:
+                    out.append({"kind": "text", "text": item.text})
+            elif item.kind == "tool_start":
+                out.append(
+                    {
+                        "kind": "tool_start",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                    }
+                )
+            elif item.kind == "tool_end":
+                out.append(
+                    {
+                        "kind": "tool_end",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                        "is_error": bool(item.is_error),
+                    }
+                )
+        return out
+
+    def drain_visible_stream_text(self, session_id: str) -> str:
+        """Return newly-visible assistant text since the last drain (or "").
+
+        Convenience wrapper over ``drain_midturn_stream_items`` for callers that
+        only need token text (unit tests / older pumps).
+        """
+        items = self.drain_midturn_stream_items(session_id)
+        return "".join(
+            str(item.get("text") or "")
+            for item in items
+            if item.get("kind") == "text"
+        )
+
+    def list_turn_tool_progress(self, session_id: str) -> List[Dict[str, Any]]:
+        """Snapshot all tool start/end events for the current turn (no text).
+
+        Used by the studio SSE pump as an end-of-turn fallback when mid-turn
+        drains were missed (client abort / late surface_sid bind). Does not
+        advance the visible-text cursor or mutate the mid-turn trackers.
+        """
+        from agenticx.harness.stream_json_text import (
+            ToolProgressTracker,
+            drain_midturn_items_from_lines,
+            VisibleTextTracker,
+        )
+
+        session = self.get(session_id)
+        if session is None:
+            return []
+        with session.lock:
+            if int(session._stream_generation or 0) <= 0:
+                return []
+            watermark = int(session._result_wait_watermark or 0)
+            chunk_lines = list(session.lines)
+        # Fresh trackers: do not disturb the live mid-turn drain state.
+        items, _ = drain_midturn_items_from_lines(
+            chunk_lines,
+            start_index=watermark,
+            text_tracker=VisibleTextTracker(),
+            tool_tracker=ToolProgressTracker(),
+        )
+        out: List[Dict[str, Any]] = []
+        for item in items:
+            if item.kind == "tool_start":
+                out.append(
+                    {
+                        "kind": "tool_start",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                    }
+                )
+            elif item.kind == "tool_end":
+                out.append(
+                    {
+                        "kind": "tool_end",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                        "is_error": bool(item.is_error),
+                    }
+                )
+        return out
+
     def wait_for_success_result(
+
         self,
         session_id: str,
         timeout_sec: float,
         poll_interval: float = 0.2,
+        *,
+        after_line_index: Optional[int] = None,
     ) -> Tuple[bool, str]:
-        """Block until a result/success line appears, timeout, or process exit."""
+        """Block until a *new* result/success line appears, timeout, or exit.
+
+        Only lines at index >= watermark count. Watermark defaults to
+        ``session._result_wait_watermark`` (set by ``send_user_message``);
+        callers may pass ``after_line_index`` explicitly. Without this,
+        follow-up turns would immediately succeed on a prior turn's result
+        already present in ``session.lines``.
+        """
         session = self.get(session_id)
         if session is None:
             return False, "unknown session"
         deadline = time.monotonic() + timeout_sec
-        last_count = 0
+        with session.lock:
+            watermark = (
+                int(after_line_index)
+                if after_line_index is not None
+                else int(session._result_wait_watermark)
+            )
+            watermark = max(0, watermark)
+            last_count = watermark
         while time.monotonic() < deadline:
             if session.done.is_set() and session.proc.poll() is not None:
                 with session.lock:
                     all_lines = list(session.lines)
                     tail = session.recent_text()
-                for line in all_lines:
+                for idx, line in enumerate(all_lines):
+                    if idx < watermark:
+                        continue
                     if line_looks_like_result_success(line):
                         return True, tail
                 return False, f"process exited code={session.exit_code}\n{tail}"

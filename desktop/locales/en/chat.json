@@ -359,7 +359,14 @@
     "effortMax": "Max",
     "effortUltra": "Ultra",
     "effortExtreme": "Extreme",
-    "contextWindow": "Context window"
+    "contextWindow": "Context window",
+    "harnessNoModelOption": "This agent has no model option",
+    "harnessEmbeddingUnsupported": "Embedding models cannot be used with this agent",
+    "harnessOllamaUnsupported": "Local Ollama models cannot be used with this agent",
+    "harnessNoneCompatible": "No models available for this agent",
+    "harnessFilteredHint": "Some models are unavailable for the current agent",
+    "claudeLiveSettings": "Claude live settings",
+    "claudeLiveSettingsHint": "Model aliases from the live ~/.claude/settings.json"
   },
   "composer": {
     "bindFolders": "Bind folders",
@@ -625,6 +632,7 @@
     "favorited": "Favorited",
     "unattendedSaveFailed": "Could not save the unattended switch",
     "busyForChat": "This agent is still running. Chat opens when it finishes.",
+    "sessionBusyElsewhere": "Previous turn is still running. Please wait before sending again.",
     "bgTaskDone": "Background task finished",
     "turnInterrupted": "This turn was interrupted. Syncing status…",
     "continueCreating": "Creating a new task...",
@@ -1078,6 +1086,42 @@
       "policy": "This turn was stopped by an enterprise compliance policy",
       "rounds": "Maximum tool rounds reached",
       "budget": "Managed usage limit exceeded"
+    }
+  },
+  "harness": {
+    "builtin": "AgenticX",
+    "switching": "Switching engine…",
+    "switchFailed": "Engine switch failed; previous engine restored",
+    "switchBusy": "A turn is still running — try switching again after it settles",
+    "switchBoundary": "Switched engine: {{from}} → {{to}} ({{strategy}})",
+    "tooltip": "Choose the coding-agent harness for this session",
+    "unavailable": "Local CLI not installed",
+    "loading": "Loading harnesses…",
+    "loadFailed": "Failed to load harnesses",
+    "empty": "No harnesses available",
+    "badgeAgenticX": "AgenticX",
+    "badgeClaudeCode": "Claude Code",
+    "badgeCodeBuddy": "CodeBuddy",
+    "badgeOther": "{{name}}",
+    "badgeCodex": "Codex",
+    "badgeOpenCode": "OpenCode",
+    "badgeDeepSeek": "DeepSeek",
+    "badgeHermesAgent": "Hermes Agent",
+    "badgePiAgent": "PI Agent",
+    "badgeOpenClaw": "OpenClaw",
+    "codebuddyLogin": {
+      "banner": "CodeBuddy Tencent login expired. Click to sign in again.",
+      "body": "CodeBuddy Tencent login is required. Sign in again to continue.",
+      "retryHint": "After authorization, use Retry on your last question to continue.",
+      "authorizing": "Opening the browser for Tencent sign-in. Complete login there, then return to Near.",
+      "oauthSuccess": "Authorization succeeded. Use Retry on your last question to continue.",
+      "oauthFailed": "Authorization did not finish: {{error}}",
+      "oauthFailedGeneric": "Tencent authorization did not complete. Try again later.",
+      "oauthStartFailed": "Could not start CodeBuddy login. Install the CodeBuddy CLI and try again.",
+      "harnessRefreshFailed": "Sign-in succeeded but refreshing the CodeBuddy session failed. Retry or restart Near.",
+      "resolvedNotice": "This turn stopped earlier because CodeBuddy login was required.",
+      "terminal": "CodeBuddy login",
+      "writeFailed": "The terminal could not accept the login command yet. Run codebuddy login in the terminal that opened."
     }
   }
 }

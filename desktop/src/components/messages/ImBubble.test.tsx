@@ -504,6 +504,33 @@ describe("ImBubble assistant protocol boundary", () => {
     expect(iconsIdx).toBeGreaterThan(cardIdx);
   });
 
+  it("does not open an empty artifact row for a hollow afterBody fragment", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{ id: "no-artifact", role: "assistant", content: "思考下，人生" }}
+        afterBody={
+          <>
+            {null}
+            {undefined}
+          </>
+        }
+        onCopyMessage={() => {}}
+        onContinueFromMessage={() => {}}
+      />,
+    );
+
+    expect(html).not.toContain("agx-artifact-action-row");
+    expect(html).toContain("agx-assistant-action-icons");
+    expect(html).toMatch(/class="[^"]*agx-assistant-action-icons[^"]*\boverflow-hidden\b[^"]*"/);
+  });
+
+  it("hides user action chrome when the bubble body is empty", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble message={{ id: "empty-user", role: "user", content: "   " }} />,
+    );
+    expect(html).not.toContain("agx-im-user-actions");
+  });
+
   it("keeps copy/usage and follow-up chips on a single clipped action line", () => {
     const html = renderToStaticMarkup(
       <ImBubble
@@ -738,7 +765,8 @@ describe("ImBubble peer human speaker", () => {
       />,
     );
     expect(html).toContain('aria-label="' + i18n.t("actions.openScratch", { ns: "chat" }) + '"');
-    expect(html).toContain("lucide-message-square");
+    // Scratch uses the custom ScratchChatIcon SVG, not lucide-message-square.
+    expect(html).toContain("M7.2 18.2");
     expect(html).toContain("lucide-quote");
   });
 

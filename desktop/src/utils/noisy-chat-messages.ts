@@ -85,6 +85,16 @@ function ephemeralStopTexts(): Set<string> {
   ]);
 }
 
+/** SSE / chat error codes that mean "turn already in flight" — toast only, no ❌ tool row. */
+export function isSessionBusyElsewhereError(errorCode: unknown): boolean {
+  const code = String(errorCode ?? "").trim();
+  return (
+    code === "session_busy_elsewhere"
+    || code === "harness_turn_busy"
+    || code === "session_busy"
+  );
+}
+
 /** Runtime STOP_MESSAGE / interrupt ack — UI uses turn_interrupted instead. */
 export function isEphemeralStopErrorText(text: string): boolean {
   const normalized = normalizeNoisyToolStatusContent(text);

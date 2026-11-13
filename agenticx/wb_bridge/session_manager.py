@@ -18,6 +18,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from agenticx.cc_bridge.ndjson import build_user_message_line
 from agenticx.wb_bridge import events as wb_events
+from agenticx.wb_bridge.custom_model import (
+    codebuddy_model_config_paths,
+    resolve_codebuddy_cli_model,
+)
 from agenticx.wb_bridge.settings import resolve_codebuddy_executable
 
 _LOG = logging.getLogger(__name__)
@@ -46,6 +50,7 @@ class WbBridgeSession:
     log_path: str = ""
     log_lock: threading.Lock = field(default_factory=threading.Lock)
     permission_mode: str = "default"
+    model: Optional[str] = None  # CLI --model when spawn requested one
     turn_state: str = "idle"  # "idle" | "running"
     turn_seq: int = 0  # incremented on each send
     turns_completed: int = 0
@@ -66,6 +71,12 @@ class WbBridgeSession:
     turn_done: threading.Event = field(default_factory=threading.Event)
     turn_line_start: int = 0  # lines index at last send; 0 if never sent
     last_idempotency_key: str = ""
+    # Mid-turn visible-text + tool-progress streaming (Near SSE pump).
+    _stream_generation: int = 0
+    _visible_generation: int = 0
+    _visible_cursor: int = 0
+    _visible_tracker: Any = None
+    _tool_tracker: Any = None
 
     def append_line(self, line: str) -> None:
         with self.lock:
@@ -209,6 +220,7 @@ class WbBridgeSessionManager:
                 "log_path": s.log_path,
                 "state": "running" if running else "stopped",
                 "permission_mode": s.permission_mode,
+                "model": s.model,
                 "turn_state": s.turn_state,
                 "turn_seq": s.turn_seq,
                 "turn_elapsed_sec": turn_elapsed,
@@ -243,8 +255,16 @@ class WbBridgeSessionManager:
         except OSError as exc:
             _LOG.warning("stdin write failed session=%s err=%s", session.session_id, exc)
 
-    def start_session(self, cwd: str, *, permission_mode: str = "default") -> WbBridgeSession:
-        return self._start_session_headless(cwd, permission_mode=permission_mode)
+    def start_session(
+        self,
+        cwd: str,
+        *,
+        permission_mode: str = "default",
+        model: Optional[str] = None,
+    ) -> WbBridgeSession:
+        return self._start_session_headless(
+            cwd, permission_mode=permission_mode, model=model
+        )
 
     def _log_path_for_sid(self, sid: str) -> str:
         log_dir = Path(os.environ.get("WB_BRIDGE_LOG_DIR", "~/.agenticx/logs/wb-bridge")).expanduser()
@@ -259,9 +279,17 @@ class WbBridgeSessionManager:
         cwd: str,
         *,
         permission_mode: str = "default",
+        model: Optional[str] = None,
     ) -> WbBridgeSession:
         exe = resolve_codebuddy_executable()
         mode = _normalize_permission_mode(permission_mode)
+        model_id = str(model or "").strip() or None
+        # argv may be custom-local:<id>; session.model stays the picker id so
+        # a live surface is not respawned as a model mismatch every turn.
+        cli_model = resolve_codebuddy_cli_model(
+            model_id,
+            config_paths=codebuddy_model_config_paths(),
+        )
 
         path = Path(cwd).resolve()
         path.mkdir(parents=True, exist_ok=True)
@@ -274,9 +302,12 @@ class WbBridgeSessionManager:
             "stream-json",
             "--output-format",
             "stream-json",
+            "--include-partial-messages",
             "--permission-mode",
             mode,
         ]
+        if cli_model:
+            args.extend(["--model", cli_model])
 
         env = os.environ.copy()
         env.setdefault("CODEBUDDY_ENVIRONMENT_KIND", "agx_wb_bridge")
@@ -300,9 +331,11 @@ class WbBridgeSessionManager:
             proc=proc,
             log_path=log_path,
             permission_mode=mode,
+            model=model_id,
         )
         session.append_log(
             f"[bridge] started headless session_id={sid} pid={proc.pid} cwd={path} argv={args}"
+            + (f" model={model_id}" if model_id else "")
         )
 
         assert proc.stdout is not None
@@ -345,6 +378,11 @@ class WbBridgeSessionManager:
         if session is None:
             raise KeyError("unknown session")
         line = build_user_message_line(text)
+        from agenticx.harness.stream_json_text import (
+            ToolProgressTracker,
+            VisibleTextTracker,
+        )
+
         with session.lock:
             session.turn_done.clear()
             session.turn_state = "running"
@@ -357,6 +395,11 @@ class WbBridgeSessionManager:
             session.written_paths = []
             session.turn_line_start = len(session.lines)
             session.last_idempotency_key = idempotency_key
+            session._stream_generation = int(session._stream_generation or 0) + 1
+            session._visible_generation = session._stream_generation
+            session._visible_cursor = session.turn_line_start
+            session._visible_tracker = VisibleTextTracker()
+            session._tool_tracker = ToolProgressTracker()
         self._write_stdin(session, line)
 
     def stop_session(self, session_id: str) -> bool:
@@ -372,7 +415,83 @@ class WbBridgeSessionManager:
                 session.proc.kill()
         return True
 
+    def drain_midturn_stream_items(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return ordered mid-turn text/tool items since the last drain (or []).
+
+        Mirrors the Claude Code bridge helper so Near's external-harness SSE
+        can stream CodeBuddy tokens + tool rows with the same pump.
+        """
+        from agenticx.harness.stream_json_text import (
+            ToolProgressTracker,
+            VisibleTextTracker,
+            drain_midturn_items_from_lines,
+        )
+
+        session = self.get(session_id)
+        if session is None:
+            return []
+        with session.lock:
+            if int(session._visible_generation or 0) != int(session._stream_generation or 0):
+                return []
+            if int(session._stream_generation or 0) <= 0:
+                return []
+            text_tracker = session._visible_tracker
+            if text_tracker is None:
+                text_tracker = VisibleTextTracker()
+                session._visible_tracker = text_tracker
+            tool_tracker = session._tool_tracker
+            if tool_tracker is None:
+                tool_tracker = ToolProgressTracker()
+                session._tool_tracker = tool_tracker
+            cursor = int(session._visible_cursor or 0)
+            chunk_lines = list(session.lines)
+        items, new_cursor = drain_midturn_items_from_lines(
+            chunk_lines,
+            start_index=cursor,
+            text_tracker=text_tracker,
+            tool_tracker=tool_tracker,
+        )
+        with session.lock:
+            if int(session._visible_generation or 0) == int(session._stream_generation or 0):
+                session._visible_cursor = new_cursor
+        out: List[Dict[str, Any]] = []
+        for item in items:
+            if item.kind == "text":
+                if item.text:
+                    out.append({"kind": "text", "text": item.text})
+            elif item.kind == "tool_start":
+                out.append(
+                    {
+                        "kind": "tool_start",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                    }
+                )
+            elif item.kind == "tool_end":
+                out.append(
+                    {
+                        "kind": "tool_end",
+                        "tool_call_id": item.tool_call_id,
+                        "name": item.name,
+                        "is_error": bool(item.is_error),
+                    }
+                )
+        return out
+
+    def drain_visible_stream_text(self, session_id: str) -> str:
+        """Return newly-visible assistant text since the last drain (or "").
+
+        Convenience wrapper over ``drain_midturn_stream_items``.
+        """
+        items = self.drain_midturn_stream_items(session_id)
+        return "".join(
+            str(item.get("text") or "")
+            for item in items
+            if item.get("kind") == "text"
+        )
+
     def wait_for_turn(
+
         self,
         session_id: str,
         timeout_sec: float,
