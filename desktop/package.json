@@ -46,7 +46,7 @@
     "mermaid": "^11.13.0",
     "monaco-editor": "^0.52.2",
     "node-pty": "^1.1.0",
-    "pdfjs-dist": "^6.4.299",
+    "pdfjs-dist": "^6.5.438",
     "prismjs": "^1.29.0",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
