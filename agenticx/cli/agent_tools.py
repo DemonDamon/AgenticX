@@ -50,6 +50,7 @@ from agenticx.runtime.plan_artifacts import (
     update_plan_artifact,
 )
 from agenticx.runtime.credential_store import redact_text
+from agenticx.runtime import studio_safety
 from agenticx.runtime.plan_mode import turn_intent_denial_message
 from agenticx.runtime.tool_result_budget import recall_tool_observation
 from agenticx.memory.session_store import SessionStore
@@ -13023,6 +13024,23 @@ async def dispatch_tool_async(
     runtime_tool_context: Optional[Any] = None,
 ) -> str:
     """Dispatch one tool call asynchronously and return result text."""
+    # SP1 safety-layer-mainline: Studio mainline choke point. Pre-execution
+    # input validation (six rules) + post-execution four-stage output
+    # pipeline, observe/enforce via AGX_STUDIO_SAFETY_MODE. Runtime metadata
+    # keys (__tool_call_id / __agent_id) ride along in arguments and are read
+    # here for audit correlation only.
+    tool_call_id = str(arguments.get("__tool_call_id", "") or "") if isinstance(arguments, dict) else ""
+    agent_id = str(arguments.get("__agent_id", "") or "") if isinstance(arguments, dict) else ""
+    session_id = _studio_session_id(session)
+    input_denial = studio_safety.validate_input(
+        name,
+        arguments,
+        session_id=session_id,
+        tool_call_id=tool_call_id,
+        agent_id=agent_id,
+    )
+    if input_denial:
+        return input_denial
     result = await _dispatch_tool_async_unredacted(
         name,
         arguments,
@@ -13035,7 +13053,15 @@ async def dispatch_tool_async(
         runtime_tool_context=runtime_tool_context,
     )
     if isinstance(result, str):
-        return redact_text(result)
+        result = redact_text(result)
+        result = studio_safety.sanitize_output(
+            name,
+            result,
+            session_id=session_id,
+            tool_call_id=tool_call_id,
+            agent_id=agent_id,
+        )
+        return result
     return result
 
 

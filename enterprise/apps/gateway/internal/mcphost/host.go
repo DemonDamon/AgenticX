@@ -39,6 +39,8 @@ func NewHost(handle *database.Handle, logger *slog.Logger, quotaTracker *quota.T
 	if logger == nil {
 		logger = slog.Default()
 	}
+	openapi := NewOpenAPIBackend()
+	openapi.SetAuditWriter(auditWriter)
 	h := &Host{
 		registry:    NewRegistry(handle, logger),
 		entitlement: NewEntitlementChecker(handle, logger),
@@ -48,7 +50,7 @@ func NewHost(handle *database.Handle, logger *slog.Logger, quotaTracker *quota.T
 		policy:      policy,
 		backends: map[string]Backend{
 			BackendEcho:    &EchoBackend{},
-			BackendOpenAPI: NewOpenAPIBackend(),
+			BackendOpenAPI: openapi,
 		},
 	}
 	// 连接器 backend 依赖数据库存储（定义/连接入 PG）；无数据库时不注册。

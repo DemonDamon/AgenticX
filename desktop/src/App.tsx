@@ -5,7 +5,11 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ExternalLinkConfirmDialog } from "./components/messages/ExternalLinkConfirmDialog";
 import { ClarificationDialog, type ClarificationAnswer } from "./components/ClarificationDialog";
 import { buildClarifyRequestBody } from "./utils/clarification-notice";
-import { shouldDeferAutoReport, shouldNotifySubagentCompletion } from "./utils/auto-report-gate";
+import {
+  shouldAutoReportSubagentCompletion,
+  shouldDeferAutoReport,
+  shouldNotifySubagentCompletion,
+} from "./utils/auto-report-gate";
 import type { ClarificationAnswer as ClarifySubmitAnswer } from "./utils/clarification-notice";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DeliveryPanel } from "./components/delivery/DeliveryPanel";
@@ -73,6 +77,7 @@ import {
 } from "./utils/model-options";
 import { scanAndPruneUnauthorizedVisibleModels } from "./utils/prune-unauthorized-visible-models";
 import { avatarPreloadKey, fetchAvatarsWithStartupRetry, fetchGroupsWithStartupRetry, fetchSessionsWithStartupRetry, mapAvatarsFromApi, runSplashCorePreload } from "./utils/splash-preload-core";
+import { readSessionHarnessBinding, resolveStickyPaneHarness } from "./utils/preferred-harness";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
 
@@ -113,6 +118,9 @@ type PersistedPaneState = {
   isolateActive?: boolean;
   scratchChats?: ScratchChat[];
   parkedScratchChats?: ScratchChat[];
+  /** null = explicit builtin. Absent key = unknown (do not invent Settings). */
+  harnessId?: string | null;
+  harnessFollowsPreference?: boolean;
 };
 
 type PersistedWorkspaceState = {
@@ -251,7 +259,21 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         isolateActive: row.isolateActive === true,
         scratchChats: normalizePersistedScratchChats(row.scratchChats),
         parkedScratchChats: normalizePersistedScratchChats(row.parkedScratchChats),
-      };
+        ...(Object.prototype.hasOwnProperty.call(row, "harnessId")
+          ? {
+              harnessId: (() => {
+                const raw = row.harnessId;
+                if (raw == null) return null;
+                const text = String(raw).trim();
+                if (!text || text === "python-agent") return null;
+                return text;
+              })(),
+            }
+          : {}),
+        ...(typeof row.harnessFollowsPreference === "boolean"
+          ? { harnessFollowsPreference: row.harnessFollowsPreference }
+          : {}),
+      } as PersistedPaneState;
     })
     .filter((item): item is PersistedPaneState => !!item);
   if (panes.length === 0) return null;
@@ -961,6 +983,29 @@ export function App() {
               console.error("[App init] restore pane failed:", pane.id, err);
             }
           }
+          for (const pane of hydratedPanes) {
+            const sid = String(pane.sessionId ?? "").trim();
+            if (!sid) continue;
+            try {
+              const plan = await resolveStickyPaneHarness({
+                pinned: pane.harnessFollowsPreference === false,
+                paneHarnessId: pane.harnessId,
+                readBinding: () => readSessionHarnessBinding(base, token, sid),
+              });
+              if (plan.harnessId !== undefined) {
+                pane.harnessId = plan.harnessId;
+                pane.harnessFollowsPreference = false;
+              }
+              if (plan.rebindHarnessId) {
+                await window.agenticxDesktop.setSessionHarness({
+                  sessionId: sid,
+                  harnessId: plan.rebindHarnessId,
+                });
+              }
+            } catch (err) {
+              console.warn("[App init] sticky harness restore failed:", sid, err);
+            }
+          }
           if (hydratedPanes.length > 0) {
             const nextActivePaneId =
               hydratedPanes.some((pane) => pane.id === saved.activePaneId)
@@ -1246,6 +1291,10 @@ export function App() {
         isolateActive: pane.isolateActive === true,
         scratchChats: normalizePersistedScratchChats(pane.scratchChats),
         parkedScratchChats: normalizePersistedScratchChats(pane.parkedScratchChats),
+        ...(pane.harnessId !== undefined ? { harnessId: pane.harnessId } : {}),
+        ...(pane.harnessFollowsPreference !== undefined
+          ? { harnessFollowsPreference: pane.harnessFollowsPreference }
+          : {}),
       })),
       hiddenScratchSessionIds: mergeHiddenScratchSessionIdsForPersist(
         (() => {
@@ -1320,6 +1369,9 @@ export function App() {
             status?: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
             delegation?: boolean;
             kind?: string;
+            run_id?: string;
+            source_tool_call_id?: string;
+            detail_refs?: Record<string, unknown>;
             avatar_session_id?: string;
             result_summary?: string;
             result_file?: string;
@@ -1441,11 +1493,25 @@ export function App() {
               : effectiveStatus !== "awaiting_input"
                 ? undefined
                 : existing?.pendingClarification;
+          // CC CLI ledger rows use provider=claude-code (harness kind). Do not
+          // clobber a catalog provider the user just picked in WorkPanel.
+          const harnessProviders = new Set(["claude-code", "codex", "opencode", "codebuddy"]);
+          const incomingProvider = (item.provider ?? existing?.provider ?? "").trim();
+          const incomingModel = (item.model ?? existing?.model ?? "").trim();
+          const existingProvider = (existing?.provider ?? "").trim();
+          const existingModel = (existing?.model ?? "").trim();
+          const keepCatalogPick =
+            !!existingProvider &&
+            !harnessProviders.has(existingProvider) &&
+            harnessProviders.has(String(item.provider ?? "").trim()) &&
+            (!incomingModel || !existingModel || incomingModel === existingModel);
+          const nextProvider = keepCatalogPick ? existingProvider : (incomingProvider || existingProvider || undefined);
+          const nextModel = keepCatalogPick ? (existingModel || incomingModel || undefined) : (incomingModel || existingModel || undefined);
           updateSubAgent(id, {
             status: effectiveStatus,
             currentAction,
-            provider: item.provider ?? existing?.provider,
-            model: item.model ?? existing?.model,
+            provider: nextProvider,
+            model: nextModel,
             avatarSessionId: itemAvatarSessionId ?? existing?.avatarSessionId,
             kind: itemKind,
             resultSummary: summaryText || undefined,
@@ -1488,24 +1554,47 @@ export function App() {
             if (matchingPane) {
               store.addPaneMessage(matchingPane.id, "tool", completionMsg, id);
             }
-            console.debug("[auto-report] enqueue: agent=%s name=%s status=%s sid=%s", id, agentName, effectiveStatus, sid);
-            autoReportQueueRef.current.push({
-              agentId: id,
-              agentName,
-              summary: summaryBody,
-              sessionId: sid,
-              status:
-                effectiveStatus === "completed"
-                  ? "completed"
-                  : effectiveStatus === "paused"
-                    ? "paused"
-                    : "failed",
-              attempts: 0,
-              queuedAt: Date.now(),
-            });
-            useAppStore
-              .getState()
-              .setReportPendingSessions(autoReportQueueRef.current.map((q) => q.sessionId));
+            // Near already wrote the parent synthesis bubble for CB/CC CLI children;
+            // do not POST a second `[系统通知]` /api/chat turn. Keep the pane chip above.
+            if (
+              shouldAutoReportSubagentCompletion({
+                agentId: id,
+                runId: typeof item.run_id === "string" ? item.run_id : id,
+                sourceToolCallId:
+                  typeof item.source_tool_call_id === "string" ? item.source_tool_call_id : "",
+                kind: typeof item.kind === "string" ? item.kind : "",
+                detailRefs:
+                  item.detail_refs && typeof item.detail_refs === "object"
+                    ? item.detail_refs
+                    : null,
+              })
+            ) {
+              console.debug("[auto-report] enqueue: agent=%s name=%s status=%s sid=%s", id, agentName, effectiveStatus, sid);
+              autoReportQueueRef.current.push({
+                agentId: id,
+                agentName,
+                summary: summaryBody,
+                sessionId: sid,
+                status:
+                  effectiveStatus === "completed"
+                    ? "completed"
+                    : effectiveStatus === "paused"
+                      ? "paused"
+                      : "failed",
+                attempts: 0,
+                queuedAt: Date.now(),
+              });
+              useAppStore
+                .getState()
+                .setReportPendingSessions(autoReportQueueRef.current.map((q) => q.sessionId));
+            } else {
+              console.debug(
+                "[auto-report] skip Near cross-harness meta-report: agent=%s kind=%s sid=%s",
+                id,
+                item.kind ?? "",
+                sid,
+              );
+            }
             }
           }
 

@@ -26,6 +26,10 @@ type Rule struct {
 	Message   string     `yaml:"message" json:"message"`
 	AppliesTo *AppliesTo `yaml:"applies_to,omitempty" json:"applies_to,omitempty"`
 
+	// Category 标注规则的合规类别（politics/porn/terrorism/ad 等），
+	// 由调用方自定义，引擎只透传到 HitEvent（SP3 合规内容审核）。
+	Category string `yaml:"category,omitempty" json:"category,omitempty"`
+
 	Keywords []string `yaml:"keywords" json:"keywords,omitempty"`
 	Pattern  string   `yaml:"pattern" json:"pattern,omitempty"`
 	PIIType  string   `yaml:"pii_type" json:"pii_type,omitempty"`
@@ -76,6 +80,7 @@ type HitEvent struct {
 	Matched   string `json:"matched"`
 	Stage     string `json:"stage"`
 	PIIType   string `json:"pii_type,omitempty"`
+	Category  string `json:"category,omitempty"`
 	Timestamp int64  `json:"timestamp"`
 }
 
