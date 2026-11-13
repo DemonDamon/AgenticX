@@ -4,3 +4,11 @@
 @source "../../../../packages/ui/src";
 @source "../../../../features/chat/src";
 
+/* A fold segment can be narrow even when the display media query is wide. */
+[data-compact="true"] [data-chat-header] { padding-left: 3.5rem; }
+[data-compact="false"] [data-chat-header] { padding-left: 1.5rem; }
+[data-compact="true"] [data-chat-composer] {
+  padding-top: 0.5rem;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+

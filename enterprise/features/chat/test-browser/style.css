@@ -1,0 +1,5 @@
+@import "../../../apps/web-portal/src/app/globals.css";
+@source "./main.tsx";
+
+html, body, #root { margin: 0; height: 100%; overflow: hidden; }
+body { background: #dce3ed; font-family: sans-serif; }
