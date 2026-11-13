@@ -178,6 +178,7 @@ func applyHit(result EvaluateResult, rule Rule, stage string, hit string) Evalua
 		Matched:   hit,
 		Stage:     stage,
 		PIIType:   rule.PIIType,
+		Category:  rule.Category,
 		Timestamp: time.Now().UnixMilli(),
 	}
 	result.Hits = append(result.Hits, event)

@@ -18,6 +18,38 @@ type PolicyHit struct {
 	Severity    string `json:"severity"`
 	Action      string `json:"action"`
 	MatchedRule string `json:"matched_rule,omitempty"`
+	// Category 合规类别（politics/porn/terrorism/ad/moderation 等，SP3 合规内容审核）。
+	Category string `json:"category,omitempty"`
+}
+
+// ChannelOutcome 记录一个告警通道的分发结果（alert-dispatch SP4）。
+type ChannelOutcome struct {
+	Type      string `json:"type"`
+	URLDigest string `json:"url_digest,omitempty"`
+	Outcome   string `json:"outcome"` // sent | failed | rate_limited | filtered
+}
+
+// AlertDispatchRecord 是 alert_dispatch 审计事件的载荷：告警分发动作本身可追溯。
+type AlertDispatchRecord struct {
+	Source   string           `json:"source"` // policy_hit | budget_alert | chain_check
+	Severity string           `json:"severity"`
+	Title    string           `json:"title"`
+	DedupKey string           `json:"dedup_key"`
+	Channels []ChannelOutcome `json:"channels,omitempty"`
+}
+
+// IncidentActionRecord 是 incident_action 审计事件的载荷：安全事件一键处置动作本身可追溯（SP5）。
+type IncidentActionRecord struct {
+	IncidentID string `json:"incident_id,omitempty"`
+	// Action: terminate_session | revoke_pat | disable_user | block_model
+	Action     string `json:"action"`
+	TargetType string `json:"target_type"` // session | pat | user | model
+	TargetID   string `json:"target_id,omitempty"`
+	// TargetHash 是吊销目标的摘要（PAT hash / session id），仅内部链使用。
+	TargetHash string `json:"target_hash,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+	// Outcome: executed（网关侧有即时内存副作用）| recorded（纯记录，执行体在 console）
+	Outcome string `json:"outcome"`
 }
 
 type Event struct {
@@ -60,7 +92,9 @@ type Event struct {
 	LatencyMS          int64           `json:"latency_ms,omitempty"`
 	Digest             *Digest         `json:"digest,omitempty"`
 	ToolsCalled        []string        `json:"tools_called,omitempty"`
-	PoliciesHit        []PolicyHit     `json:"policies_hit,omitempty"`
+	PoliciesHit        []PolicyHit          `json:"policies_hit,omitempty"`
+	AlertDispatch      *AlertDispatchRecord `json:"alert_dispatch,omitempty"`
+	IncidentAction     *IncidentActionRecord `json:"incident_action,omitempty"`
 	MCPStatus          string          `json:"mcp_status,omitempty"`
 	MCPServer          string          `json:"mcp_server,omitempty"`
 	MCPToolName        string          `json:"mcp_tool_name,omitempty"`

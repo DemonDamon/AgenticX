@@ -91,8 +91,8 @@ DEFAULT_RULES: list[_RuleTuple] = [
     ),
     (
         "ssrf_private_ip",
-        "SSRF via private/loopback IP address",
-        r"(?:https?://)?(?:127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)",
+        "SSRF via private/loopback/link-local IP address",
+        r"(?:https?://)?(?:127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|169\.254\.|0\.0\.0\.0)",
         InputRiskLevel.HIGH,
         True,
     ),

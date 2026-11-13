@@ -74,6 +74,13 @@ import { usePacedStreamText } from "./usePacedStreamText";
 import { splitGroupTalkFromReport } from "../../utils/group-talk-report";
 import { isLongUserQuery } from "../../utils/long-user-query";
 import { splitAutomationExecutionContract } from "../../utils/automation-contract-display";
+import {
+  assistantShowsResolvedCodebuddyLoginNotice,
+  assistantTurnNeedsCodebuddyLogin,
+  shouldSuppressCodebuddyHarnessErrorBody,
+} from "../../utils/codebuddy-login";
+import { CodebuddyLoginPrompt } from "./CodebuddyLoginPrompt";
+import { CodebuddyLoginPendingTip } from "./CodebuddyLoginPendingTip";
 
 type Props = {
   message: Message;
@@ -148,6 +155,16 @@ type Props = {
   sessionWebRefs?: SearchReference[];
   /** Also collapse a long user query when the caller opts in explicitly. */
   collapseLongUserQuery?: boolean;
+  /** Near session harness id for CodeBuddy login detection. */
+  activeHarnessId?: string | null;
+  /** Full pane transcript for per-turn login detection. */
+  conversationMessages?: Message[];
+  onCodebuddyLogin?: () => void;
+  /** User already launched shell login; show retry guidance instead of the CTA. */
+  codebuddyLoginAwaitingRetry?: boolean;
+  codebuddyLoginAuthorizing?: boolean;
+  codebuddyLoginOAuthFailed?: boolean;
+  codebuddyLoginOAuthError?: string | null;
 };
 
 function ExecutionContractNote({ lines }: { lines: string[] }) {
@@ -443,6 +460,13 @@ export function ImBubble({
   onOpenWorkspaceRefs,
   sessionWebRefs,
   collapseLongUserQuery = false,
+  activeHarnessId,
+  conversationMessages,
+  onCodebuddyLogin,
+  codebuddyLoginAwaitingRetry = false,
+  codebuddyLoginAuthorizing = false,
+  codebuddyLoginOAuthFailed = false,
+  codebuddyLoginOAuthError = null,
 }: Props) {
   const { t } = useTranslation("chat");
   void _senderAvatarVariant;
@@ -492,10 +516,37 @@ export function ImBubble({
     : (userQuoteDisplay?.body ?? message.content);
   /** Drop leading `---` so Meta/PM reports don't leave a hole under the expert label. */
   const strippedBody = !isUser ? stripTrailingFinalMarker(String(rawBodyText ?? "")) : rawBodyText;
+  const loginTranscript = conversationMessages ?? [];
+  const turnNeedsCodebuddyLogin =
+    !isUser && assistantTurnNeedsCodebuddyLogin(message, loginTranscript, activeHarnessId);
+  const showInlineCodebuddyLogin =
+    turnNeedsCodebuddyLogin
+    && Boolean(onCodebuddyLogin)
+    && !codebuddyLoginAwaitingRetry
+    && !codebuddyLoginAuthorizing
+    && !codebuddyLoginOAuthFailed;
+  const codebuddyLoginTipPhase = codebuddyLoginAuthorizing
+    ? "authorizing"
+    : codebuddyLoginAwaitingRetry
+      ? "success"
+      : codebuddyLoginOAuthFailed
+        ? "failed"
+        : null;
+  const showCodebuddyLoginPendingTip =
+    turnNeedsCodebuddyLogin && codebuddyLoginTipPhase !== null;
+  const showResolvedCodebuddyLoginNotice =
+    !isUser &&
+    assistantShowsResolvedCodebuddyLoginNotice(message, loginTranscript, activeHarnessId);
+  const suppressHarnessLoginError = shouldSuppressCodebuddyHarnessErrorBody(
+    message,
+    loginTranscript,
+    activeHarnessId,
+  );
+  const strippedForDisplay = suppressHarnessLoginError ? "" : strippedBody;
   const bodyText =
     isGroupAssistant
-      ? String(strippedBody ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
-      : strippedBody;
+      ? String(strippedForDisplay ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
+      : strippedForDisplay;
   const commandName = isUser ? String(message.command_name ?? "").trim() : "";
   const commandParts = commandName ? splitCommandBody(String(bodyText ?? "")) : null;
   const groupStreamActive = isGroupAssistant && isStreaming;
@@ -536,7 +587,12 @@ export function ImBubble({
     ? (message.attachments ?? []).filter((attachment) => !isWorkspaceReferenceAttachment(attachment))
     : [];
   const hasBody =
-    !!bodyText?.trim() || displayQuotedItems.length > 0 || hasImageBlock(message.blocks);
+    !!bodyText?.trim() ||
+    displayQuotedItems.length > 0 ||
+    hasImageBlock(message.blocks) ||
+    showInlineCodebuddyLogin ||
+    showCodebuddyLoginPendingTip ||
+    showResolvedCodebuddyLoginNotice;
   const renderInlineBlocks = hasImageBlock(message.blocks);
   const bubbleStyle: CSSProperties = isUser
     ? {
@@ -552,6 +608,8 @@ export function ImBubble({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [menuLayout, setMenuLayout] = useState<{ x: number; y: number } | null>(null);
+  const menuLayoutRef = useRef(menuLayout);
+  menuLayoutRef.current = menuLayout;
   const [menuHasSelection, setMenuHasSelection] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const msgContentRef = useRef<HTMLDivElement | null>(null);
@@ -653,9 +711,17 @@ export function ImBubble({
     };
   }, [menuOpen]);
 
+  // Presence only. Function identities change on every ChatPane render (login opens
+  // the terminal and re-renders the thread). Depending on the functions re-ran this
+  // effect and setState(null) nested until React aborted.
+  const menuActionPresence =
+    (onEditMessage ? 1 : 0) + (onQuoteToNewPane ? 2 : 0) + (onRetryMessage ? 4 : 0);
   useLayoutEffect(() => {
     if (!menuOpen) {
-      setMenuLayout(null);
+      if (menuLayoutRef.current !== null) {
+        menuLayoutRef.current = null;
+        setMenuLayout(null);
+      }
       return;
     }
 
@@ -681,13 +747,18 @@ export function ImBubble({
           : menuPos.y - rect.height >= MESSAGE_CONTEXT_MENU_MARGIN
             ? menuPos.y - rect.height
             : maxTop;
-      setMenuLayout((prev) => (prev?.x === left && prev.y === top ? prev : { x: left, y: top }));
+      setMenuLayout((prev) => {
+        if (prev?.x === left && prev.y === top) return prev;
+        const next = { x: left, y: top };
+        menuLayoutRef.current = next;
+        return next;
+      });
     };
 
     reposition();
     window.addEventListener("resize", reposition);
     return () => window.removeEventListener("resize", reposition);
-  }, [menuOpen, menuPos, menuHasSelection, onEditMessage, onQuoteToNewPane, onRetryMessage]);
+  }, [menuOpen, menuPos, menuActionPresence]);
 
   useEffect(() => {
     // NOTE: Keyword highlight used to mutate React-managed DOM nodes directly,
@@ -1381,6 +1452,18 @@ export function ImBubble({
                       ) : isGroupAssistant ? null : (
                         <StreamingDots compact={compactAssistant && noBubbleBorder} />
                       )
+                    ) : null}
+                    {showInlineCodebuddyLogin ? (
+                      <CodebuddyLoginPrompt variant="inline" onLogin={onCodebuddyLogin!} />
+                    ) : showCodebuddyLoginPendingTip && codebuddyLoginTipPhase ? (
+                      <CodebuddyLoginPendingTip
+                        phase={codebuddyLoginTipPhase}
+                        error={codebuddyLoginOAuthError}
+                      />
+                    ) : showResolvedCodebuddyLoginNotice ? (
+                      <p className="mt-2 text-[13px] leading-relaxed text-text-muted">
+                        {t("harness.codebuddyLogin.resolvedNotice")}
+                      </p>
                     ) : null}
                     {!showMetaCitation && webReferences.length > 0 ? (
                       <div className="mt-2">

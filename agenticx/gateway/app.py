@@ -48,6 +48,13 @@ logger = logging.getLogger(__name__)
 MOBILE_RPC_TIMEOUT_FLOOR_SECONDS = 600.0
 
 
+def _secret_equals(expected: Optional[str], candidate: str) -> bool:
+    """Compare secrets in constant time; a missing expected value never matches."""
+    if not expected:
+        return False
+    return secrets.compare_digest(expected.encode("utf-8"), candidate.encode("utf-8"))
+
+
 def create_gateway_app(
     config: Optional[GatewayServerConfig] = None,
     *,
@@ -166,7 +173,7 @@ def create_gateway_app(
     def _require_device_token(device_id: str, token: str) -> None:
         did = (device_id or "").strip()
         tok = (token or "").strip()
-        if not did or not tok or tokens.get(did) != tok:
+        if not did or not tok or not _secret_equals(tokens.get(did), tok):
             raise HTTPException(status_code=401, detail="invalid device credentials")
 
     def _require_mobile_auth(request: Request) -> str:
@@ -349,12 +356,12 @@ def create_gateway_app(
         tok = str(body.get("token") or token or "").strip()
         header_secret = (request.headers.get("x-agx-command-secret") or "").strip()
         if secret:
-            if header_secret != secret and tok != secret:
+            if not _secret_equals(secret, header_secret) and not _secret_equals(secret, tok):
                 raise HTTPException(status_code=401, detail="unauthorized")
         else:
             if not did or not tok:
                 raise HTTPException(status_code=401, detail="device_id and token required")
-            if tokens.get(did) != tok:
+            if not _secret_equals(tokens.get(did), tok):
                 raise HTTPException(status_code=401, detail="invalid device token")
 
         if not did and secret:
@@ -746,7 +753,7 @@ def create_gateway_app(
         await websocket.accept()
         token_q = (websocket.query_params.get("token") or "").strip()
         expected = tokens.get(device_id)
-        if expected and token_q != expected:
+        if expected and not _secret_equals(expected, token_q):
             await websocket.close(code=4401)
             return
         dm: DeviceManager = app.state.device_manager
