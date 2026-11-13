@@ -17,13 +17,14 @@ export async function POST(request: Request, { params }: Params) {
     if (!body.spec?.trim()) {
       return NextResponse.json({ code: "40000", message: "spec required" }, { status: 400 });
     }
-    const server = await importOpenAPITools(
+    const result = await importOpenAPITools(
       id,
       body.spec,
       body.allowedOperationIds ?? [],
-      body.baseUrl
+      body.baseUrl,
+      auth.session.userId,
     );
-    return NextResponse.json({ code: "00000", message: "ok", data: { server } });
+    return NextResponse.json({ code: "00000", message: "ok", data: result });
   } catch (error) {
     return NextResponse.json(
       { code: "40000", message: error instanceof Error ? error.message : "import failed" },

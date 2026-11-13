@@ -44,3 +44,37 @@ export function shouldDeferAutoReport(args: {
   const maxDeferMs = args.maxDeferMs ?? 10 * 60 * 1000;
   return args.now - args.oldestQueuedAt < maxDeferMs;
 }
+
+
+/**
+ * Near already synthesizes the parent bubble for cross-harness CLI children
+ * (cb-subagent-* / cc-subagent-*). Enqueueing the desktop `[系统通知]` meta-report
+ * would POST a second /api/chat user turn. Native AGX `sa-*` spawn_subagent
+ * children must keep auto-report.
+ */
+export function shouldAutoReportSubagentCompletion(args: {
+  agentId?: string | null;
+  runId?: string | null;
+  sourceToolCallId?: string | null;
+  kind?: string | null;
+  detailRefs?: Record<string, unknown> | null;
+}): boolean {
+  const id = String(args.agentId ?? args.runId ?? "").trim();
+  if (id.startsWith("cb-subagent-") || id.startsWith("cc-subagent-")) {
+    return false;
+  }
+  const source = String(args.sourceToolCallId ?? "").trim();
+  if (source.startsWith("near-cb-") || source.startsWith("near-cc-")) {
+    return false;
+  }
+  const kind = String(args.kind ?? "").trim().toLowerCase();
+  const refs = args.detailRefs && typeof args.detailRefs === "object" ? args.detailRefs : null;
+  const orchestratedBy = refs ? String(refs.orchestrated_by ?? "").trim().toLowerCase() : "";
+  if (
+    orchestratedBy === "near" &&
+    (kind === "codebuddy" || kind === "claude-code")
+  ) {
+    return false;
+  }
+  return true;
+}

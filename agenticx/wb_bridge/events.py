@@ -100,15 +100,23 @@ def extract_result_text(obj: Optional[Dict[str, Any]]) -> str:
 
 
 def extract_tool_activity(line: str) -> Optional[str]:
-    """Best-effort current-activity label from an assistant line.
+    """Best-effort current-activity label from an assistant / tool line.
 
-    Scans ``obj["message"]["content"]`` for items with ``type == "tool_use"``
-    and returns the LAST such item's ``name``. Returns None when the shape
-    does not match. Heuristic by design.
+    Recognizes:
+    - Anthropic-style ``message.content[].type == tool_use`` (last name)
+    - CodeBuddy stream-json ``type == function_call`` with top-level ``name``
+
+    Returns None when the shape does not match. Heuristic by design.
     """
     obj = parse_stream_line(line)
     if obj is None:
         return None
+    # CodeBuddy / WorkBuddy headless: function_call rows carry the tool name
+    # at the top level (repro: session d37c29ea Agent + WebSearch).
+    if obj.get("type") == "function_call":
+        name = obj.get("name")
+        if name:
+            return str(name)
     message = obj.get("message")
     if not isinstance(message, dict):
         return None
