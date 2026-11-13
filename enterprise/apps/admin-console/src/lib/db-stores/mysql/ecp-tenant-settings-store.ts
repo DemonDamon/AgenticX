@@ -12,11 +12,18 @@ export type EcpTenantDistributionPolicyRecord = {
   installCopyEnabled: boolean;
 };
 
+async function getSettingsDb() {
+  const database = resolveDatabaseConfig();
+  if (database.dialect !== "mysql") {
+    throw new Error("Tenant distribution settings requested from the wrong database dialect.");
+  }
+  return (await createMysqlDb(database)).raw;
+}
+
 export async function getEcpTenantDistributionPolicy(
   tenantId: string,
 ): Promise<EcpTenantDistributionPolicyRecord> {
-  const database = resolveDatabaseConfig();
-  const { raw: db } = await createMysqlDb(database);
+  const db = await getSettingsDb();
   const rows = await db
     .select()
     .from(ecpTenantSettings)
@@ -34,8 +41,7 @@ export async function updateEcpTenantDistributionPolicy(
   tenantId: string,
   input: { installCopyEnabled?: boolean },
 ): Promise<EcpTenantDistributionPolicyRecord> {
-  const database = resolveDatabaseConfig();
-  const { raw: db } = await createMysqlDb(database);
+  const db = await getSettingsDb();
   const existing = await getEcpTenantDistributionPolicy(tenantId);
   const installCopyEnabled =
     input.installCopyEnabled === undefined ? existing.installCopyEnabled : input.installCopyEnabled === true;
