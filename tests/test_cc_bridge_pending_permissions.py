@@ -299,3 +299,32 @@ def test_harness_options_from_run_mode_cc_and_cb() -> None:
     }
     # ask/allowlist leave CB default (no interactive channel).
     assert harness_spawn_options_for_run_mode("codebuddy", "ask") == {}
+
+    # Codex: Near auto/「全部允许」is networked workspace-write, not
+    # danger-full-access (UI: workspace isolation still applies).
+    assert harness_spawn_options_for_run_mode("codex", "auto") == {
+        "sandbox": "workspace-write",
+        "network_access": True,
+        "full_auto": False,
+    }
+    assert harness_spawn_options_for_run_mode("codex", "auto")["sandbox"] != (
+        "danger-full-access"
+    )
+    assert harness_spawn_options_for_run_mode("codex", "allowlist") == {
+        "sandbox": "workspace-write",
+        "network_access": False,
+        "full_auto": False,
+    }
+    assert harness_spawn_options_for_run_mode("codex", "semi-auto") == {
+        "sandbox": "workspace-write",
+        "network_access": False,
+        "full_auto": False,
+    }
+    for mode in ("ask", "manual", "", "unknown"):
+        assert harness_spawn_options_for_run_mode("codex", mode) == {
+            "sandbox": "read-only",
+            "network_access": False,
+            "full_auto": False,
+        }
+    # OpenCode stays unmapped; --auto is not the same as Near workspace isolation.
+    assert harness_spawn_options_for_run_mode("opencode", "auto") == {}

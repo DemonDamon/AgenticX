@@ -1108,6 +1108,20 @@
     "badgeDeepSeek": "DeepSeek",
     "badgeHermesAgent": "Hermes Agent",
     "badgePiAgent": "PI Agent",
-    "badgeOpenClaw": "OpenClaw"
+    "badgeOpenClaw": "OpenClaw",
+    "codebuddyLogin": {
+      "banner": "CodeBuddy 腾讯登录已失效，点击重新登录",
+      "body": "CodeBuddy 腾讯登录已失效，请重新登录后再试。",
+      "retryHint": "完成授权后，可点击上一条消息的重试按钮继续提问。",
+      "authorizing": "正在打开浏览器完成腾讯授权，请在页面中登录后回到 Near。",
+      "oauthSuccess": "授权成功，点击上一条消息的重试即可继续。",
+      "oauthFailed": "授权未完成：{{error}}",
+      "oauthFailedGeneric": "腾讯授权未完成，请稍后重试。",
+      "oauthStartFailed": "无法启动 CodeBuddy 登录，请确认已安装 CodeBuddy CLI。",
+      "harnessRefreshFailed": "授权成功，但刷新 CodeBuddy 会话失败，请重试一次或重启 Near。",
+      "resolvedNotice": "此前因 CodeBuddy 登录失效未能完成回答。",
+      "terminal": "CodeBuddy 登录",
+      "writeFailed": "终端暂时无法输入登录命令，请在已打开的终端中执行 codebuddy login"
+    }
   }
 }

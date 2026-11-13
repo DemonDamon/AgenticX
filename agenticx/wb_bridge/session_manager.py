@@ -18,6 +18,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from agenticx.cc_bridge.ndjson import build_user_message_line
 from agenticx.wb_bridge import events as wb_events
+from agenticx.wb_bridge.custom_model import (
+    codebuddy_model_config_paths,
+    resolve_codebuddy_cli_model,
+)
 from agenticx.wb_bridge.settings import resolve_codebuddy_executable
 
 _LOG = logging.getLogger(__name__)
@@ -280,6 +284,12 @@ class WbBridgeSessionManager:
         exe = resolve_codebuddy_executable()
         mode = _normalize_permission_mode(permission_mode)
         model_id = str(model or "").strip() or None
+        # argv may be custom-local:<id>; session.model stays the picker id so
+        # a live surface is not respawned as a model mismatch every turn.
+        cli_model = resolve_codebuddy_cli_model(
+            model_id,
+            config_paths=codebuddy_model_config_paths(),
+        )
 
         path = Path(cwd).resolve()
         path.mkdir(parents=True, exist_ok=True)
@@ -296,8 +306,8 @@ class WbBridgeSessionManager:
             "--permission-mode",
             mode,
         ]
-        if model_id:
-            args.extend(["--model", model_id])
+        if cli_model:
+            args.extend(["--model", cli_model])
 
         env = os.environ.copy()
         env.setdefault("CODEBUDDY_ENVIRONMENT_KIND", "agx_wb_bridge")

@@ -13,6 +13,11 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from agenticx.harness.adapter import HarnessAdapter
+from agenticx.harness.codebuddy_auth import (
+    codebuddy_login_required_from_lines,
+    is_codebuddy_auth_failure_text,
+)
+from agenticx.harness.stream_json_text import visible_assistant_text_from_lines
 from agenticx.harness.types import (
     CapabilityNotSupported,
     HarnessCapabilities,
@@ -30,6 +35,16 @@ from agenticx.harness.types import (
 )
 from agenticx.wb_bridge.session_manager import WbBridgeSessionManager
 from agenticx.wb_bridge.settings import resolve_codebuddy_executable
+from agenticx.wb_bridge.codebuddy_agent_await import (
+    await_agent_artifacts,
+    codebuddy_cc_subagent_guard_prefix,
+    honesty_footer,
+    parse_agent_spawns_from_lines,
+    user_asked_for_claude_code_subagents,
+)
+from agenticx.harness.codebuddy_cc_subagents import (
+    maybe_run_cc_subagents_for_codebuddy_turn,
+)
 
 _PERMISSION_MODES = frozenset(
     {"default", "acceptEdits", "bypassPermissions", "dontAsk", "plan", "auto"}
@@ -139,7 +154,13 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
         key = (request.idempotency_key or "").strip()
         if key and self.turn_matches_idempotency_key(session_id, key):
             status, snap = self.wait_for_turn(session_id, request.wait_seconds)
-            return self._turn_result(session_id, status, snap, deduplicated=True)
+            return self._turn_result(
+                session_id,
+                status,
+                snap,
+                deduplicated=True,
+                user_text=request.text,
+            )
 
         snapshot = self.describe_session(session_id)
         if snapshot is None:
@@ -154,12 +175,44 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
                 ),
             )
 
+        # Cross-harness: user asked for Claude Code as subagents → Near spawns
+        # real `claude` CLI sessions instead of letting CodeBuddy Agent pretend.
+        session = self.get(session_id)
+        cwd = str(getattr(session, "cwd", "") or "") if session else ""
+        model = None
+        if session is not None:
+            model = getattr(session, "model", None) or None
+        owner_sid = (
+            str(getattr(request, "owner_session_id", "") or "").strip()
+            or str(getattr(request, "studio_session_id", "") or "").strip()
+            or str(session_id or "").strip()
+        )
+        intercepted = maybe_run_cc_subagents_for_codebuddy_turn(
+            parent_session_id=owner_sid,
+            user_text=request.text,
+            cwd=cwd,
+            wait_seconds=request.wait_seconds,
+            model=(str(model).strip() or None) if model else None,
+        )
+        if intercepted is not None:
+            return intercepted
+
+        outbound = request.text
+        guard = codebuddy_cc_subagent_guard_prefix(request.text)
+        if guard:
+            outbound = guard + (request.text or "")
         try:
-            self.send_user_message(session_id, request.text, idempotency_key=key)
+            self.send_user_message(session_id, outbound, idempotency_key=key)
         except KeyError as exc:
             raise SessionNotFoundError(session_id) from exc
         status, snap = self.wait_for_turn(session_id, request.wait_seconds)
-        return self._turn_result(session_id, status, snap, deduplicated=False)
+        return self._turn_result(
+            session_id,
+            status,
+            snap,
+            deduplicated=False,
+            user_text=request.text,
+        )
 
     def _turn_result(
         self,
@@ -168,6 +221,7 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
         snap: Dict[str, Any],
         *,
         deduplicated: bool,
+        user_text: str = "",
     ) -> TurnResult:
         if status == TURN_STATUS_UNKNOWN_SESSION:
             raise SessionNotFoundError(session_id)
@@ -195,6 +249,49 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
             )
             if k in snap
         }
+        turn_lines = self._turn_stream_lines(session_id)
+        if unified == TURN_STATUS_SUCCESS:
+            # d37c29ea: Agent "Spawned successfully" then parent turn ended while
+            # teammates never wrote report_*.md — and user asked for Claude Code.
+            spawns = parse_agent_spawns_from_lines(turn_lines)
+            asked_cc = user_asked_for_claude_code_subagents(user_text)
+            await_info = None
+            if spawns:
+                session = self.get(session_id)
+                cwd = str(getattr(session, "cwd", "") or "") if session else ""
+                detail["codebuddy_agent_spawns"] = [
+                    {
+                        "name": s.name,
+                        "agent_id": s.agent_id,
+                        "team_name": s.team_name,
+                        "task_id": s.task_id,
+                        "expected_paths": list(s.expected_paths),
+                    }
+                    for s in spawns
+                ]
+                await_info = await_agent_artifacts(
+                    spawns, cwd=cwd, timeout_sec=45.0
+                )
+                detail["codebuddy_agent_await"] = await_info
+                if asked_cc:
+                    detail["codebuddy_claimed_claude_code"] = True
+            footer = honesty_footer(
+                asked_for_claude_code=asked_cc,
+                spawns=spawns,
+                await_info=await_info,
+            )
+            if footer:
+                result_text = (result_text or "") + footer
+                if len(result_text) > _RESULT_TEXT_MAX_CHARS:
+                    result_text = result_text[:_RESULT_TEXT_MAX_CHARS]
+        if unified != TURN_STATUS_SUCCESS:
+            visible = self._turn_error_visible_text(session_id)
+            if visible:
+                detail["error_visible_text"] = visible[:_RESULT_TEXT_MAX_CHARS]
+            if codebuddy_login_required_from_lines(
+                turn_lines, turn_failed=True
+            ) or is_codebuddy_auth_failure_text(visible):
+                detail["codebuddy_login_required"] = True
         return TurnResult(
             harness=self.harness_id,
             session_id=session_id,
@@ -204,6 +301,19 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
             deduplicated=deduplicated,
             detail=detail,
         )
+
+    def _turn_stream_lines(self, session_id: str) -> list[str]:
+        """Stdout lines belonging to the current turn (excludes earlier turns)."""
+        session = self.get(session_id)
+        if session is None:
+            return []
+        with session.lock:
+            start = max(0, int(session.turn_line_start or 0))
+            return list(session.lines[start:])
+
+    def _turn_error_visible_text(self, session_id: str) -> str:
+        """Assistant text emitted before a non-success result, if any."""
+        return visible_assistant_text_from_lines(self._turn_stream_lines(session_id))
 
     # ------------------------------------------------------------------
     # stop

@@ -38,6 +38,7 @@ type BuiltinManifestRule = {
   action: "block" | "redact" | "warn";
   severity: "low" | "medium" | "high" | "critical";
   message?: string;
+  category?: string;
   keywords?: string[];
   pattern?: string;
   pii_type?: string;
@@ -95,20 +96,23 @@ function normalizeAppliesTo(input?: Partial<PolicyAppliesTo> | DbPolicyAppliesTo
   };
 }
 
-function normalizeRulePayload(kind: UpsertPolicyRuleInput["kind"], payload: PolicyRulePayload): PolicyRulePayload {
+// normalizeRulePayload 导出供单测与调用方复用（SP3：验证 category 数据通道保留）。
+export function normalizeRulePayload(kind: UpsertPolicyRuleInput["kind"], payload: PolicyRulePayload): PolicyRulePayload {
+  // SP3 合规类别是数据通道的一部分：重建 payload 时保留，随快照直达网关策略引擎。
+  const category = payload.category?.trim() || undefined;
   if (kind === "keyword") {
     const keywords = uniq(payload.keywords ?? []);
     if (!keywords.length) throw new Error("关键词规则至少需要一个关键词");
-    return { keywords };
+    return { keywords, ...(category ? { category } : {}) };
   }
   if (kind === "regex") {
     const pattern = payload.pattern?.trim();
     if (!pattern) throw new Error("正则规则缺少 pattern");
-    return { pattern };
+    return { pattern, ...(category ? { category } : {}) };
   }
   const piiType = payload.piiType?.trim();
   if (!piiType) throw new Error("PII 规则缺少 piiType");
-  return { piiType };
+  return { piiType, ...(category ? { category } : {}) };
 }
 
 function dbPackToModel(row: typeof policyRulePacks.$inferSelect): PolicyPack {
@@ -271,6 +275,7 @@ export class PgPolicyStore {
             : rule.kind === "regex"
               ? { pattern: rule.pattern ?? "" }
               : { piiType: rule.pii_type ?? "" };
+        if (rule.category?.trim()) payload.category = rule.category.trim();
         const normalizedPayload = normalizeRulePayload(rule.kind, payload);
         await db
           .insert(policyRules)
@@ -563,6 +568,7 @@ export class PgPolicyStore {
           message: effective.message ?? null,
           matched: item,
           stage,
+          category: effective.payload.category ?? null,
         });
         if (effective.action === "block") blocked = true;
         if (effective.action === "redact") {
