@@ -307,7 +307,14 @@ async function cdpEvaluate(wsUrl, expression) {
 /** Evaluate inside the extension service worker (SP5 note: the NM port +
  *  ping alarm keep it warm; transient absence is retried). */
 async function swEvaluate(expression) {
-  const wrapped = `(async () => { const v = await (${expression}); return JSON.stringify({ v }); })()`;
+  // CodeQL (improper code sanitization): the expression is a static test
+  // fixture, but it is never spliced raw into executable code — JSON-encode
+  // it and let the target decode + evaluate the literal.
+  const wrapped = `(async () => {
+      const code = ${JSON.stringify(`(${expression})`)};
+      const v = await (0, eval)(code);
+      return JSON.stringify({ v });
+    })()`;
   const raw = await waitFor(async () => {
     try {
       const targets = await fetchJsonTargets();

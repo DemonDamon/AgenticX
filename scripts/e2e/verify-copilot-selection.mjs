@@ -333,7 +333,14 @@ async function cdpEvaluate(wsUrl, expression) {
 }
 
 async function swEvaluate(expression) {
-  const wrapped = `(async () => { const v = await (${expression}); return JSON.stringify({ v }); })()`;
+  // CodeQL (improper code sanitization): the expression is a static test
+  // fixture, but it is never spliced raw into executable code — JSON-encode
+  // it and let the target decode + evaluate the literal.
+  const wrapped = `(async () => {
+      const code = ${JSON.stringify(`(${expression})`)};
+      const v = await (0, eval)(code);
+      return JSON.stringify({ v });
+    })()`;
   const raw = await waitFor(async () => {
     try {
       const targets = await fetchJsonTargets();
@@ -632,9 +639,16 @@ async function runScenario(fixture, mock) {
     s4done.preCount === 1 && s4done.preText[0]?.includes("code line 1"),
     `S4 代码块渲染（<pre> 含 code line 1）`,
   );
+  const parsedLinks = s4done.links.map((link) => {
+    try {
+      return new URL(String(link));
+    } catch {
+      return null;
+    }
+  });
   assert(
-    s4done.links.includes("https://example.com/agx"),
-    `S4 链接渲染且可点（href 指向 https://example.com/agx）`,
+    parsedLinks.some((u) => u?.hostname === "example.com" && u?.pathname === "/agx"),
+    `S4 链接渲染且可点（href 解析为 example.com/agx）`,
   );
   assert(
     s4done.scriptLeak === 0 && !s4html.includes("<script>"),

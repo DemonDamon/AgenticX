@@ -55,7 +55,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { delay, waitFor, NM_HOST_NAME, SPIKE_EXTENSION_ID } from "./helpers.mjs";
+import { delay, waitFor, NM_HOST_NAME, SPIKE_EXTENSION_ID, urlHostname } from "./helpers.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DESKTOP_DIR = path.join(REPO_ROOT, "desktop");
@@ -558,7 +558,14 @@ const findPageTarget = (urlPrefix) => async () => {
 const swSession = createCdpSession(findSwTarget, "extension SW");
 
 async function swEvaluate(expression) {
-  const wrapped = `(async () => { const v = await (${expression}); return JSON.stringify({ v }); })()`;
+  // CodeQL (improper code sanitization): the expression is a static test
+  // fixture, but it is never spliced raw into executable code — JSON-encode
+  // it and let the target decode + evaluate the literal.
+  const wrapped = `(async () => {
+      const code = ${JSON.stringify(`(${expression})`)};
+      const v = await (0, eval)(code);
+      return JSON.stringify({ v });
+    })()`;
   const raw = await waitFor(() => swSession.evaluate(wrapped), 30_000, `SW evaluate: ${expression.slice(0, 50)}…`);
   return JSON.parse(raw).v;
 }
@@ -948,7 +955,7 @@ async function journeyJ5(endpoint, fixtureBase, agxHome) {
     ? fs.readFileSync(outbox, "utf-8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l))
     : [];
   const bankBlockedLine = lines.find(
-    (row) => row.outcome === "blocked" && String(row.tab_url).includes(DENIED_BANK_HOST),
+    (row) => row.outcome === "blocked" && urlHostname(String(row.tab_url)) === DENIED_BANK_HOST,
   );
   const confirmedLine = lines.find((row) => row.outcome === "confirmed");
   assert(

@@ -1,0 +1,19 @@
+# Gitleaks configuration — extends the default ruleset.
+#
+# NOTE: gitleaks-action v2 passes this file to `gitleaks --config`, which
+# REPLACES the default rules — `[extend] useDefault` below re-enables them,
+# otherwise the scan would silently degrade to a near no-op.
+#
+# Allowlist rationale (2026-11-13, PR #342): extension/manifest.json "key" is
+# the PUBLIC RSA key that pins the Chrome extension ID
+# (kajgkmohjdflaidencpfmebbjibfieka) required by the Native Messaging host
+# registration — see scripts/install-extension-dev.sh and
+# docs/guides/browser-extension/enterprise-deployment.md. It is not a
+# credential; only this one path + rule combination is allowed.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Chrome extension public key pinning the extension ID for Native Messaging host registration (not a secret)"
+paths = ['''^extension/manifest\.json$''']
+rules = ['generic-api-key']

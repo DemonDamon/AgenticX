@@ -15,6 +15,31 @@ export const NM_HOST_NAME = "com.agenticx.bridge";
 /** Locked by the fixed "key" in extension/manifest.json — recorded in the SP1 plan. */
 export const SPIKE_EXTENSION_ID = "kajgkmohjdflaidencpfmebbjibfieka";
 
+/** Parse a URL and return its hostname, or null when unparsable. E2e
+ *  assertions compare hosts this way instead of raw substring matching
+ *  (CodeQL: incomplete URL substring sanitization). */
+export function urlHostname(url) {
+  try {
+    return new URL(String(url)).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/** True when some whitespace-separated token of `text` parses to exactly
+ *  `host`. Tokens without a scheme are matched by their leading ASCII
+ *  domain run, so glued punctuation (e.g. "mail.qq.com（记录在案…）")
+ *  still yields the bare host. */
+export function textHasHost(text, host) {
+  return String(text)
+    .split(/\s+/)
+    .some((token) => {
+      if (token.includes("://")) return urlHostname(token) === host;
+      const m = token.match(/^[A-Za-z0-9][A-Za-z0-9.-]*/);
+      return m ? urlHostname(`https://${m[0]}`) === host : false;
+    });
+}
+
 export function nmSocketPath() {
   const override = String(process.env.AGX_NM_SOCKET_PATH ?? "").trim();
   return override || path.join(os.homedir(), ".agenticx", "browser_bridge_nm.sock");

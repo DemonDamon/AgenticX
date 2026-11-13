@@ -51,7 +51,7 @@ import path from "node:path";
 import process from "node:process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { delay, waitFor, NM_HOST_NAME, SPIKE_EXTENSION_ID } from "./helpers.mjs";
+import { delay, waitFor, NM_HOST_NAME, SPIKE_EXTENSION_ID, urlHostname, textHasHost } from "./helpers.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DESKTOP_DIR = path.join(REPO_ROOT, "desktop");
@@ -602,7 +602,7 @@ async function runScenario(endpoint, fixtureBase, agxHome) {
      })()`,
   );
   assert(
-    String(t13status).includes("已放行") && String(t13status).includes(DENIED_MAIL_HOST),
+    String(t13status).includes("已放行") && textHasHost(t13status, DENIED_MAIL_HOST),
     `T13 options UI: 放行 click lands — status "${t13status}"`,
   );
   const t13list = await cdpEvaluate(
@@ -610,7 +610,7 @@ async function runScenario(endpoint, fixtureBase, agxHome) {
     `document.getElementById("allow-list").innerText`,
   );
   assert(
-    String(t13list).includes(DENIED_MAIL_HOST),
+    textHasHost(t13list, DENIED_MAIL_HOST),
     `T13 the allowed domain is recorded in the options allow list (${DENIED_MAIL_HOST})`,
   );
 
@@ -660,10 +660,10 @@ async function runScenario(endpoint, fixtureBase, agxHome) {
     `T14 audit outcomes cover the run: ${JSON.stringify(outcomes)}`,
   );
   const bankBlocked = lines.find(
-    (row) => row.outcome === "blocked" && String(row.tab_url).includes(DENIED_BANK_HOST),
+    (row) => row.outcome === "blocked" && urlHostname(String(row.tab_url)) === DENIED_BANK_HOST,
   );
   const mailBlocked = lines.find(
-    (row) => row.outcome === "blocked" && String(row.tab_url).includes(DENIED_MAIL_HOST),
+    (row) => row.outcome === "blocked" && urlHostname(String(row.tab_url)) === DENIED_MAIL_HOST,
   );
   assert(
     Boolean(bankBlocked && mailBlocked),
