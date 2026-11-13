@@ -1,3 +1,4 @@
+import type { AdministrativeActor } from "./privilege-guard";
 import type { AuthUser } from "@agenticx/auth";
 import type { DatabaseDialect } from "../database/config";
 import type { IamDb } from "../db";
@@ -53,30 +54,30 @@ export interface UsersRepository extends DialectRepository {
     tenantId: string; email: string; displayName: string; deptId?: string | null;
     status?: AdminUserStatus; phone?: string | null; employeeNo?: string | null;
     jobTitle?: string | null; roleCodes?: string[]; initialPassword?: string | null;
-    defaultOrgId: string | null; actorUserId?: string | null;
+    defaultOrgId: string | null; actor: AdministrativeActor; actorUserId?: string | null;
   }): Promise<{ user: AdminUserDto; initialPassword: string }>;
   updateAdminUser(
     tenantId: string,
     id: string,
     patch: UpdateAdminUserInput,
-    ctx: { actorUserId?: string | null; defaultOrgId: string | null },
+    ctx: { actor: AdministrativeActor; actorUserId?: string | null; defaultOrgId: string | null },
   ): Promise<AdminUserDto>;
-  softDeleteUser(tenantId: string, id: string, actorUserId?: string | null): Promise<void>;
-  resetUserPassword(input: { tenantId: string; userId: string; actorUserId?: string | null }): Promise<{ initialPassword: string }>;
+  softDeleteUser(tenantId: string, id: string, actor: AdministrativeActor): Promise<void>;
+  resetUserPassword(input: { tenantId: string; userId: string; actor: AdministrativeActor; actorUserId?: string | null }): Promise<{ initialPassword: string }>;
   updatePasswordAndClearRequirement(tenantId: string, email: string, passwordHash: string): Promise<AuthUser | null>;
   upsertUserRowFromAuthUser(user: AuthUser): Promise<void>;
   assignRolesIfNone(input: {
-    tenantId: string; userId: string; roleCodes: string[];
+    tenantId: string; userId: string; roleCodes: string[]; actor: AdministrativeActor;
     defaultOrgId: string | null; defaultDeptId: string | null;
   }): Promise<void>;
   upsertUserByEmail(input: {
     tenantId: string; email: string; displayName: string; deptId: string | null;
     phone?: string | null; employeeNo?: string | null; jobTitle?: string | null;
     passwordHash: string; status?: AdminUserStatus; roleCodes: string[];
-    defaultOrgId: string | null; actorUserId?: string | null;
+    defaultOrgId: string | null; actor: AdministrativeActor; actorUserId?: string | null;
   }): Promise<AdminUserDto>;
   replaceUserRoleAssignments(input: {
-    tenantId: string; userId: string; roleCodes: string[];
+    tenantId: string; userId: string; roleCodes: string[]; actor: AdministrativeActor;
     defaultOrgId: string | null; defaultDeptId: string | null;
   }): Promise<void>;
 }
@@ -99,10 +100,10 @@ export interface RolesRepository extends DialectRepository {
   listRoles(tenantId: string): Promise<RoleRow[]>;
   getRoleById(tenantId: string, id: string): Promise<RoleRow | null>;
   getRoleByCode(tenantId: string, code: string): Promise<RoleRow | null>;
-  createCustomRole(input: { tenantId: string; code: string; name: string; scopes: string[]; actorUserId?: string | null }): Promise<RoleRow>;
-  updateRole(input: { tenantId: string; actorUserId?: string | null; id: string; name?: string; scopes?: string[] }): Promise<RoleRow>;
-  deleteRole(input: { tenantId: string; id: string; actorUserId?: string | null }): Promise<void>;
-  duplicateRole(input: { tenantId: string; sourceId: string; newCode: string; newName: string; actorUserId?: string | null }): Promise<RoleRow>;
+  createCustomRole(input: { tenantId: string; code: string; name: string; scopes: string[]; actor: AdministrativeActor; actorUserId?: string | null }): Promise<RoleRow>;
+  updateRole(input: { tenantId: string; actor: AdministrativeActor; actorUserId?: string | null; id: string; name?: string; scopes?: string[] }): Promise<RoleRow>;
+  deleteRole(input: { tenantId: string; id: string; actor: AdministrativeActor; actorUserId?: string | null }): Promise<void>;
+  duplicateRole(input: { tenantId: string; sourceId: string; newCode: string; newName: string; actor: AdministrativeActor; actorUserId?: string | null }): Promise<RoleRow>;
   resolveRoleIdsFromCodes(tenantId: string, codes: string[], dbOrTx?: IamDb): Promise<Map<string, string>>;
   listUsersForRole(tenantId: string, roleId: string): Promise<Array<{ userId: string; email: string; displayName: string }>>;
   getUserRolesDetail(tenantId: string, userId: string): Promise<{ scopes: string[]; roleCodes: string[] }>;

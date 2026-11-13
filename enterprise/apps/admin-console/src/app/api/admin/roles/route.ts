@@ -38,6 +38,7 @@ export async function POST(request: Request) {
         newCode: body.newCode,
         newName: body.newName,
         actorUserId: auth.session.userId,
+      actor: { kind: "user", tenantId: auth.session.tenantId, userId: auth.session.userId, scopes: auth.scopes },
       });
       return NextResponse.json({ code: "00000", message: "ok", data: { role } });
     }
@@ -50,12 +51,13 @@ export async function POST(request: Request) {
       name,
       scopes,
       actorUserId: auth.session.userId,
+      actor: { kind: "user", tenantId: auth.session.tenantId, userId: auth.session.userId, scopes: auth.scopes },
     });
     return NextResponse.json({ code: "00000", message: "ok", data: { role } });
   } catch (error) {
     return NextResponse.json(
-      { code: "40000", message: error instanceof Error ? error.message : "invalid request" },
-      { status: 400 }
+      { code: error instanceof Error && error.name === "PrivilegeEscalationError" ? "40300" : "40000", message: error instanceof Error ? error.message : "invalid request" },
+      { status: error instanceof Error && error.name === "PrivilegeEscalationError" ? 403 : 400 }
     );
   }
 }

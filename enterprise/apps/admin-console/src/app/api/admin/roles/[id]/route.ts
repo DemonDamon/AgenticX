@@ -15,12 +15,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       name: body.name,
       scopes,
       actorUserId: auth.session.userId,
+      actor: { kind: "user", tenantId: auth.session.tenantId, userId: auth.session.userId, scopes: auth.scopes },
     });
     return NextResponse.json({ code: "00000", message: "ok", data: { role } });
   } catch (error) {
     return NextResponse.json(
-      { code: "40000", message: error instanceof Error ? error.message : "invalid request" },
-      { status: 400 }
+      { code: error instanceof Error && error.name === "PrivilegeEscalationError" ? "40300" : "40000", message: error instanceof Error ? error.message : "invalid request" },
+      { status: error instanceof Error && error.name === "PrivilegeEscalationError" ? 403 : 400 }
     );
   }
 }
@@ -30,11 +31,11 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   if (!auth.ok) return auth.response;
   const { id } = await context.params;
   try {
-    await deleteRole({ tenantId: auth.session.tenantId, id, actorUserId: auth.session.userId });
+    await deleteRole({ tenantId: auth.session.tenantId, id, actorUserId: auth.session.userId, actor: { kind: "user", tenantId: auth.session.tenantId, userId: auth.session.userId, scopes: auth.scopes }, });
     return NextResponse.json({ code: "00000", message: "ok" });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "invalid request";
-    const status = msg === "role_in_use" ? 409 : 400;
-    return NextResponse.json({ code: status === 409 ? "40900" : "40000", message: msg }, { status });
+    const status = msg === "role_in_use" ? 409 : error instanceof Error && error.name === "PrivilegeEscalationError" ? 403 : 400;
+    return NextResponse.json({ code: status === 409 ? "40900" : status === 403 ? "40300" : "40000", message: msg }, { status });
   }
 }

@@ -45,13 +45,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const defaultOrgId = await getDefaultOrgId(auth.session.tenantId);
     const updated = await updateAdminUser(auth.session.tenantId, id, patch, {
       actorUserId: auth.session.userId,
+      actor: { kind: "user", tenantId: auth.session.tenantId, userId: auth.session.userId, scopes: auth.scopes },
       defaultOrgId,
     });
     return NextResponse.json({ code: "00000", message: "ok", data: { user: updated } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "invalid request";
-    const status = message === "user not found" ? 404 : 400;
-    return NextResponse.json({ code: status === 404 ? "40400" : "40000", message }, { status });
+    const status = message === "user not found" ? 404 : error instanceof Error && error.name === "PrivilegeEscalationError" ? 403 : 400;
+    return NextResponse.json({ code: status === 404 ? "40400" : status === 403 ? "40300" : "40000", message }, { status });
   }
 }
 
@@ -61,10 +62,11 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
 
   const { id } = await context.params;
   try {
-    await softDeleteUser(auth.session.tenantId, id, auth.session.userId);
+    await softDeleteUser(auth.session.tenantId, id, { kind: "user", tenantId: auth.session.tenantId, userId: auth.session.userId, scopes: auth.scopes });
     return NextResponse.json({ code: "00000", message: "ok" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "invalid request";
-    return NextResponse.json({ code: "40000", message }, { status: 400 });
+    const forbidden = error instanceof Error && error.name === "PrivilegeEscalationError";
+    return NextResponse.json({ code: forbidden ? "40300" : "40000", message }, { status: forbidden ? 403 : 400 });
   }
 }

@@ -81,7 +81,73 @@ jobs:
           pnpm --filter @agenticx/db-schema db:seed
       - name: Contract suite
         run: bash scripts/ci/run-db-contract-suite.sh
+      - name: IAM real database regressions
+        # Opt-in URLs belong to this step only; unit tests below retain their
+        # dialect-dispatch/file-fixture isolation from the matrix database.
+        env:
+          IAM_PRIVILEGE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+          SSO_TEST_POSTGRES_URL: ${{ matrix.dialect == 'postgresql' && env.DATABASE_URL || '' }}
+          SSO_TEST_MYSQL_URL: ${{ matrix.dialect == 'mysql' && env.DATABASE_URL || '' }}
+        run: |
+          set -euo pipefail
+          test -n "$IAM_PRIVILEGE_TEST_DATABASE_URL"
+          case "$DATABASE_DIALECT" in
+            postgresql) test -n "$SSO_TEST_POSTGRES_URL" ;;
+            mysql) test -n "$SSO_TEST_MYSQL_URL" ;;
+            *) echo "Unsupported database dialect" >&2; exit 1 ;;
+          esac
+          echo "Real database dialect: $DATABASE_DIALECT"
+          candidates=(
+            packages/iam-core/src/repos/__tests__/privilege-guard-user-writes.real-db.test.ts
+            packages/iam-core/src/repos/__tests__/pat-grant-boundaries.real-db.test.ts
+            packages/iam-core/src/repos/__tests__/sso-identity-links.db.test.ts
+          )
+          files=()
+          for file in "${candidates[@]}"; do
+            if [ -f "$file" ]; then
+              files+=("$file")
+            else
+              echo "Not present in this PR: $file"
+            fi
+          done
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No scoped IAM real-database regression files in this PR."
+          else
+            printf 'Real database regression: %s\n' "${files[@]}"
+            pnpm exec vitest run --reporter=verbose "${files[@]}"
+          fi
       - name: IAM unit tests
         # These are dialect-dispatch/unit tests and deliberately exercise both
         # URL schemes plus local file fixtures; do not leak the matrix DB env.
         run: env -u DATABASE_DIALECT -u DATABASE_URL pnpm --filter @agenticx/iam-core test
+      - name: Scoped auth and portal regressions
+        run: |
+          set -euo pipefail
+          candidates=(
+            apps/admin-console/src/lib/__tests__/admin-auth-active-account.test.ts
+            apps/admin-console/src/app/api/admin/api-tokens/__tests__/route.test.ts
+            packages/auth/src/services/__tests__/oidc-claims.test.ts
+            packages/auth/src/services/__tests__/oidc-protocol-handler.test.ts
+            packages/auth/src/services/__tests__/sso-sign-in-policy.test.ts
+            apps/web-portal/src/lib/__tests__/sso-identity-login.test.ts
+            apps/admin-console/src/lib/__tests__/admin-sso-identity-login.test.ts
+            apps/web-portal/src/lib/__tests__/enterprise-skill-bundle.test.ts
+            apps/web-portal/src/lib/__tests__/enterprise-skill-context.test.ts
+            apps/web-portal/src/lib/__tests__/enterprise-skill-prompt.test.ts
+            apps/web-portal/src/lib/desktop-device-auth.test.ts
+            apps/web-portal/src/app/api/desktop/auth/token/__tests__/route.test.ts
+          )
+          files=()
+          for file in "${candidates[@]}"; do
+            if [ -f "$file" ]; then
+              files+=("$file")
+            else
+              echo "Not present in this PR: $file"
+            fi
+          done
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No scoped auth/portal regression files in this PR."
+          else
+            printf 'Auth/portal regression: %s\n' "${files[@]}"
+            env -u DATABASE_DIALECT -u DATABASE_URL pnpm exec vitest run --reporter=verbose "${files[@]}"
+          fi
