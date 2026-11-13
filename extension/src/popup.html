@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AGX NM Spike</title>
+  <style>
+    body { font: 13px system-ui, sans-serif; width: 260px; margin: 12px; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    .row { display: flex; justify-content: space-between; padding: 3px 0; }
+    .val { font-family: ui-monospace, Menlo, monospace; }
+    .ok { color: #080; }
+    .bad { color: #c00; }
+    .muted { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>AGX Bridge Spike</h1>
+  <div class="row"><span>status</span><span id="status" class="val">…</span></div>
+  <div class="row"><span>last RTT</span><span id="rtt" class="val">—</span></div>
+  <div class="row"><span>reconnects</span><span id="attempts" class="val">—</span></div>
+  <div class="row"><span>last pong</span><span id="pong" class="val muted">—</span></div>
+  <div class="row"><span>RTT samples</span><span id="samples" class="val muted">—</span></div>
+  <script src="popup.js"></script>
+</body>
+</html>

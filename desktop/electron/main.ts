@@ -97,6 +97,7 @@ import {
 } from "./desktop-notify";
 import { applyRunOutcome, applyUserEnableToggle, markInterruptedOnStartup, markRunStarted } from "./automation-run-health";
 import { startNearBrowserBridge, stopNearBrowserBridge } from "./browser-bridge";
+import { installNmHost } from "./native-messaging-host";
 import { registerChromeCookieImportIpc } from "./chrome-cookie-import";
 import { pickLocalFsPathCandidate } from "./local-fs-path";
 import {
@@ -7824,9 +7825,24 @@ function createWindow(): void {
     }
   });
   if (typeof startNearBrowserBridge === "function") {
-    startNearBrowserBridge(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null));
+    startNearBrowserBridge(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null), {
+      // SP5: inject_context dispatch target — the same studio URL/token every
+      // other main-process studio call uses; read per request.
+      injectContextStudio: { url: getStudioUrl, token: getStudioToken },
+      // SP7b: copilot_chat dispatch target — same studio getters as inject.
+      copilotChatStudio: { url: getStudioUrl, token: getStudioToken },
+    });
   } else {
     console.error("[main] startNearBrowserBridge missing; browser bridge skipped");
+  }
+  // SP6: keep the Chrome/Edge NM host registration in sync with the running
+  // app (idempotent overwrite; dev = repo shim + system node, installed =
+  // bundled shim + ELECTRON_RUN_AS_NODE). Matches scripts/install-extension-dev.sh
+  // output so the two paths never fight over the same files.
+  try {
+    installNmHost({ mode: app.isPackaged ? "installed" : "dev" });
+  } catch (err) {
+    console.warn("[main] NM host install failed (browser extension channel stays unregistered):", err);
   }
 }
 
