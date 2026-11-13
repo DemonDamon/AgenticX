@@ -68,6 +68,12 @@ def harness_spawn_options_for_run_mode(
     - CodeBuddy ``auto`` → ``permission_mode=acceptEdits`` (CB has no interactive
       ``can_use_tool`` channel; ask/allowlist keep CB default and may still
       stall on gated tools — documented, not broken).
+    - Codex ``auto`` / 「全部允许」→ ``workspace-write`` with network access.
+      Near promises not to ask, but workspace isolation still applies, so this
+      is not ``danger-full-access``.
+    - Codex ``allowlist`` / 「按需确认」→ ``workspace-write`` without network
+      (Codex has no interactive approval channel; risky outbound stays blocked).
+    - Codex ``ask`` / empty / unknown → ``read-only`` without network.
     """
     hid = str(harness_id or "").strip()
     mode = str(run_mode or "").strip().lower()
@@ -85,6 +91,26 @@ def harness_spawn_options_for_run_mode(
         if mode == "auto":
             return {"permission_mode": "acceptEdits"}
         return {}
+    if hid == "codex":
+        # full_auto is always cleared so a leftover flag cannot silently
+        # open danger-full-access after the user switches to a tighter mode.
+        if mode == "auto":
+            return {
+                "sandbox": "workspace-write",
+                "network_access": True,
+                "full_auto": False,
+            }
+        if mode == "allowlist":
+            return {
+                "sandbox": "workspace-write",
+                "network_access": False,
+                "full_auto": False,
+            }
+        return {
+            "sandbox": "read-only",
+            "network_access": False,
+            "full_auto": False,
+        }
     return {}
 
 

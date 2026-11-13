@@ -81,6 +81,21 @@ export function canonicalizeHarnessId(
   return preferred || BUILTIN_HARNESS_ID;
 }
 
+/** Merge a known harness onto a user row. null means the builtin runtime. */
+export function stampUserMessageHarnessMetadata(
+  metadata: Record<string, unknown> | undefined | null,
+  harnessId: string | null,
+): Record<string, unknown> {
+  const canonical = canonicalizeHarnessId(harnessId);
+  const base =
+    metadata && typeof metadata === "object" ? { ...metadata } : {};
+  return {
+    ...base,
+    harness: canonical,
+    harness_id: canonical,
+  };
+}
+
 export function resolveMessageHarnessId(
   metadata: Record<string, unknown> | undefined | null,
 ): string | null {

@@ -14,18 +14,20 @@ func TestRegistryLabelsForbidHighCardinalityIDs(t *testing.T) {
 		"deployment_id", "deploymentId", "gateway_trace_id",
 	}
 	allowed := map[string][]string{
-		"agx_gateway_ttft_seconds":                  {"model", "channel", "inbound_protocol"},
-		"agx_gateway_tokens_per_second":             {"model", "channel"},
-		"agx_gateway_cache_hits_total":              {"layer"},
-		"agx_gateway_cache_lookups_total":           {"layer", "result"},
-		"agx_gateway_channel_health":                {"channel", "status"},
-		"agx_gateway_active_streams":                {"model"},
-		"agx_gateway_upstream_error_total":          {"channel", "reason"},
-		"agx_plugin_invocations_total":              {"plugin"},
-		"agx_plugin_errors_total":                   {"plugin"},
-		"agx_plugin_latency_seconds":                {"plugin"},
-		"agx_gateway_http_requests_total":           {"method", "route", "status"},
-		"agx_gateway_http_request_duration_seconds": {"method", "route"},
+		"agx_gateway_ttft_seconds":                      {"model", "channel", "inbound_protocol"},
+		"agx_gateway_tokens_per_second":                 {"model", "channel"},
+		"agx_gateway_cache_hits_total":                  {"layer"},
+		"agx_gateway_cache_lookups_total":               {"layer", "result"},
+		"agx_gateway_channel_health":                    {"channel", "status"},
+		"agx_gateway_active_streams":                    {"model"},
+		"agx_gateway_upstream_error_total":              {"channel", "reason"},
+		"agx_plugin_invocations_total":                  {"plugin"},
+		"agx_plugin_errors_total":                       {"plugin"},
+		"agx_plugin_latency_seconds":                    {"plugin"},
+		"agx_gateway_http_requests_total":               {"method", "route", "status"},
+		"agx_gateway_http_request_duration_seconds":     {"method", "route"},
+		"gateway_config_apply_failures_total":           {"domain"},
+		"gateway_config_last_success_timestamp_seconds": {"domain"},
 	}
 	for name, labels := range allowed {
 		for _, f := range forbidden {

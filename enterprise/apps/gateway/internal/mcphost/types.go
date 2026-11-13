@@ -43,7 +43,10 @@ type ServerRecord struct {
 	Status          string
 	ToolCallsPerMin int
 	Tools           []Tool
-	Builtin         bool
+	// ToolsFromPublishedVersion 为真时，Tools 与 BackendConfig 来自已发布版本。
+	// OpenAPI 列表不得在工具为空时回退解析规格。
+	ToolsFromPublishedVersion bool
+	Builtin                   bool
 }
 
 // Backend executes tool calls for a hosted MCP server.

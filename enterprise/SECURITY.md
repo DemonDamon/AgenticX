@@ -103,6 +103,58 @@
 
 ---
 
+## 4.5 事件响应 SOP（incident-response）
+
+安全事件响应闭环：**告警/审计发现 → 立案 → 一键处置 → 三态流转 → 复盘**。处置面板在 admin-console 审计页「安全事件处置」卡片。
+
+### 4.5.1 分级响应时限
+
+| 级别 | 判据（例） | 响应要求 |
+|---|---|---|
+| CRITICAL | 审计链校验失败 / 凭据外泄类命中 / moderation 通道降级 | 15 分钟内进入 handling，立即执行凭据类处置 |
+| HIGH | 涉政/暴恐/色情命中（block）/ 预算击穿 | 1 小时内进入 handling |
+| MEDIUM/LOW | 广告类 WARN / 单点异常 | 当个工作日内评估立案或忽略 |
+
+### 4.5.2 处置动作决策树（先审计后执行——所有动作先落审计链再生效）
+
+1. **确认主体**：从告警卡片（user / session / model 字段）或审计事件 trace_id 下钻拿齐主体。
+2. **凭据类优先**：session 终止 → PAT 吊销（受影响面小、可回滚：PAT 可重发、用户可重登录）。
+3. **用户级处置需二次确认**：禁用用户会级联吊销该用户全部 PAT + 终止全部会话，操作员必须输入本人邮箱确认（误伤对策）。
+4. **模型级**：拉黑模型（provider enabled=false）用于问题模型止血；网关 10s 内热加载生效。
+5. **失败不静默**：动作明细 outcome=failed 时事件停留在 handling，重试或人工介入；禁止绕过面板直接改库。
+
+### 4.5.3 状态机（security_incidents）
+
+- `open → handling`：任一处置动作执行后自动流转（也可手动标记）。
+- `handling → resolved`：管理员手动结案，**必填结案说明**（根因/影响面/后续动作）。
+- `resolved → handling`：允许重开（复发场景），重开动作同样落审计。
+- 状态流转与每个处置动作均写入 iam 审计（audit_events）+ 网关防篡改链（incident_action 事件，checksum 可验）。
+
+### 4.5.4 生效语义与回滚
+
+| 动作 | 生效 | 回滚 |
+|---|---|---|
+| 终止会话 | 网关内存即时 401（access）+ refresh 行删除断续命 + 吊销快照表（网关轮询兜底重启恢复） | 用户重新登录 |
+| 吊销 PAT | 网关内存即时 401 + DB status='revoked' + PAT 吊销快照 | 重发 PAT |
+| 禁用用户 | users.status='disabled' + 级联 PAT/session 处置 | 管理员重新启用（回写 status）|
+| 拉黑模型 | provider enabled=false，热加载 10s | 重新启用模型 |
+
+### 4.5.5 复盘与演练
+
+- resolved 后 48 小时内在事件结案说明中补齐：根因、命中规则/告警链路是否如期工作、SOP 改进项。
+- 季度攻防演练（红队）重跑本 SOP 全链路，验证：外泄告警 → 处置 → 原凭据 401 → 链上可查，证据落盘拦截矩阵报告。
+- 演练入口（SP6 red-team-drill，12 类脚本化攻击对真实组件栈）：
+
+```bash
+python3 scripts/red-team-drill/run_drill.py        # 重演两侧 → 拦截矩阵报告（md+json）落盘
+pytest tests/red_team/ -q                          # 主链路侧单独跑（常规 CI 零文件副作用）
+cd enterprise/apps/gateway && go test ./internal/server -run TestRedTeam -v   # 网关侧单独跑
+```
+
+拦截率验收线 ≥90%；首轮（2026-11-13）实测 32/32（100%）。演练 payload 全部为合成词/合成凭据（脱敏纪律），报告落 `reports/red-team-drill/`（版本化 run 目录）。
+
+---
+
 ## 5. CI 安全门禁（必选）
 
 ```yaml

@@ -208,6 +208,7 @@ def iter_raw_tool_progress(line: str) -> Iterable[ToolProgressEvent]:
     Recognized shapes:
     - ``stream_event`` → ``content_block_start`` → ``content_block.type=tool_use``
     - ``assistant`` → ``message.content`` items with ``type=tool_use``
+    - ``function_call`` / ``function_call_result`` (CodeBuddy stream-json)
     - ``user`` → ``message.content`` items with ``type=tool_result``
 
     Never yields tool argument JSON or large result bodies — only id/name/status.
@@ -248,6 +249,31 @@ def iter_raw_tool_progress(line: str) -> Iterable[ToolProgressEvent]:
             name = str(item.get("name") or "").strip()
             if tid:
                 yield ToolProgressEvent(kind="start", tool_call_id=tid, name=name or "tool")
+        return
+
+    # CodeBuddy stream-json uses top-level function_call / function_call_result
+    # instead of Anthropic tool_use / tool_result blocks.
+    if kind == "function_call":
+        tid = str(obj.get("callId") or obj.get("id") or "").strip()
+        name = str(obj.get("name") or "").strip() or "tool"
+        if tid:
+            yield ToolProgressEvent(kind="start", tool_call_id=tid, name=name)
+        return
+
+    if kind == "function_call_result":
+        tid = str(obj.get("callId") or obj.get("id") or "").strip()
+        name = str(obj.get("name") or "").strip()
+        if tid:
+            status = str(obj.get("status") or "").lower()
+            is_error = status in {"failed", "error", "cancelled"} or bool(
+                obj.get("is_error") or obj.get("isError")
+            )
+            yield ToolProgressEvent(
+                kind="end",
+                tool_call_id=tid,
+                name=name,
+                is_error=is_error,
+            )
         return
 
     if kind == "user":
@@ -448,6 +474,17 @@ def drain_visible_text_from_lines(
     return "".join(parts), new_index
 
 
+def visible_assistant_text_from_lines(lines: List[str]) -> str:
+    """Sanitized assistant text from one turn's stream-json lines.
+
+    Complete ``assistant`` blocks released before ``result`` are included.
+    The terminal ``result`` payload is not.
+    """
+    tracker = VisibleTextTracker()
+    drain_visible_text_from_lines(lines, start_index=0, tracker=tracker)
+    return tracker.emitted.strip()
+
+
 __all__ = [
     "MidTurnItem",
     "ToolProgressEvent",
@@ -455,6 +492,7 @@ __all__ = [
     "VisibleTextTracker",
     "drain_midturn_items_from_lines",
     "drain_visible_text_from_lines",
+    "visible_assistant_text_from_lines",
     "iter_raw_text_fragments",
     "iter_raw_tool_progress",
     "parse_stream_json_object",

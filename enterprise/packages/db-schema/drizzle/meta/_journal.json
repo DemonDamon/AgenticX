@@ -519,6 +519,34 @@
       "when": 1789200000000,
       "tag": "0074_ecp_e4_expert_package",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789300000000,
+      "tag": "0075_gateway_instances",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789300000001,
+      "tag": "0076_mcp_server_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1789300000002,
+      "tag": "0077_enterprise_runtime_virtual_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1789300000003,
+      "tag": "0078_security_incident_response",
+      "breakpoints": true
     }
   ]
 }

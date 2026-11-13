@@ -1,0 +1,49 @@
+name: moderation-compliance
+version: 0.1.0
+type: rule-pack
+description: 合规内容审核基线规则包（涉政/色情/暴恐/广告）。注意：本包为基线示例，词表不可避免存在覆盖不足与误拦风险，生产环境应以客户自有数据包替换或增补；租户可经管理后台停用/改词（规则是数据，走 policy snapshot 热加载）。
+rules:
+  # 涉政（block/critical）
+  - id: compliance-politics-1
+    kind: keyword
+    category: politics
+    keywords:
+      - 颠覆国家政权
+      - 推翻社会主义制度
+      - 分裂国家
+      - 煽动分裂
+    action: block
+    severity: critical
+    message: 涉政违规内容，已拦截
+  # 暴恐（block/critical）
+  - id: compliance-terrorism-1
+    kind: keyword
+    category: terrorism
+    keywords:
+      - 制作爆炸物教程
+      - 制造炸弹方法
+      - 购买枪支弹药
+      - 恐怖袭击策划
+    action: block
+    severity: critical
+    message: 暴恐违规内容，已拦截
+  # 色情（block/high）
+  - id: compliance-porn-1
+    kind: keyword
+    category: porn
+    keywords:
+      - 裸聊
+      - 援交
+      - 卖淫嫖娼
+      - 成人片资源
+    action: block
+    severity: high
+    message: 色情违规内容，已拦截
+  # 广告（warn/medium——误拦风险对策：WARN 档先行，命中审计可复盘）
+  - id: compliance-ad-1
+    kind: regex
+    category: ad
+    pattern: '加(微信|V|vx|wx)\s?[a-zA-Z0-9_]{6,}'
+    action: warn
+    severity: medium
+    message: 疑似广告引流内容，已记录
