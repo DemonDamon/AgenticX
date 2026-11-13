@@ -55,6 +55,15 @@ export const DEFAULT_THRESHOLD: AdmissionThreshold = {
 const EMPTY_CONFIG: ModelAdmissionConfig = { tenants: {} };
 const HISTORY_CAP = 10;
 
+// Reserved object keys: a model name taken from an imported scorecard must
+// never be used as a plain-object key (`obj["__proto__"] = x` rewrites the
+// prototype — CodeQL prototype pollution).
+const RESERVED_OBJ_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export function isReservedObjectKey(key: string): boolean {
+  return RESERVED_OBJ_KEYS.has(key);
+}
+
 function configPath(): string {
   return (
     process.env.ADMIN_MODEL_ADMISSION_FILE?.trim() ||
@@ -138,6 +147,9 @@ export function parseScorecardImport(payload: unknown): ScorecardImport {
   }
   for (const m of card.models) {
     if (typeof m.model !== "string" || !m.model) throw new Error("scorecard model entry missing model name");
+    if (isReservedObjectKey(m.model)) {
+      throw new Error("scorecard model name is a reserved object key");
+    }
     if (typeof m.safety_score !== "number" || Number.isNaN(m.safety_score)) {
       throw new Error(`scorecard entry for ${m.model} missing safety_score`);
     }
@@ -159,6 +171,11 @@ export async function importScorecard(
   };
   let imported = 0;
   for (const m of card.models ?? []) {
+    if (isReservedObjectKey(m.model)) {
+      // Store-boundary re-validation (route already validates): reserved keys
+      // must never reach a plain-object assignment.
+      throw new Error("scorecard model name is a reserved object key");
+    }
     const entry: ScorecardEntry = {
       model: m.model,
       provider: m.provider,

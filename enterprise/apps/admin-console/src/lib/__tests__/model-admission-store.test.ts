@@ -52,6 +52,12 @@ describe("parseScorecardImport", () => {
   it("拒绝空 models", () => {
     expect(() => parseScorecardImport({ schema: "agx-security-scorecard/1", models: [] })).toThrow(/no model/);
   });
+
+  it("拒绝保留对象键作为 model 名（原型污染）", () => {
+    for (const model of ["__proto__", "constructor", "prototype"]) {
+      expect(() => parseScorecardImport(scorecard([{ model, score: 88 }]))).toThrow(/reserved/);
+    }
+  });
 });
 
 describe("store roundtrip", () => {
@@ -93,5 +99,15 @@ describe("store roundtrip", () => {
 
   it("非法导入 payload 抛错", async () => {
     await expect(importScorecard("tenant-d", { schema: "nope" } as never)).rejects.toThrow();
+  });
+
+  it("保留键 model 名在 store 边界被拒，原型不被污染", async () => {
+    const before = ({} as { polluted?: boolean }).polluted;
+    await expect(
+      importScorecard("tenant-e", scorecard([{ model: "__proto__", score: 88 }])),
+    ).rejects.toThrow(/reserved/);
+    const admission = await readTenantAdmission("tenant-e");
+    expect(admission.scorecards).toEqual({});
+    expect(({} as { polluted?: boolean }).polluted).toBe(before);
   });
 });

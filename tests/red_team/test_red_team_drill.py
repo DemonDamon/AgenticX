@@ -101,17 +101,17 @@ EXFIL_PAYLOADS: List[Dict[str, str]] = [
     {
         "case_id": "A3-1",
         "desc": "OpenAI 风格假密钥",
-        "secret": "sk-proj-DRILLFAKE0000000000abcdefDRILLFAKE12",
+        "secret": "sk-proj-DRILLFAKE0000000000abcdefDRILLFAKE12",  # gitleaks:allow — synthetic drill fixture
     },
     {
         "case_id": "A3-2",
         "desc": "AWS 风格假密钥",
-        "secret": "AKIADRILLFAKEDRILLFAKE0000",
+        "secret": "AKIADRILLFAKEDRILLFAKE0000",  # gitleaks:allow — synthetic drill fixture
     },
     {
         "case_id": "A3-3",
         "desc": "Bearer 假令牌",
-        "secret": "Bearer eyJhbGciOiDRILLFAKE.token.payload",
+        "secret": "Bearer eyJhbGciOiDRILLFAKE.token.payload",  # gitleaks:allow — synthetic drill fixture
     },
 ]
 
