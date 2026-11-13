@@ -10,8 +10,9 @@ Author: Damon Li
 from __future__ import annotations
 
 import os
-import re
 from typing import TYPE_CHECKING, Literal, Optional, Set
+
+from agenticx.llms.http_status import exception_chain, exception_text, http_status_code
 
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
@@ -57,12 +58,23 @@ def is_model_param_compat_error(exc: BaseException) -> bool:
 
 def classify_provider_fault(exc: BaseException) -> FaultKind:
     """Best-effort classification from exception message and common SDK patterns."""
-    text = f"{type(exc).__name__} {exc}".lower()
+    text = exception_text(exc).lower()
+    status = http_status_code(exc)
+    # A real status must not be overridden by an unrelated message elsewhere
+    # in an SDK wrapper chain. Keep provider-specific 403 balance semantics below.
+    if status == 402:
+        return "billing"
+    if status == 401:
+        return "auth"
+    if status == 429:
+        return "rate_limit"
+    if status is not None and 500 <= status < 600:
+        return "transient"
     if "accountoverdue" in text or "overdue balance" in text or "欠费" in text:
         return "billing"
-    if "payment_required" in text or "402" in text:
+    if "payment_required" in text:
         return "billing"
-    if re.search(r"\b403\b", text) and (
+    if status == 403 and (
         "forbidden" in text
         or "invalid" in text and "key" in text
         or "auth" in text
@@ -72,9 +84,9 @@ def classify_provider_fault(exc: BaseException) -> FaultKind:
         if "overdue" in text or "billing" in text or "balance" in text:
             return "billing"
         return "auth"
-    if re.search(r"\b401\b", text) or "unauthorized" in text or "invalid api key" in text:
+    if "unauthorized" in text or "invalid api key" in text:
         return "auth"
-    if "429" in text or "rate limit" in text or "too many requests" in text:
+    if "rate limit" in text or "too many requests" in text:
         return "rate_limit"
     if (
         "contextwindowexceeded" in text
@@ -85,7 +97,18 @@ def classify_provider_fault(exc: BaseException) -> FaultKind:
         return "context_window"
     if "tool" in text and ("not found" in text or "unavailable" in text):
         return "tool_unavailable"
-    if "timeout" in text or "timed out" in text or "connection reset" in text:
+    if (
+        "timeout" in text
+        or "timed out" in text
+        or any(marker in text for marker in (
+            "connection error", "connection refused", "connection reset",
+            "connection aborted", "connection closed", "apiconnectionerror",
+            "server disconnected", "remoteprotocolerror", "remote protocol error",
+            "network is unreachable", "broken pipe", "internalservererror",
+            "service unavailable", "bad gateway",
+        ))
+        or any(isinstance(item, (ConnectionError, TimeoutError)) for item in exception_chain(exc))
+    ):
         return "transient"
     return "unknown"
 
