@@ -1920,6 +1920,8 @@ declare global {
         cwd: string;
         cols?: number;
         rows?: number;
+        tabId?: string;
+        shellOnly?: boolean;
       }) => Promise<{ ok: boolean; id?: string; error?: string }>;
       terminalBridgeAttach: (payload: {
         id: string;
@@ -1931,6 +1933,15 @@ declare global {
       }) => Promise<{ ok: boolean; id?: string; error?: string }>;
       terminalWrite: (payload: { id: string; data: string }) => Promise<{ ok: boolean }>;
       terminalWriteByTab: (payload: { tabId: string; data: string }) => Promise<{ ok: boolean; id?: string }>;
+      terminalWritePtyByTab: (payload: {
+        tabId: string;
+        data: string;
+        requireRegistered?: boolean;
+      }) => Promise<{ ok: boolean; id?: string; error?: string }>;
+      terminalHasPtyForTab: (payload: {
+        tabId: string;
+        requireRegistered?: boolean;
+      }) => Promise<{ ok: boolean; id?: string }>;
       terminalResize: (payload: { id: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
       terminalKill: (id: string) => Promise<{ ok: boolean }>;
       onTerminalData: (cb: (payload: { id: string; data: string }) => void) => () => void;

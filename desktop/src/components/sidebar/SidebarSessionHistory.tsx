@@ -757,12 +757,12 @@ export function SidebarSessionHistory() {
         provider: row.provider,
         model: row.model,
       });
-      // Sticky: restore this session's last harness (Settings default is new-chat only).
-      setPaneHarness(
-        paneId,
-        toStoredPreferredHarnessId(row.harness_id),
-        false,
-      );
+      // Only an external sticky id pins the composer. A missing/null field
+      // must not lock builtin before message-metadata backfill.
+      const stickyHarness = toStoredPreferredHarnessId(row.harness_id);
+      if (stickyHarness) {
+        setPaneHarness(paneId, stickyHarness, false, { preserveModel: true });
+      }
       if (row.session_mode === "code_dev" || row.session_mode === "daily_office") {
         setPaneSessionMode(paneId, row.session_mode);
       }
@@ -878,12 +878,10 @@ export function SidebarSessionHistory() {
       provider: row.provider,
       model: row.model,
     });
-    // Sticky: restore this session's last harness (Settings default is new-chat only).
-    setPaneHarness(
-      paneId,
-      toStoredPreferredHarnessId(row.harness_id),
-      false,
-    );
+    const stickyHarness = toStoredPreferredHarnessId(row.harness_id);
+    if (stickyHarness) {
+      setPaneHarness(paneId, stickyHarness, false, { preserveModel: true });
+    }
     if (row.session_mode === "code_dev" || row.session_mode === "daily_office") {
       setPaneSessionMode(paneId, row.session_mode);
     }

@@ -94,6 +94,41 @@ func enrichAuditRoutingPolicy(event *audit.Event, decision channel.PickDecision)
 	event.RoutingPolicy = raw
 }
 
+func relayModel(requested, resolved string) string {
+	if strings.TrimSpace(resolved) != "" {
+		return resolved
+	}
+	return requested
+}
+
+// annotateVirtualModelAudit records the real model on the event and keeps the
+// requested virtual name inside the existing routing_policy JSON.
+func annotateVirtualModelAudit(event *audit.Event, virtualName, resolved string) {
+	if event == nil {
+		return
+	}
+	virtualName = strings.TrimSpace(virtualName)
+	resolved = strings.TrimSpace(resolved)
+	if resolved != "" {
+		event.Model = resolved
+	}
+	if virtualName == "" {
+		return
+	}
+	payload := map[string]any{}
+	if len(event.RoutingPolicy) > 0 {
+		if err := json.Unmarshal(event.RoutingPolicy, &payload); err != nil {
+			payload = map[string]any{}
+		}
+	}
+	payload["requested_model"] = virtualName
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	event.RoutingPolicy = raw
+}
+
 func (s *Server) initChannelRelay() {
 	openaiAdaptor := adaptor.NewOpenAIAdaptor()
 	s.adaptorFactory = adaptor.NewFactory(openaiAdaptor)
@@ -101,9 +136,11 @@ func (s *Server) initChannelRelay() {
 	s.channelStats = channel.NewStatsStore()
 	s.channelAffinity = channel.NewAffinityStore(0)
 	s.channelRegistry = channel.NewRegistry(s.logger, s.adminLoader)
+	s.channelRegistry.SetConfigStatus(s.configStatus)
 	s.channelRegistry.Start(context.Background())
 	s.channelPicker = channel.NewPicker(s.channelRegistry, s.channelStats, s.channelAffinity)
 	s.relayExecutor = relay.NewExecutor(s.channelPicker, s.adaptorFactory, s.keyPool)
+	s.relayExecutor.SetVirtualPlanner(s.virtualLoader)
 	s.billingService = billing.NewService(s.quotaTracker)
 }
 

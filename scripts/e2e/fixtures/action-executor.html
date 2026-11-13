@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AGX Action Executor Fixture</title>
+</head>
+<body>
+  <!-- open + extract_text assertions -->
+  <h1>AGX Action Executor Fixture</h1>
+  <p>welcome to the sp3 executor fixture</p>
+
+  <!-- click-by-index target: observable side effect -->
+  <button id="inc">Increment</button>
+  <div id="counter">Counter: 0</div>
+
+  <!-- type-by-index target: live input preview -->
+  <label>Live input <input id="live" placeholder="Type here"></label>
+  <div id="last-input">last-input: (none)</div>
+
+  <!-- type + submit path: Enter / requestSubmit -->
+  <form id="form">
+    <input id="email" placeholder="Email">
+    <button type="submit">Submit form</button>
+  </form>
+  <div id="form-result">form-result: (none)</div>
+
+  <!-- password input: proves is_password:true lands in the snapshot elements -->
+  <input id="pw" type="password" placeholder="Secret">
+
+  <!-- link: proves a[href] indexing -->
+  <a id="second" href="second-page.html">Goto second page</a>
+
+  <!-- press_key target: document-level key listener -->
+  <div id="last-key">last-key: (none)</div>
+
+  <!-- open shadow root: snapshot/click must reach through it -->
+  <div id="shadow-host"></div>
+  <div id="shadow-note">shadow-count: 0</div>
+
+  <script>
+    // Main-world handlers: prove events dispatched from the extension's
+    // ISOLATED world land here (DOM attributes and events are shared).
+    let count = 0;
+    document.getElementById("inc").addEventListener("click", () => {
+      count += 1;
+      document.getElementById("counter").textContent = `Counter: ${count}`;
+    });
+    document.getElementById("live").addEventListener("input", (e) => {
+      document.getElementById("last-input").textContent = `last-input: ${e.target.value}`;
+    });
+    document.getElementById("form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      document.getElementById("form-result").textContent =
+        `form-result: ${document.getElementById("email").value}`;
+    });
+    document.addEventListener("keydown", (e) => {
+      document.getElementById("last-key").textContent = `last-key: ${e.key}`;
+    });
+
+    const host = document.getElementById("shadow-host");
+    const root = host.attachShadow({ mode: "open" });
+    let shadowCount = 0;
+    root.innerHTML = `
+      <p>shadow-host-content: inside the open shadow root</p>
+      <button id="shadow-btn">Shadow button</button>
+    `;
+    root.getElementById("shadow-btn").addEventListener("click", () => {
+      shadowCount += 1;
+      document.getElementById("shadow-note").textContent = `shadow-count: ${shadowCount}`;
+    });
+  </script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/keypool"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
+	"github.com/agenticx/enterprise/gateway/internal/virtualmodel"
 )
 
 const defaultMaxRetries = 2
@@ -22,6 +24,7 @@ type Executor struct {
 	factory  *adaptor.Factory
 	keypool  *keypool.Pool
 	cooldown time.Duration
+	virtual  VirtualPlanner
 }
 
 func NewExecutor(picker *channel.Picker, factory *adaptor.Factory, pool *keypool.Pool) *Executor {
@@ -42,16 +45,85 @@ type CompleteResult struct {
 	KeyRef        string
 	Attempts      []channel.Attempt
 	PickDecision  channel.PickDecision
+	ResolvedModel string
+	VirtualName   string
 }
 
 type StreamResult struct {
-	Channel      channel.Channel
-	KeyRef       string
-	Attempts     []channel.Attempt
-	PickDecision channel.PickDecision
+	Channel       channel.Channel
+	KeyRef        string
+	Attempts      []channel.Attempt
+	PickDecision  channel.PickDecision
+	ResolvedModel string
+	VirtualName   string
+}
+
+// VirtualPlanner resolves a virtual model name before channel selection.
+// ok is false for ordinary model names.
+type VirtualPlanner interface {
+	Plan(tenantID, name string, available func(model string) bool) (order []string, virtualName string, ok bool)
+}
+
+func (e *Executor) SetVirtualPlanner(p VirtualPlanner) {
+	if e == nil {
+		return
+	}
+	e.virtual = p
+}
+
+func (e *Executor) virtualPlan(model string, id channel.Identity) ([]string, string, bool) {
+	if e == nil || e.virtual == nil {
+		return nil, "", false
+	}
+	return e.virtual.Plan(id.TenantID, model, func(target string) bool {
+		if e.picker == nil {
+			return false
+		}
+		return e.picker.HasRoutableChannel(id.TenantID, target)
+	})
 }
 
 func (e *Executor) Complete(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+	model string,
+	id channel.Identity,
+) (CompleteResult, error) {
+	if order, virtualName, ok := virtualmodel.PlanFromContext(ctx); ok {
+		return e.completeVirtual(ctx, req, order, virtualName, id)
+	}
+	if order, virtualName, ok := e.virtualPlan(model, id); ok {
+		return e.completeVirtual(ctx, req, order, virtualName, id)
+	}
+	return e.completeOne(ctx, req, model, id)
+}
+
+func (e *Executor) completeVirtual(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+	order []string,
+	virtualName string,
+	id channel.Identity,
+) (CompleteResult, error) {
+	var lastErr error
+	attempts := make([]channel.Attempt, 0)
+	for i, target := range order {
+		reqTry := req
+		reqTry.Model = target
+		result, err := e.completeOne(ctx, reqTry, target, id)
+		attempts = append(attempts, result.Attempts...)
+		result.Attempts = attempts
+		result.ResolvedModel = target
+		result.VirtualName = virtualName
+		if err == nil || !isNoChannel(err) || i == len(order)-1 {
+			return result, err
+		}
+		lastErr = err
+	}
+	return CompleteResult{Attempts: attempts, VirtualName: virtualName}, lastErr
+}
+
+func (e *Executor) completeOne(
 	ctx context.Context,
 	req openai.ChatCompletionRequest,
 	model string,
@@ -179,6 +251,52 @@ func (e *Executor) Stream(
 	id channel.Identity,
 	push adaptor.StreamPush,
 ) (StreamResult, error) {
+	if order, virtualName, ok := virtualmodel.PlanFromContext(ctx); ok {
+		return e.streamVirtual(ctx, req, order, virtualName, id, push)
+	}
+	if order, virtualName, ok := e.virtualPlan(model, id); ok {
+		return e.streamVirtual(ctx, req, order, virtualName, id, push)
+	}
+	return e.streamOne(ctx, req, model, id, push)
+}
+
+func (e *Executor) streamVirtual(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+	order []string,
+	virtualName string,
+	id channel.Identity,
+	push adaptor.StreamPush,
+) (StreamResult, error) {
+	var lastErr error
+	attempts := make([]channel.Attempt, 0)
+	for i, target := range order {
+		reqTry := req
+		reqTry.Model = target
+		result, err := e.streamOne(ctx, reqTry, target, id, push)
+		attempts = append(attempts, result.Attempts...)
+		result.Attempts = attempts
+		result.ResolvedModel = target
+		result.VirtualName = virtualName
+		if err == nil || !isNoChannel(err) || i == len(order)-1 {
+			return result, err
+		}
+		lastErr = err
+	}
+	return StreamResult{Attempts: attempts, VirtualName: virtualName}, lastErr
+}
+
+func isNoChannel(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), "no channel for model ")
+}
+
+func (e *Executor) streamOne(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+	model string,
+	id channel.Identity,
+	push adaptor.StreamPush,
+) (StreamResult, error) {
 	var lastErr error
 	excludeChannels := map[string]struct{}{}
 	attempts := make([]channel.Attempt, 0)
@@ -207,6 +325,9 @@ func (e *Executor) Stream(
 			return StreamResult{Attempts: attempts, Channel: ch, KeyRef: result.keyRef}, err
 		}
 		e.picker.MarkFailure(ch, err.Error(), e.cooldown)
+		if result.committed {
+			return StreamResult{Attempts: attempts, Channel: ch, KeyRef: result.keyRef}, err
+		}
 		excludeChannels[ch.ID] = struct{}{}
 	}
 	return StreamResult{Attempts: attempts}, lastErr
@@ -216,6 +337,7 @@ type channelStreamOutcome struct {
 	keyRef    string
 	latencyMS int64
 	attempts  []channel.Attempt
+	committed bool
 }
 
 func (e *Executor) streamOnChannel(
@@ -230,8 +352,10 @@ func (e *Executor) streamOnChannel(
 	excludeKeys := map[string]struct{}{}
 	var lastErr error
 	var lastKeyRef string
+	var committed bool
 
 	for keyTry := 0; keyTry < maxKeyTries; keyTry++ {
+		committed = false
 		resolved := e.resolveKeyWithExcludes(ch, poolID, excludeKeys)
 		lastKeyRef = resolved.KeyRef
 		if resolved.Key == "" && len(refs) > 0 {
@@ -241,21 +365,20 @@ func (e *Executor) streamOnChannel(
 		chTry := ch
 		chTry.APIKey = resolved.Key
 
-		var tokensSent bool
 		wrappedPush := func(chunk openai.StreamChunk) error {
-			if len(chunk.Choices) > 0 {
-				delta := chunk.Choices[0].Delta
-				if strings.TrimSpace(delta.Content) != "" || strings.TrimSpace(delta.ReasoningContent) != "" {
-					tokensSent = true
-				}
+			if err := push(chunk); err != nil {
+				return &clientPushError{err: err}
 			}
-			return push(chunk)
+			if len(chunk.Choices) > 0 && deltaHasClientPayload(chunk.Choices[0].Delta) {
+				committed = true
+			}
+			return nil
 		}
 
 		start := time.Now()
 		ad, err := e.factory.For(chTry)
 		if err != nil {
-			return channelStreamOutcome{}, err
+			return channelStreamOutcome{committed: committed}, err
 		}
 		err = ad.Stream(ctx, req, chTry, wrappedPush)
 		latency := time.Since(start).Milliseconds()
@@ -266,6 +389,7 @@ func (e *Executor) streamOnChannel(
 			return channelStreamOutcome{
 				keyRef:    resolved.KeyRef,
 				latencyMS: latency,
+				committed: committed,
 				attempts: []channel.Attempt{{
 					ChannelID: ch.ID,
 					Provider:  ch.ProviderLabel,
@@ -283,7 +407,7 @@ func (e *Executor) streamOnChannel(
 			RetryReason: reason,
 			LatencyMS:   latency,
 		}
-		canRetryKey := IsKeyRetryable(err) && len(refs) > 0 && resolved.KeyRef != "" && resolved.KeyRef != "direct" && !tokensSent
+		canRetryKey := IsKeyRetryable(err) && len(refs) > 0 && resolved.KeyRef != "" && resolved.KeyRef != "direct" && !committed
 		if canRetryKey {
 			e.keypool.MarkFailure(poolID, resolved.KeyRef, reason)
 			excludeKeys[resolved.KeyRef] = struct{}{}
@@ -291,9 +415,9 @@ func (e *Executor) streamOnChannel(
 				continue
 			}
 		}
-		return channelStreamOutcome{keyRef: lastKeyRef, attempts: []channel.Attempt{attempt}}, err
+		return channelStreamOutcome{keyRef: lastKeyRef, attempts: []channel.Attempt{attempt}, committed: committed}, err
 	}
-	return channelStreamOutcome{keyRef: lastKeyRef}, lastErr
+	return channelStreamOutcome{keyRef: lastKeyRef, committed: committed}, lastErr
 }
 
 func (e *Executor) resolveKeyWithExcludes(ch channel.Channel, poolID string, exclude map[string]struct{}) keypool.ResolveResult {
@@ -322,6 +446,10 @@ func maxKeyAttempts(ch channel.Channel) int {
 // IsKeyRetryable upstream errors that should try the next key within the same channel.
 func IsKeyRetryable(err error) bool {
 	if err == nil {
+		return false
+	}
+	var pushErr *clientPushError
+	if errors.As(err, &pushErr) {
 		return false
 	}
 	var up *adaptor.UpstreamError
@@ -355,6 +483,10 @@ func IsChannelRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
+	var pushErr *clientPushError
+	if errors.As(err, &pushErr) {
+		return false
+	}
 	var up *adaptor.UpstreamError
 	if errors.As(err, &up) {
 		if up.StatusCode == httpStatusTooManyRequests || up.StatusCode >= 500 {
@@ -382,6 +514,32 @@ func IsChannelRetryable(err error) bool {
 // IsRetryable kept for backward-compatible tests (channel-level retry).
 func IsRetryable(err error) bool {
 	return IsChannelRetryable(err)
+}
+
+type clientPushError struct {
+	err error
+}
+
+func (e *clientPushError) Error() string {
+	if e == nil || e.err == nil {
+		return "client push failed"
+	}
+	return e.err.Error()
+}
+
+func (e *clientPushError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func deltaHasClientPayload(delta openai.StreamDelta) bool {
+	if strings.TrimSpace(delta.Content) != "" || strings.TrimSpace(delta.ReasoningContent) != "" {
+		return true
+	}
+	raw := bytes.TrimSpace(delta.ToolCalls)
+	return len(raw) > 0 && string(raw) != "null"
 }
 
 const httpStatusTooManyRequests = 429

@@ -179,6 +179,12 @@ type Props = {
   onBuildPlan?: (plan: PlanArtifactPayload) => void;
   onOpenBranchSource?: (lineage: BranchLineage) => void;
   onContinueFromMessage?: (message: Message) => void;
+  activeHarnessId?: string | null;
+  onCodebuddyLogin?: () => void;
+  codebuddyLoginAwaitingRetry?: boolean;
+  codebuddyLoginAuthorizing?: boolean;
+  codebuddyLoginOAuthFailed?: boolean;
+  codebuddyLoginOAuthError?: string | null;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -459,6 +465,12 @@ export function MessageRenderer({
   onBuildPlan,
   onOpenBranchSource,
   onContinueFromMessage,
+  activeHarnessId,
+  onCodebuddyLogin,
+  codebuddyLoginAwaitingRetry,
+  codebuddyLoginAuthorizing,
+  codebuddyLoginOAuthFailed,
+  codebuddyLoginOAuthError,
 }: Props) {
   const { t } = useTranslation("chat");
   const chatStyle = useAppStore((s) => s.chatStyle);
@@ -691,6 +703,13 @@ export function MessageRenderer({
         }
         onOpenWorkspaceRefs={onOpenAllRefs}
         sessionWebRefs={sessionWebRefs}
+        activeHarnessId={activeHarnessId}
+        conversationMessages={allMessages}
+        onCodebuddyLogin={onCodebuddyLogin}
+        codebuddyLoginAwaitingRetry={codebuddyLoginAwaitingRetry}
+        codebuddyLoginAuthorizing={codebuddyLoginAuthorizing}
+        codebuddyLoginOAuthFailed={codebuddyLoginOAuthFailed}
+        codebuddyLoginOAuthError={codebuddyLoginOAuthError}
       />,
     );
   }
