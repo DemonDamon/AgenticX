@@ -408,6 +408,32 @@ def test_template_summarizer_prefers_recent_user_goal():
     assert "南沙" in payload
 
 
+def test_template_summarizer_keeps_full_recent_assistant_turn():
+    """Latest assistant body should survive well past the old 400-char clip."""
+    body = "CubeSandbox信创适配。" + ("详情段落。" * 200)
+    assert len(body) > 400
+    snap = AppThreadSnapshot(
+        app_thread_id="thread-long",
+        current_harness="codebuddy",
+        cwd="/tmp",
+        history=[
+            HistoryMessage(role="user", content="还有哪些满足信创的？", harness="codebuddy"),
+            HistoryMessage(role="assistant", content=body, harness="codebuddy"),
+        ],
+        runs=[],
+        threads=[],
+        memory_snapshot="",
+        knowledge_snapshot="",
+        todos="",
+    )
+    plan = decide_strategy(snap, "codebuddy", user_strategy=STRATEGY_FULL)
+    result = TemplateSummarizer().summarize(snap, plan)
+    # Keep well more than the compact 400-char excerpt so a model switch
+    # can continue an unfinished answer.
+    assert body[:800] in result.summary.decisions
+    assert "还有哪些满足信创的" in result.summary.decisions
+
+
 def test_template_summarizer_manual_context():
     snap = _snapshot()
     plan = decide_strategy(snap, "codex", user_strategy=STRATEGY_MANUAL)

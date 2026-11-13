@@ -640,6 +640,32 @@ async def test_skip_user_history_dedupes_existing_tail_user() -> None:
     assert user_rows[0]["content"] == "能不能听到？"
 
 
+async def test_skip_user_history_restamps_tail_user_harness() -> None:
+    runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
+    session = StudioSession()
+    session.chat_history = [
+        {
+            "role": "user",
+            "content": "能不能听到？",
+            "metadata": {"harness": "codebuddy", "client_turn_id": "turn-9"},
+        }
+    ]
+
+    async for _ in runtime.run_turn(
+        "能不能听到？",
+        session,
+        persist_user_message=False,
+        history_user_metadata={"harness": "python-agent", "client_turn_id": "turn-9"},
+    ):
+        pass
+
+    user_rows = [m for m in session.chat_history if m.get("role") == "user"]
+    assert len(user_rows) == 1
+    assert user_rows[0]["metadata"]["harness"] == "python-agent"
+    assert user_rows[0]["metadata"]["harness_id"] == "python-agent"
+    assert user_rows[0]["metadata"]["client_turn_id"] == "turn-9"
+
+
 async def test_skip_user_history_skips_forward_card_follow_up_echo() -> None:
     """Auto-reply after merge-forward must not create a second identical user bubble."""
     runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
