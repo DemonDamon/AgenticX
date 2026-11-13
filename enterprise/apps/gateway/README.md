@@ -82,6 +82,7 @@ docker build -f apps/gateway/Dockerfile -t agenticx-gateway:latest .
 | `GATEWAY_REMOTE_QUOTA_CONFIG_URL` | HTTPS URL（JSON 等价于 `quotas.json`），约 **10 秒** 本地缓存 |
 | `GATEWAY_REMOTE_PRICING_CONFIG_URL` | admin `GET /api/internal/pricing-snapshot`（JSON 计价快照），约 **10 秒** 本地缓存；失败回落 `GATEWAY_PRICING_FILE` / 默认 `pricing.yaml` |
 | `GATEWAY_REMOTE_BUDGET_CONFIG_URL` | admin `GET /api/internal/budget-snapshot`（JSON 成本/词元预算快照），约 **10 秒** 本地缓存；失败回落 `GATEWAY_BUDGET_CONFIG_FILE` |
+| `GATEWAY_REMOTE_VIRTUAL_MODELS_URL` | admin `GET /api/internal/virtual-models`（虚拟模型快照），约 5 秒轮询；未配置时虚拟模型不可用 |
 | `GATEWAY_BUDGET_CONFIG_FILE` | 本地预算配置路径（默认 `../../.runtime/admin/budgets.json`） |
 | `GATEWAY_BUDGET_USAGE_FILE` | 本地预算累计用量路径（默认 `../../.runtime/gateway/budget-usage.json`） |
 | `GATEWAY_PAT_CACHE_TTL` | PAT 校验内存缓存 TTL（默认 `5s`） |

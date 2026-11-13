@@ -170,6 +170,21 @@ func (v *PATVerifier) RevocationStore() *PATRevocationStore {
 	return v.revocationStore
 }
 
+// RevokeByHash marks a PAT revoked immediately in this replica (incident response SP5).
+// hash 必须是 SHA256(token)；持久化吊销（DB status + console 快照表）由 console 完成。
+func (v *PATVerifier) RevokeByHash(tokenHash string) {
+	tokenHash = strings.TrimSpace(tokenHash)
+	if tokenHash == "" {
+		return
+	}
+	v.mu.Lock()
+	delete(v.cache, tokenHash)
+	v.mu.Unlock()
+	if v.revocationStore != nil {
+		v.revocationStore.InvalidateLocal(tokenHash)
+	}
+}
+
 func (v *PATVerifier) cached(hash string) (patCacheEntry, bool) {
 	v.mu.RLock()
 	entry, ok := v.cache[hash]

@@ -24,6 +24,9 @@ type PickDecision struct {
 	ChannelID string   `json:"channel_id"`
 	Policy    LBPolicy `json:"policy"`
 	Reason    string   `json:"reason"` // affinity|prefix|latency|weight
+	// Priority is the selected channel's tier. Smaller numbers are preferred; 0 is the highest tier.
+	// No omitempty: 0 must appear in the routing_policy JSON.
+	Priority int `json:"priority"`
 }
 
 // LBPolicyFromEnv reads GATEWAY_AI_LB_POLICY; unknown values fall back to weight.

@@ -9,6 +9,7 @@ import {
   normalizeProviderEntry,
   reconcilePaneModelsWithSettings,
   resolveSessionBindingModel,
+  resolveSubAgentModelSelection,
 } from "./model-options";
 
 const TEST_PROVIDER_KEY = ["place", "holder"].join("");
@@ -158,5 +159,56 @@ describe("model-options", () => {
         defaultModel: "glm-5.2",
       }),
     ).toEqual({ provider: "custom_openai_glm", model: "glm-4.5-air" });
+  });
+});
+
+describe("resolveSubAgentModelSelection", () => {
+  const caixun = {
+    apiKey: "k",
+    baseUrl: "https://example.com/v1",
+    model: "glm-5.3-flash",
+    models: ["glm-5.3-flash", "deepseek-v4.1-flash"],
+    enabled: true,
+    dropParams: false,
+    displayName: "彩讯",
+  };
+
+  it("maps harness provider + bare model onto a selectable catalog pair", () => {
+    const resolved = resolveSubAgentModelSelection(
+      "claude-code",
+      "glm-5.3-flash",
+      { 彩讯: caixun },
+    );
+    expect(resolved.selectable).toBe(true);
+    expect(resolved.provider).toBe("彩讯");
+    expect(resolved.model).toBe("glm-5.3-flash");
+    expect(resolved.label).toContain("glm-5.3-flash");
+    expect(resolved.label).not.toBe("");
+  });
+
+  it("keeps an already-selectable catalog pair", () => {
+    const resolved = resolveSubAgentModelSelection("彩讯", "deepseek-v4.1-flash", {
+      彩讯: caixun,
+    });
+    expect(resolved.selectable).toBe(true);
+    expect(resolved.provider).toBe("彩讯");
+    expect(resolved.model).toBe("deepseek-v4.1-flash");
+    expect(resolved.label).toContain("彩讯");
+    expect(resolved.label).toContain("deepseek-v4.1-flash");
+  });
+
+  it("falls back to bare model text when catalog has no match", () => {
+    const resolved = resolveSubAgentModelSelection("claude-code", "mystery-model", {
+      彩讯: caixun,
+    });
+    expect(resolved.selectable).toBe(false);
+    expect(resolved.model).toBe("mystery-model");
+    expect(resolved.label).toBe("mystery-model");
+  });
+
+  it("returns empty model when nothing is set", () => {
+    const resolved = resolveSubAgentModelSelection("claude-code", "", { 彩讯: caixun });
+    expect(resolved.model).toBe("");
+    expect(resolved.selectable).toBe(false);
   });
 });
