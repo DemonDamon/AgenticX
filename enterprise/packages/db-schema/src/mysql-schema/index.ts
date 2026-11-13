@@ -19,6 +19,7 @@ export * from "./chat-attachments";
 export * from "./deep-research-runs";
 
 export * from "./runtime-config";
+export * from "./security-incidents";
 export * from "./gateway-channels";
 export * from "./gateway-instances";
 export * from "./gateway-budget";

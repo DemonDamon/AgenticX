@@ -153,6 +153,17 @@ export const enterpriseRuntimePatRevocation = pgTable("enterprise_runtime_pat_re
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/**
+ * SP5 incident-response：JWT session 吊销列表（网关近实时拉取，pat revocation 同款范式）。
+ * 网关处置端点 InvalidateLocal 即时生效；本表持久化用于重启恢复与多副本感知。
+ */
+export const enterpriseRuntimeSessionRevocation = pgTable("enterprise_runtime_session_revocation", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  version: numeric("version", { precision: 20, scale: 0 }).default("0").notNull(),
+  revokedSessionIds: jsonb("revoked_session_ids").default([]).notNull().$type<string[]>(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 /** 租户合规：数据驻留、跨境策略、审计留存（HIPAA 式可配）。 */
 export const enterpriseRuntimeCompliance = pgTable("enterprise_runtime_compliance", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),

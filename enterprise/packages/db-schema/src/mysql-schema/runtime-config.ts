@@ -144,6 +144,14 @@ export const enterpriseRuntimePatRevocation = mysqlTable("enterprise_runtime_pat
   updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
+/** SP5 incident-response：JWT session 吊销列表（网关近实时拉取，pat revocation 同款范式）。 */
+export const enterpriseRuntimeSessionRevocation = mysqlTable("enterprise_runtime_session_revocation", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  version: decimal("version", { precision: 20, scale: 0 }).default("0").notNull(),
+  revokedSessionIds: json("revoked_session_ids").default([]).notNull().$type<string[]>(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
+});
+
 /** 租户合规：数据驻留、跨境策略、审计留存（HIPAA 式可配）。 */
 export const enterpriseRuntimeCompliance = mysqlTable("enterprise_runtime_compliance", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),

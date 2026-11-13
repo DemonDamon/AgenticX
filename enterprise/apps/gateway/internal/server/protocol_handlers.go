@@ -154,6 +154,15 @@ func (s *Server) dispatchProtocol(
 	if reqPolicy.RedactedText != latestUserText {
 		req.Messages = replaceLastUserMessageContent(req.Messages, reqPolicy.RedactedText)
 	}
+	// SP3 compliance-moderation：本地规则通过后再外呼第三方内容安全 provider。
+	if modRes := s.enforceModeration(r.Context(), identity, "request", latestUserText, req.Model, routing.Decision{Model: req.Model}, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+		if modRes.AuditFailed {
+			writeAPIError(w, openai.Internal("audit write failed"))
+			return
+		}
+		writePolicyError(w, "90001", "请求触发合规拦截", []policyengine.HitEvent{modRes.Hit})
+		return
+	}
 
 	estimatedInputTokens := estimateTextTokens(joinMessages(req.Messages))
 	reserveTokens := estimateTokensWithMax(estimatedInputTokens, maxTokensFromRequest(req))
@@ -256,6 +265,16 @@ func (s *Server) protocolComplete(
 	ev := s.protocolAuditEvent(identity, r, decision, req.Model, session.inbound, outboundProto, derived, thinkingMode, startedAt, result, streamResultFromComplete(result), estimatedInputTokens, providerInputTokens, providerOutputTokens, settle.Delta, responseContent, req.Messages)
 	if err := s.writeAuditEvent(ev); err != nil {
 		writeAPIError(w, openai.Internal("audit write failed"))
+		return
+	}
+
+	// SP3 compliance-moderation：非流式在终态外呼第三方内容安全 provider。
+	if modRes := s.enforceModeration(r.Context(), identity, "response", responseContent, req.Model, decision, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+		if modRes.AuditFailed {
+			writeAPIError(w, openai.Internal("audit write failed"))
+			return
+		}
+		writePolicyError(w, "90002", "响应触发合规拦截", []policyengine.HitEvent{modRes.Hit})
 		return
 	}
 
@@ -425,6 +444,17 @@ func (s *Server) protocolStream(
 	responseText := responseBuilder.String()
 	if tail := reasoningState.CloseOpenReasoning(); tail != "" {
 		responseText += tail
+	}
+	// SP3 compliance-moderation：流式在流尾外呼第三方内容安全 provider。
+	if modRes := s.enforceModeration(r.Context(), identity, "response", responseText, req.Model, decision, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+		s.billingService.RollbackContext(qctx, reservedTokens)
+		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
+		if modRes.AuditFailed {
+			writeStreamError(w, flusher, "audit write failed")
+			return
+		}
+		writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", []policyengine.HitEvent{modRes.Hit})
+		return
 	}
 	inputTokens := estimatedInputTokens
 	outputTokens := estimateTextTokens(responseText)
