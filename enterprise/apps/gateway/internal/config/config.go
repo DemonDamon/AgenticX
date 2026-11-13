@@ -16,12 +16,13 @@ type ModelRoute struct {
 }
 
 type Config struct {
-	HTTPAddr         string       `yaml:"http_addr"`
-	DefaultRoute     string       `yaml:"default_route"`
-	LocalRouteHeader string       `yaml:"local_route_header"`
-	Models           []ModelRoute `yaml:"models"`
-	PolicyManifest   string       `yaml:"policy_manifest"`
-	AuditDir         string       `yaml:"audit_dir"`
+	TrustedProxyCIDRs []string     `yaml:"trusted_proxy_cidrs"`
+	HTTPAddr          string       `yaml:"http_addr"`
+	DefaultRoute      string       `yaml:"default_route"`
+	LocalRouteHeader  string       `yaml:"local_route_header"`
+	Models            []ModelRoute `yaml:"models"`
+	PolicyManifest    string       `yaml:"policy_manifest"`
+	AuditDir          string       `yaml:"audit_dir"`
 }
 
 func defaultConfig() Config {
@@ -41,11 +42,14 @@ func defaultConfig() Config {
 
 func Load() (Config, error) {
 	cfg := defaultConfig()
+	// Environment overrides YAML, including an explicit empty value to disable
+	// forwarded-header trust without editing a mounted configuration file.
 	path := strings.TrimSpace(os.Getenv("GATEWAY_CONFIG_PATH"))
 	if path == "" {
 		if addr := strings.TrimSpace(os.Getenv("GATEWAY_HTTP_ADDR")); addr != "" {
 			cfg.HTTPAddr = addr
 		}
+		applyTrustedProxyEnv(&cfg)
 		return cfg, nil
 	}
 
@@ -68,5 +72,15 @@ func Load() (Config, error) {
 	if cfg.AuditDir == "" {
 		cfg.AuditDir = "./.runtime/audit"
 	}
+	applyTrustedProxyEnv(&cfg)
 	return cfg, nil
+}
+
+func applyTrustedProxyEnv(cfg *Config) {
+	if raw, set := os.LookupEnv("GATEWAY_TRUSTED_PROXY_CIDRS"); set {
+		cfg.TrustedProxyCIDRs = nil
+		if strings.TrimSpace(raw) != "" {
+			cfg.TrustedProxyCIDRs = strings.Split(raw, ",")
+		}
+	}
 }

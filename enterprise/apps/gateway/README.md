@@ -36,6 +36,17 @@ go run ./cmd/gateway
 
 - `GATEWAY_HTTP_ADDR`：监听地址，默认 `:8088`
 - `GATEWAY_CONFIG_PATH`：外部 YAML 配置文件路径
+- `GATEWAY_TRUSTED_PROXY_CIDRS`：逗号分隔的可信入口代理 IP/CIDR，默认不信任任何转发头；覆盖 YAML 的 `trusted_proxy_cidrs` 列表，显式空值可关闭信任。无效地址和 `/0` 会阻止启动。
+
+### 客户端来源地址
+
+默认以 TCP 连接来源作为策略与审计的客户端地址。只有来源命中可信代理列表，才解析 `X-Forwarded-For`（从右向左停在第一个不可信地址）；不存在 XFF 时才使用单个 `X-Real-IP`。无效链条保留连接来源。入口代理须覆盖或正确追加客户端来源，且只配置实际受控的代理地址，不要把所有用户所在网段都列为可信代理。
+
+```yaml
+trusted_proxy_cidrs:
+  - "192.0.2.10/32"
+  - "2001:db8:1::/48"
+```
 
 ## 接入真实模型 Key
 
