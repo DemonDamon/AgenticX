@@ -5,6 +5,7 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 
 import { HarnessAvatarBadge } from "./HarnessAvatarBadge";
+import { stampUserMessageHarnessMetadata } from "../../utils/harness-display";
 
 void i18n.use(initReactI18next).init({
   lng: "zh",
@@ -66,5 +67,13 @@ describe("HarnessAvatarBadge", () => {
     const cx = wrap(<HarnessAvatarBadge metadata={{ harness: "codex" }} />);
     expect(cx).toContain('title="Codex"');
     expect(cx).toContain('data-harness-mark="codex"');
+  });
+
+  it("follows a regenerate restamp from an external harness to AgenticX", () => {
+    const stamped = stampUserMessageHarnessMetadata({ harness: "codebuddy" }, "python-agent");
+    const html = wrap(<HarnessAvatarBadge metadata={stamped} />);
+    expect(html).toContain('data-harness-avatar-badge="python-agent"');
+    expect(html).toContain('title="AgenticX"');
+    expect(html).not.toContain('data-harness-avatar-badge="codebuddy"');
   });
 });

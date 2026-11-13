@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AGX Safety Layer Fixture</title>
+</head>
+<body>
+  <!-- extract anchor -->
+  <h1>AGX Safety Layer Fixture</h1>
+  <p>welcome to the sp4 safety fixture</p>
+
+  <!-- SP4 confirm condition (a): type into a password field -->
+  <input id="pw-input" type="password" placeholder="Password here">
+  <div id="pw-typed">pw-typed: (none)</div>
+
+  <!-- SP4 confirm condition (b): click a form submit button / in-form button -->
+  <form id="login-form">
+    <input id="form-user" placeholder="Form user">
+    <button type="submit" id="form-submit">Submit form</button>
+    <button type="button" id="form-plain-btn">Form plain button</button>
+  </form>
+  <div id="submit-count">submit-count: 0</div>
+  <div id="plain-in-form">plain-in-form: 0</div>
+
+  <!-- no-card control: a plain button OUTSIDE any form -->
+  <button id="outer-btn">Outer button</button>
+  <div id="outer-count">outer-count: 0</div>
+
+  <!-- SP4 confirm condition (c): press_key Enter with focus inside the form -->
+  <button id="focus-form-input" type="button">Focus form input</button>
+  <button id="focus-body" type="button">Focus body</button>
+  <div id="form-focus-count">form-focus-count: 0</div>
+  <div id="form-key">form-key: (none)</div>
+  <div id="last-key">last-key: (none)</div>
+
+  <!-- "human" hooks: main-world clicks reach INTO the extension card's shadow
+       DOM (open root) and click its allow/deny buttons, emulating the user.
+       The card host element is appended to <html> by agxPageConfirmCard. -->
+  <button id="card-allow" type="button">Card allow</button>
+  <button id="card-deny" type="button">Card deny</button>
+  <div id="card-seen">card-seen: 0</div>
+
+  <script>
+    // Main-world handlers: prove events dispatched from the extension's
+    // ISOLATED world land here, and give the harness observable markers.
+    document.getElementById("pw-input").addEventListener("input", (e) => {
+      document.getElementById("pw-typed").textContent = `pw-typed: ${e.target.value}`;
+    });
+    document.getElementById("login-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const el = document.getElementById("submit-count");
+      el.textContent = `submit-count: ${Number(el.textContent.split(": ")[1]) + 1}`;
+    });
+    document.getElementById("form-plain-btn").addEventListener("click", () => {
+      const el = document.getElementById("plain-in-form");
+      el.textContent = `plain-in-form: ${Number(el.textContent.split(": ")[1]) + 1}`;
+    });
+    document.getElementById("outer-btn").addEventListener("click", () => {
+      const el = document.getElementById("outer-count");
+      el.textContent = `outer-count: ${Number(el.textContent.split(": ")[1]) + 1}`;
+    });
+    document.getElementById("focus-form-input").addEventListener("click", () => {
+      document.getElementById("form-focus-count").textContent = "form-focus-count: 1";
+      document.getElementById("form-user").focus();
+    });
+    document.getElementById("focus-body").addEventListener("click", () => {
+      if (document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur();
+      }
+    });
+    document.getElementById("form-user").addEventListener("keydown", (e) => {
+      document.getElementById("form-key").textContent = `form-key: ${e.key}`;
+    });
+    document.addEventListener("keydown", (e) => {
+      document.getElementById("last-key").textContent = `last-key: ${e.key}`;
+    });
+
+    // Card hooks: click the buttons inside the extension-injected shadow DOM.
+    const clickCardButton = (id) => {
+      const host = document.getElementById("agx-confirm-card");
+      const root = host && host.shadowRoot;
+      const btn = root && root.getElementById(id);
+      if (btn) btn.click();
+    };
+    document.getElementById("card-allow").addEventListener("click", () => clickCardButton("agx-confirm-allow"));
+    document.getElementById("card-deny").addEventListener("click", () => clickCardButton("agx-confirm-deny"));
+
+    // Observe the card host appearing on <html> (the card is appended there).
+    let cardSeen = 0;
+    new MutationObserver(() => {
+      if (document.getElementById("agx-confirm-card")) {
+        cardSeen += 1;
+        document.getElementById("card-seen").textContent = `card-seen: ${cardSeen}`;
+      }
+    }).observe(document.documentElement, { childList: true });
+  </script>
+</body>
+</html>

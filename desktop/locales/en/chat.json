@@ -1108,6 +1108,20 @@
     "badgeDeepSeek": "DeepSeek",
     "badgeHermesAgent": "Hermes Agent",
     "badgePiAgent": "PI Agent",
-    "badgeOpenClaw": "OpenClaw"
+    "badgeOpenClaw": "OpenClaw",
+    "codebuddyLogin": {
+      "banner": "CodeBuddy Tencent login expired. Click to sign in again.",
+      "body": "CodeBuddy Tencent login is required. Sign in again to continue.",
+      "retryHint": "After authorization, use Retry on your last question to continue.",
+      "authorizing": "Opening the browser for Tencent sign-in. Complete login there, then return to Near.",
+      "oauthSuccess": "Authorization succeeded. Use Retry on your last question to continue.",
+      "oauthFailed": "Authorization did not finish: {{error}}",
+      "oauthFailedGeneric": "Tencent authorization did not complete. Try again later.",
+      "oauthStartFailed": "Could not start CodeBuddy login. Install the CodeBuddy CLI and try again.",
+      "harnessRefreshFailed": "Sign-in succeeded but refreshing the CodeBuddy session failed. Retry or restart Near.",
+      "resolvedNotice": "This turn stopped earlier because CodeBuddy login was required.",
+      "terminal": "CodeBuddy login",
+      "writeFailed": "The terminal could not accept the login command yet. Run codebuddy login in the terminal that opened."
+    }
   }
 }

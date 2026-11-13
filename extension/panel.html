@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>AGX Copilot</title>
+  <style>
+    body { font: 14px/1.6 system-ui, -apple-system, "PingFang SC", sans-serif; margin: 0;
+      display: flex; flex-direction: column; height: 100vh; color: #1c2128; }
+    header { padding: 10px 14px; border-bottom: 1px solid #eaeef2; }
+    header .title { font-size: 14px; font-weight: 600; }
+    header .session { font-size: 12px; color: #6a737d; margin-top: 2px; }
+    #messages { flex: 1; overflow-y: auto; padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 8px; }
+    .msg { max-width: 85%; padding: 7px 11px; border-radius: 10px;
+      white-space: pre-wrap; word-break: break-word; }
+    .msg.user { align-self: flex-end; background: #1f6feb; color: #fff; }
+    .msg.assistant { align-self: flex-start; background: #f0f2f5; color: #1c2128; }
+    /* SP7c markdown-lite（panel.js 手写渲染器）产物 */
+    .msg.assistant code { background: #e2e6ea; border-radius: 4px; padding: 1px 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+    .msg.assistant pre { align-self: stretch; max-width: 100%; background: #e8ebef;
+      border-radius: 8px; padding: 8px 10px; margin: 4px 0; overflow-x: auto; white-space: pre; }
+    .msg.assistant pre code { background: none; padding: 0; font-size: 12.5px; }
+    .msg a { color: #0969da; }
+    /* SP7c 划词预填态：pending 选中文本气泡 + 来源标注条（链接可点） */
+    .msg.user.selection { background: #2a7ff0; }
+    .source-bar { align-self: flex-start; max-width: 85%; font-size: 12px; color: #6a737d;
+      padding: 0 4px; word-break: break-all; }
+    .source-bar a { color: #0969da; text-decoration: none; }
+    .source-bar a:hover { text-decoration: underline; }
+    #status { min-height: 18px; font-size: 12px; padding: 0 14px; color: #6a737d; }
+    #status.error { color: #c0392b; }
+    footer { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid #eaeef2; }
+    #input { flex: 1; font: inherit; padding: 7px 10px; border: 1px solid #d0d7de;
+      border-radius: 8px; resize: none; }
+    #input:disabled { background: #f6f8fa; }
+    #send { font: inherit; padding: 7px 16px; border-radius: 8px;
+      border: 1px solid #1f6feb; background: #1f6feb; color: #fff; cursor: pointer; }
+    #send:disabled { opacity: .5; cursor: default; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">AGX Copilot</div>
+    <div class="session" id="session-name">正在读取会话…</div>
+  </header>
+  <div id="messages"></div>
+  <div id="status"></div>
+  <footer>
+    <textarea id="input" rows="2" placeholder="输入消息，发送给 AGX 会话…"></textarea>
+    <button id="send">发送</button>
+  </footer>
+  <script src="src/panel.js"></script>
+</body>
+</html>
