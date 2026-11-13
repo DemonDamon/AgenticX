@@ -146,3 +146,21 @@ def test_resolve_round_max_tokens_deepseek_v4_thinking_floor() -> None:
         )
         >= 24576
     )
+
+
+@pytest.mark.parametrize("raw", ['', '{"message":', 'null', '[1, 2]', '[{"message": "x"}]', 'true'])
+def test_malformed_arguments_are_distinct_from_empty_object(raw):
+    from agenticx.runtime.agent_runtime import _repair_streamed_tool_arguments
+
+    assert _repair_streamed_tool_arguments(raw) is None
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ('{}', {}),
+    ('{"message":"ok"}', {"message": "ok"}),
+    ('```json\n{"message":"ok"}\n```', {"message": "ok"}),
+])
+def test_valid_object_argument_repairs_are_preserved(raw, expected):
+    from agenticx.runtime.agent_runtime import _repair_streamed_tool_arguments
+
+    assert _repair_streamed_tool_arguments(raw) == expected
