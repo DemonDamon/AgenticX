@@ -1,0 +1,3 @@
+# 论文全文与第三方仓库不入库（版权/体积），用 fetch_arxiv_md.py 可随时重建
+papers/
+repos/
