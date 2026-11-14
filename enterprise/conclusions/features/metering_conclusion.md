@@ -1,12 +1,12 @@
 # @agenticx/feature-metering 模块总结
 
-> 结论生成时间：2026-10-25（基于 `enterprise/features/metering` 当前源码重生成）
+> 结论生成时间：2026-11-14（target `cebdabd5`，基于 `enterprise/features/metering` 当前源码重生成）
 
 > 说明：本文档描述**计量 · 四维查询 feature 包**（`@agenticx/feature-metering`），由 `apps/admin-console` 在 `/metering` 页面消费。仅基于真实源码，区分**真查询/UI** 与 **stub**。
 
 ## 模块概述
 
-`@agenticx/feature-metering` 是 admin-console **token 消耗计量与 ROI 分析的核心 feature 包**。口号"四维查询（部门-员工-厂商-时间）"，实际维度更广：dept / user / provider / model / day / pat（PAT）/ api_token_id 都可作分组键或过滤项。基于 `usage_records` 表（来自 `@agenticx/db-schema`），提供**真实 DB 查询**：分组聚合（`MeteringService.query`）、热力图矩阵（`MeteringService.queryHeatmap`）、ROI 报表（`RoiService.computeReport`），以及诊断向四类聚合——Overview KPI（`queryOverviewStats`）、按 `trace_id` 下钻（`queryTraceList`）、0–24 时模型堆叠（`queryHourlyModelRidge`）、按模型的请求体量分位数（`queryRequestSizeDistribution`），外加业务营收 CRUD 与 CSV 导出。
+`@agenticx/feature-metering` 是 admin-console **token 消耗计量与 ROI 分析的核心 feature 包**。口号"四维查询（部门-员工-厂商-时间）"，实际维度更广：dept / user / provider / model / day / pat（PAT）/ api_token_id 都可作分组键或过滤项。基于 `usage_records` 表（来自 `@agenticx/db-schema`），提供**真实 DB 查询**：分组聚合（`MeteringService.query`）、热力图矩阵（`MeteringService.queryHeatmap`）、ROI 报表（`RoiService.computeReport`），以及诊断向四类聚合——Overview KPI（`queryOverviewStats`）、按 `trace_id` 下钻（`queryTraceList`）、0–24 时模型堆叠（`queryHourlyModelRidge`）、按模型的请求体量分位数（`queryRequestSizeDistribution`），外加业务营收 CRUD 与 CSV 导出。并行提供 **托管智能体会话计量**（`AgentUsageService`）：读 `ma_session_usage`，按 agent/user/dept/model/日分组聚合，并用 `windowTotals` 按 IANA 时区（默认 `Asia/Shanghai`，`MA_QUOTA_TIMEZONE`）计算日/周/月 token 窗口，供配额侧消费——与 gateway `usage_records` 链路分离，**无 JSONL 兜底**。
 
 **真 vs stub 判定**：本包**无 mock/stub**——所有 service 方法都走真实 SQL（PG 或 MySQL）；admin-console 侧 `lib/metering-service.ts` 是真 wrapper（直接 `new MeteringService()` / `new RoiService()`），`/api/metering/*` 路由与 `/metering` 页面均真接线。唯一"硬编码"是 `tenant_id`：由 `DEFAULT_TENANT_ID` env 或兜底常量 `01J00000000000000000000001` 解析（单租户简化，非 stub）。
 
@@ -18,12 +18,14 @@ features/metering/
 ├── vitest.config.ts
 ├── tests/
 │   ├── heatmap.test.ts                       # buildHeatmapMatrix / formatTimeSlot（AC-1/AC-3）
-│   └── roi.test.ts                           # computeRoiRows / roiRowsToCsv（AC-2/AC-3）
+│   ├── roi.test.ts                           # computeRoiRows / roiRowsToCsv（AC-2/AC-3）
+│   └── agent-usage.test.ts                   # AgentUsageService.query + agentQuotaWindowStarts
 └── src/
     ├── index.ts                              # barrel
     ├── types.ts                              # 所有 Input / Result 类型
     ├── services/
     │   ├── metering.ts                       # MeteringService（query + heatmap + recordUsage + JSONL 兜底）
+    │   ├── agent-usage.ts                    # AgentUsageService + 配额时区窗口（resolveQuotaTimeZone 等）
     │   ├── heatmap-utils.ts                  # buildHeatmapMatrix + formatTimeSlot（纯函数）
     │   ├── roi.ts                            # RoiService（computeReport + 营收 CRUD）
     │   ├── roi-utils.ts                      # computeRoiRows + roiRowsToCsv（纯函数）
@@ -55,6 +57,9 @@ features/metering/
 | `TraceListRow / TraceListResult` | 按 `trace_id` 聚合的单条调用链摘要（token、成本、`step_count`、`first_seen`、涉及 `models[]`） |
 | `HourlyRidgeResult` | `{ hours: 0..23, models[], series: Record<model, number[24]> }` —— Top N 模型按小时 token 堆叠 |
 | `RequestSizeDistRow / RequestSizeDistResult` | 按模型统计 `request_count`、`avg_tokens` 与 `p50`/`p90`/`p99`（JS 线性插值分位数） |
+| `AgentUsageGroupKey` | `"agent" \| "user" \| "dept" \| "model" \| "day"`（`ma_session_usage` 分组维） |
+| `AgentUsageQueryInput / AgentUsageRow` | 租户 + 时间窗 + `agent_id`/`user_id` IN + `group_by[]`；行含 token 字段 + `requests` + `sessions`（distinct `session_id`） |
+| `AgentQuotaWindowTotals / AgentQuotaWindows` | 单用户日/周/月 token 合计；窗口起点 ISO 字符串（`agentQuotaWindowLabels`） |
 
 ## SQL 抽象层（`src/services/sql/`）—— 双方言真查询
 
@@ -85,6 +90,14 @@ features/metering/
 - `queryRequestSizeDistribution(input & { top_n? }) → RequestSizeDistResult`：先按模型 token 总量取 Top N（默认 15、上限 50），再逐模型拉取 `total_tokens` 升序列表，模块内 `percentile()` 算 p50/p90/p99；失败返回 `{ rows: [] }`。
 - **JSONL 兜底**（真查询的降级路径，非 mock）：DB 查询抛错时，若 `GATEWAY_USAGE_JSONL_FALLBACK === "1"`，**仅** `query` / `queryHeatmap` 回退到 `queryFromUsageLog` / `queryHeatmapFromUsageLog`，读取 `GATEWAY_USAGE_LOG`（默认 `../../apps/gateway/.runtime/usage.jsonl`）按行 JSON 解析、内存聚合。读不到文件返回空集。
 - **约束**：`MAX_HEATMAP_TIME_SLOTS` hour=168（一周）、day=90（三月）；`HEATMAP_DIM_COLUMN` 映射 `pat → api_token_id`、`user → user_id` 等；`limit_dimensions` 默认 30。Overview/Trace/Ridge/分位数查询共用私有 `buildUsageFilters()`（tenant + 时间窗 + 多维 IN）。
+
+### `AgentUsageService` (`services/agent-usage.ts`)
+
+- 数据源：`ma_session_usage`（`LEFT JOIN users`、`enterprise_agents` 取 dept / `display_name`）；**不走** `usage_records`、无 JSONL 兜底。
+- `query(input) → { rows: AgentUsageRow[] }`：动态 `group_by`；`day` 按构造时 `timeZone`（`MA_QUOTA_TIMEZONE` 或 `opts.timeZone`，默认上海）做 PG `AT TIME ZONE` / MySQL `CONVERT_TZ` 日桶；`ORDER BY total_tokens DESC LIMIT 1000`；失败返回 `{ rows: [] }`。
+- `windowTotals(tenantId, agentId, userIds, now?)`：用 `agentQuotaWindowStarts` 算本地日/周一/月初 UTC 起点，按 `user_id` 汇总三段 `total_tokens`；失败返回各用户全零。
+- 时区工具（可单测、可被 runtime 复用）：`resolveQuotaTimeZone`（非法 IANA 抛 `QuotaTimeZoneError`）、`agentQuotaWindowStarts`、`agentQuotaWindowLabels`。
+- 方言：与 `MeteringService` 相同，经 `resolveDatabaseConfig` 选 PG/MySQL executor + `MeteringSqlBuilder`。
 
 ### `RoiService` (`services/roi.ts`)
 
@@ -122,7 +135,7 @@ features/metering/
 
 ## 公共导出（`src/index.ts`）
 
-re-export：types / 4 个 service（`MeteringService`、`RoiService`、heatmap-utils、roi-utils）/ 3 个 API 类 / sql 层（经 service 间接导出）。
+re-export：types / 5 个 service 模块（`MeteringService`、`AgentUsageService` 及时区工具、`RoiService`、heatmap-utils、roi-utils）/ 3 个 API 类 / sql 层（经 service 间接导出）。
 
 ## 依赖
 
@@ -132,7 +145,7 @@ re-export：types / 4 个 service（`MeteringService`、`RoiService`、heatmap-u
 | `mysql2 ^3.14.1` | MySQL 客户端（`createPool`） |
 | `@agenticx/iam-core` `workspace:*` | `resolveDatabaseConfig` 方言选择 |
 | `ulid ^3` | `usage_records` / `enterprise_business_revenue` 主键 |
-| `vitest ^4` | 测试 |
+| `vitest ^5` | 测试 |
 
 **注**：本包**不依赖 Drizzle**，直接用 `pg.Pool` / `mysql2.Pool` 写裸 SQL，因分组维度组合 + heatmap 矩阵都需动态拼 SQL，比 query builder 更直接。
 
@@ -142,8 +155,9 @@ re-export：types / 4 个 service（`MeteringService`、`RoiService`、heatmap-u
 |---|---|
 | `heatmap.test.ts` | `buildHeatmapMatrix` 空集（AC-3）/ 聚合 + top N 截断（AC-1）/ 合并重复 dim/time；`formatTimeSlot` hour/day |
 | `roi.test.ts` | `computeRoiRows` ROI 计算与排序（AC-2）/ revenue-only 与 cost-only label / 空输入（AC-3）；`roiRowsToCsv` 表头与行格式 |
+| `agent-usage.test.ts` | `AgentUsageService.query` SQL 形态（`ma_session_usage`、agent/day 分组）+ `agentQuotaWindowStarts` 上海时区日/周/月边界 |
 
-服务层（含 PG/MySQL 实际调用）的集成测试在 admin-console 侧覆盖，本包仅测纯函数。
+服务层（含 PG/MySQL 实际调用）的集成测试在 admin-console 侧覆盖；本包测纯函数与 recording executor 下的 agent 查询契约。
 
 ## admin-console 消费侧（真 UI / 真路由，非 stub）
 
@@ -168,3 +182,4 @@ re-export：types / 4 个 service（`MeteringService`、`RoiService`、heatmap-u
 - **IAM 鉴权**：所有路由经 `requireAdminScope`，读类用 `metering:read`、写类（营收 CRUD）用 `metering:manage`。
 - **双方言迁移**：本包是 `@agenticx/iam-core` `resolveDatabaseConfig` 双方言（PG/MySQL）体系的下游消费者之一，与 IAM `getRepositoryRegistry()` 的 dialect dispatch 同源。
 - **Gateway 数据链**：`usage_records` 由 Go gateway 写入；DB 不可达时本包可经 `GATEWAY_USAGE_JSONL_FALLBACK` 读 gateway 的 JSONL 兜底，保证计量页不白屏。
+- **托管智能体用量**：`ma_session_usage` 由 enterprise 会话/runtime 写入；`AgentUsageService` 专供配额窗口与 agent 维度聚合，admin-console 是否暴露独立路由以消费侧 wiring 为准（本包已导出 service + 类型）。

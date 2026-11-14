@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
   "module_id": "enterprise-root",
-  "generation": "fec09c1fcee3468591774615f7206f8f",
-  "mapping_revision": 2,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:6c9d7da13ca24aa2b86e7a2ffe335cfff2e5592a26a26c04d226daa309319bb7",
+  "generation": "aa764568211e4fdda2723f8df904e11e",
+  "mapping_revision": 3,
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:73c09957bff20db4d1d420c65d1afed5ee581709dc075608e031f0a53ebe9898",
   "summary_path": "enterprise/conclusions/enterprise_root_conclusion.md",
-  "summary_sha256": "sha256:b59760e1e7904d075917d36e1344ff68549457966c164f6b9ec597de7a9bdd86",
-  "updated_at": "2026-10-25T03:42:38.853779+00:00",
+  "summary_sha256": "sha256:0b23a1d494cd283496707c7e85d480060faf68ac3f6a1fbfd3ac35798953b66a",
+  "updated_at": "2026-11-14T12:27:56.775191+00:00",
   "mapping_refresh": {
-    "previous_mapping_revision": 1,
-    "reason": "split context-service into its own module; root no longer owns that app"
+    "previous_mapping_revision": 2,
+    "reason": "split enterprise/apps/agent-runtime out of enterprise-root"
   }
 }

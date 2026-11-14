@@ -1,12 +1,12 @@
 # AgenticX Enterprise gateway 模块总结
 
-> 结论生成时间：2026-07-21（基于当前工作区代码重生成，覆盖旧版）
+> 结论生成时间：2026-11-14（基于提交 `cebdabd5`）
 
 > 说明：本文档描述 **企业 AI 控制平面网关**（OpenAI 兼容 HTTP 数据面，多 provider 路由 + 治理）。与主仓 `agenticx/gateway`（IM 远程指令网关）、`agenticx/studio/server.py`（FastAPI 服务网关）是完全不同的模块，请勿混淆。本网关灵感借鉴 APIPark / Higress ai-load-balancer，但代码完全自研（`internal/channel/lb_policy.go` 顶部标注 Apache-2.0 NOTICE）。
 
 ## 模块定位
 
-`apps/gateway` 是 **AgenticX 企业 AI 控制平面数据面**，Go 1.25 + Chi router 实现，默认监听 `:8088`（`GATEWAY_HTTP_ADDR` 可覆盖）。对外是 OpenAI 兼容的 HTTP 网关，前面挂多 vendor LLM（OpenAI、Anthropic Claude、Google Gemini、Azure OpenAI、AWS Bedrock、DeepSeek、Moonshot、自托管 Ollama / edge-agent），背后是一整套企业治理能力：**三路由决策（local · private-cloud · third-party）**、嵌入式 `policy-engine` 做 PII / 敏感词 / 字段级脱敏、配额与预算追踪、防篡改审计日志（File + Postgres + blake2b 链）、语义缓存（L1 内存/Redis + L2 语义相似度）、Wasm 插件链、MCP host + proxy、跨境数据合规、channel pool 负载均衡 + key pool 轮转、Prometheus 指标 + Pyroscope 性能剖析。所有运行时配置（providers/policy/pricing/budget/channels/PAT 吊销/session grants/compliance）通过 5-10s 轮询 admin-console 的 `/api/internal/*` 热加载，**支持优雅降级**（无 PG/Redis 时回退本地 jsonl，无 key 时回退 mock provider）。
+`apps/gateway` 是 **AgenticX 企业 AI 控制平面数据面**，Go 1.26 + Chi router 实现，默认监听 `:8088`（`GATEWAY_HTTP_ADDR` 可覆盖）。对外是 OpenAI 兼容的 HTTP 网关，前面挂多 vendor LLM（OpenAI、Anthropic Claude、Google Gemini、Azure OpenAI、AWS Bedrock、DeepSeek、Moonshot、自托管 Ollama / edge-agent），背后是一整套企业治理能力：**三路由决策（local · private-cloud · third-party）**、虚拟模型到真实模型的分层选路、嵌入式 `policy-engine` 与可插拔第三方内容审核、配额与预算追踪、防篡改审计日志（File + Postgres + blake2b 链）、告警分发与事件处置、语义缓存、Wasm 插件链、MCP host + proxy、跨境数据合规、channel/key 两级轮转、出站地址守护、Prometheus 指标 + Pyroscope 性能剖析。核心配置通过 5-10s 轮询 admin-console 热加载；providers/channels/policy/MCP server 在解析失败或已成功加载后的远端 404 时继续服务最后一次可用快照。
 
 ## 目录结构（internal/* 真实包）
 
@@ -30,6 +30,9 @@ apps/gateway/
     │   ├── mcp_proxy_handlers.go  # 通用 MCP 反向代理（/v1/mcp/{server_id}/*）
     │   ├── channel_handlers.go    # /internal/channel-stats、/internal/keypool-stats、probe
     │   ├── channel_relay.go        # useChannelRelay() 判定 + 装配 channel/adaptor/keypool/relay
+    │   ├── virtual_quota.go        # 虚拟模型准入计划与真实模型配额结算
+    │   ├── moderation.go           # 第三方内容审核接线、审计与降级告警
+    │   ├── incident_action_handlers.go # /internal/security/incident-action
     │   ├── plugin_handlers.go     # /internal/plugins（list、reload、upload）
     │   ├── plugin_chain.go         # Wasm hook 在请求/响应/stream-chunk 前后的调用链
     │   ├── cache_handlers.go      # /internal/cache/{reload,evict}
@@ -40,6 +43,11 @@ apps/gateway/
     │   ├── trace_context.go       # Trace-id/Step 头部 → identity
     │   ├── health.go              # /healthz, /readyz
     │   └── init_cache.go          # 装配 cache.Service（可选 Redis L1+L2）
+    ├── virtualmodel/          # 租户虚拟模型快照、分层加权计划与上下文传递
+    ├── moderation/            # 可插拔 HTTP 内容安全 provider；degraded/strict 语义
+    ├── alertdispatch/         # webhook/飞书告警、去重限流、审计链持续自检
+    ├── configstatus/          # providers/channels/policy/MCP 生效状态与心跳
+    ├── egress/               # MCP/OpenAPI 出站 DNS/IP 判定与 allowlist
     ├── config/config.go       # YAML 配置（HTTPAddr、Models[]、PolicyManifest、AuditDir）+ env 覆盖
     ├── routing/decision.go    # Decider：admin 覆盖 → header 覆盖 → YAML 查表 → 默认
     ├── runtimeconfig/runtimeconfig.go  # 轮询 admin-console providers JSON（5s）；ResolveByModel() → ResolvedRoute
@@ -97,7 +105,8 @@ apps/gateway/
     ├── auth/                  # JWT 以外的鉴权（PAT、session scope、吊销）
     │   ├── pat.go                 # PATVerifier（DB 查 + 内存 TTL cache）
     │   ├── session_grant.go       # SessionGrantStore（短期临时 scope）
-    │   └── revocation.go          # PATRevocationStore（从 admin 拉哈希列表）
+    │   ├── revocation.go          # PATRevocationStore（从 admin 拉哈希列表）
+    │   └── session_revocation.go  # JWT session 即时吊销 + admin 快照轮询
     ├── residency/             # 数据驻留 / 跨境判定
     │   ├── store.go               # ComplianceStore（每租户 policy 快照）
     │   └── judge.go               # JudgeRequest → allow / block / require_approval
@@ -109,7 +118,7 @@ apps/gateway/
     │   ├── protocol.go            # JSON-RPC 2.0 + initialize/list/call
     │   ├── transport.go / transport_sse.go  # Streamable-HTTP / SSE 传输
     │   ├── backend.go / backend_echo.go / backend_openapi.go / backend_connector.go / openapi_loader.go
-    │   ├── registry.go            # ServerRecord（pgx-backed）
+    │   ├── registry.go            # ServerRecord（PG/MySQL；已发布版本钉住工具面）
     │   ├── scopes.go              # CanListTools / CanCallTool
     │   └── types.go
     ├── wasmhost/              # 进程内插件链（wazero + 原生内置）
@@ -129,24 +138,24 @@ apps/gateway/
 
 ## 请求流（handleChatCompletions 标准生命周期）
 
-`server.go` 的 `Server` 结构体编排一切。`New(cfg, logger)` 装配：database handle（可选 PG/MySQL）、metering sink（PG reporter 或 jsonl 回退）、trace reporter、runtimeconfig loader（5s admin 轮询）、quota tracker、policy engine（snapshot 或 manifest glob，热重载）、audit writer（file 或 file+PG 双写 + backfill）、cache service、MCP host & proxy、channel relay、wasm manager、observability registry、budget alert reporter。
+`server.go` 的 `Server` 结构体编排一切。`New(cfg, logger)` 装配：database handle（可选 PG/MySQL）、metering sink、providers/virtual-model loader、quota tracker、policy engine、audit writer、cache、MCP host/proxy、channel relay、第三方内容审核、告警分发、审计链自检、配置状态/心跳、wasm manager 与 observability registry。
 
-**`handleChatCompletions`（`server.go:663`）是标准请求生命周期**：
+**`handleChatCompletions` 是标准请求生命周期**：
 
-1. **身份**（`identityFromRequest`）：`agx-pat-*` 走 `PATVerifier`（DB 查 + TTL cache），其余走 RS256 JWT（issuer `agenticx-enterprise-web-portal`，audience `agenticx-web-users`，env `AUTH_JWT_PUBLIC_KEY`，强制 `typ=access`）
+1. **身份**（`identityFromRequest`）：`agx-pat-*` 走 `PATVerifier`（DB 查 + TTL cache），其余走 RS256 JWT（issuer `agenticx-enterprise-web-portal`，audience `agenticx-web-users`，env `AUTH_JWT_PUBLIC_KEY`，强制 `typ=access`）；JWT 的 `sessionId` 还会经过 `SessionRevocationStore.IsRevoked`
 2. **scope 检查**：`hasEffectiveScope(r, identity, "workspace:chat")`，PAT 命中时 `NoteUsed`
 3. **路由决策**：`decider.Decide(r, model)` → `Decision{Route, Provider, Endpoint, APIKey, Model, ChannelID}`
 4. **跨境合规**：`enforceCrossBorder` 基于 `DataResidency` claim + 租户 policy 决定 allow/block/require_approval
 5. **wasm 请求 hook**：`runWasmRequestHooks` 可短路返回（命中即写 audit 后 return）
-6. **配额+预算闸门**：`runChatQuotaGate` 预占 tokens，`billingService.ReleaseContext` defer 兜底
-7. **缓存查找**：`tryServeFromCache` 命中即回放 SSE/JSON
-8. **policy 前置**：`evaluateChatRequestPolicy` —— 默认仍对最后一条 user 文本（`latestUserMessageContent`）做 `evaluatePolicy(..., "request")`；若请求携带已验签的 `__policy_context`（公开检索，`trustedPublicRetrieval` + `X-AgenticX-Policy-*` HMAC），则对**原始 user 文本**与普通 prompt **分层评估**（`PublicRetrieval` 上下文仅 warn 命中另写 audit）；block 写 audit + 返回 `90001`；redact 可回写 messages。`PolicyContext` 在 relay 前从请求体剥离
-9. **执行**：`useChannelRelay()` 为真走 `handleChatCompleteRelay`（`relay.Executor`），否则 `provider.Complete`
-10. **policy 后置**：`evaluatePolicy(responseContent, "response")`，block 返回 `90002`，redact 替换；再 `applyResponseFieldPolicy` 做字段级脱敏
+6. **策略与审核**：本地 `evaluateChatRequestPolicy` 通过后，`enforceModeration` 可按租户外呼内容安全 provider；degraded 默认放行并告警，strict 失败关闭
+7. **虚拟模型准入、配额+预算闸门**：`admitVirtual` 先生成真实模型顺序，以首选真实模型预检/预占；执行后按实际命中模型结算
+8. **缓存查找**：`tryServeFromCache` 命中即回放 SSE/JSON
+9. **执行**：`useChannelRelay()` 为真走 `relay.Executor`；虚拟模型按计划在真实模型之间回退，channel 再按 priority tier → affinity/prefix/latency/weight 选择
+10. **响应治理**：本地 response policy、字段级策略和第三方内容审核依次执行；block 返回 `90002`
 11. **wasm 响应 hook**：`transformChatResponseJSON`
-12. **写缓存 + 审计 + 上报 usage**：`writeChatCache` + `writeAuditEvent` + `reportUsageDetailed` + `reconcileQuotaUsage`
+12. **写缓存 + 审计 + 上报 usage**：审计中的 `Model` 记录真实模型，`routing_policy.requested_model` 保留虚拟模型名
 
-**`handleStream`（`server.go:1060`）结构相同，但 policy 与 metering 每 chunk 增量执行**：`push` 回调内对合并后的 `delta.Content` 调 `evaluatePolicy(merged, "response")`，命中即 `policy blocked stream chunk` 并截断；流式结束 `billingService.SettleContext(reserved, actual)` 对账，错误 `RollbackContext`。
+**`handleStream` 结构相同，但本地 policy 与 metering 每 chunk 增量执行**：`StreamDelta.ToolCalls` 原样透传，不进入文本策略；一旦 content/reasoning/tool-call chunk 已交付客户端，`relay.Executor` 不再换 key、channel 或虚拟模型目标，避免重复流。第三方审核在流尾对完整文本执行，随后按实际真实模型结算。
 
 ### 策略三通道（核实）
 
@@ -154,8 +163,8 @@ apps/gateway/
 |---|---|---|
 | **请求前置** | `evaluateChatRequestPolicy` → `evaluatePolicy`（含公开检索分层） | `retrieval_policy.go` / `server.go` |
 | **公开检索 warn** | `writePublicRetrievalWarnings`（仅 `ActionWarn`） | `retrieval_policy.go` |
-| **响应后置** | `evaluatePolicy(responseContent, makeEvalContext(identity, "response"))` + `applyResponseFieldPolicy` | `server.go:835` / `server.go:870` |
-| **流式 per-chunk** | `evaluatePolicy(merged, makeEvalContext(identity, "response"))` 在 `push` 回调内 | `server.go:1107` |
+| **响应后置** | `evaluatePolicy(responseContent, makeEvalContext(identity, "response"))` + `applyResponseFieldPolicy` | `server.go` |
+| **流式 per-chunk** | `evaluatePolicy(merged, makeEvalContext(identity, "response"))` 在 `push` 回调内 | `server.go` |
 
 ## 核心组件分析
 
@@ -170,10 +179,16 @@ apps/gateway/
 
 ### channel + keypool
 
-- `channel.Registry` —— 租户级 channel 快照，5s 重载（`registry.go:22`）；`synthesizeFromProviders` 把 admin providers 自动合成单 Channel（向后兼容 `providers.json`）
-- `channel.Picker` —— LB 策略（`lb_policy.go`）：`weight` / `latency_aware`（InverseLatencyWeight）/ `prefix_cache`（fnv hash 前缀粘性，默认 4 条消息）；支持 affinity 粘性
+- `channel.Registry` —— 租户级 channel 快照，5s 重载；`synthesizeFromProviders` 直接基于 `runtimeconfig.Loader.Providers()` 内存快照合成兼容 Channel，远程 provider 同样适用
+- `channel.Picker` —— 先只保留最小 `Priority` 的可用层，再在层内执行 `weight` / `latency_aware` / `prefix_cache` 与 affinity；高优先级层冷却或排除后才落到下一层，`PickDecision.Priority` 进入审计
 - `channel.Prober` —— 周期 + on-demand 健康探测
 - `keypool.Pool` —— 每 channel 多 key 轮转，失败后冷却
+
+### virtualmodel
+
+- `virtualmodel.Loader` 每 5s 拉取 `GATEWAY_REMOTE_VIRTUAL_MODELS_URL`，解析失败或成功加载后的 404 保留最后可用快照
+- `virtualmodel.Plan` 在最低可用 priority 层按 weight 选首个真实模型，其余目标按 priority 与声明顺序构成回退序列；`virtualmodel.WithPlan` 保证配额预检与 relay 执行复用同一计划
+- 虚拟模型只有在当前目标无可路由 channel 时切换目标；流式一旦提交输出则停止所有后续回退
 
 ### cache 包（两层，`cache/service.go`）
 
@@ -199,11 +214,22 @@ apps/gateway/
 - `DualWriter` —— File + Postgres 双写
 - `pg_writer.go` —— pgx INSERT `gateway_audit_events` 表
 - `backfill.go` —— 启动时把孤儿 file 事件回灌 PG（默认 7 天，`GATEWAY_AUDIT_BACKFILL_DAYS`），保证最终一致
+- `alertdispatch.VerifyAuditChain` 周期重算跨行/跨文件 checksum；断链由 `StartChainCheck` 触发 CRITICAL 告警
+- `alert_dispatch` 与 `incident_action` 有独立载荷；事件处置端点遵循“先写防篡改审计，再执行本副本即时吊销”
+
+### moderation + alertdispatch
+
+- `moderation.Service.Enforce` 按租户配置调用通用 HTTP JSON provider；未配置租户零外呼。provider 故障时默认 degraded（本地规则继续、发 CRITICAL 告警），`mode=strict` 时合成 `moderation_strict_fail_closed` block hit
+- 审核命中被提升为带 `Category` 的 `policyengine.HitEvent`，贯穿 `90001/90002` 与 `audit.PolicyHit.Category`
+- `alertdispatch.Dispatcher` 支持通用 webhook 和飞书 interactive card，按 severity 过滤、DedupKey 窗口去重、通道滑动窗口限流；发送结果写 `alert_dispatch` 审计事件
+- `POST /internal/security/incident-action` 支持 `terminate_session`、`revoke_pat`、`disable_user`、`block_model`；前两项在审计成功后即时写本副本吊销状态，后两项只记录，持久化执行由控制台负责
 
 ### mcp + mcphost（双模 MCP）
 
-- **`mcp` = MCP 代理模式**（`mcp/handler.go`）：`Handler` 是 `httputil.ReverseProxy`，重写 auth header，调 quota，响应后写审计；10min 超时
-- **`mcphost` = MCP host 模式**（`mcphost/host.go`）：网关自己说 MCP（Streamable-HTTP + SSE 两种传输）；`BackendEcho` 是 demo，`BackendOpenAPI` 自动从 OpenAPI 3 spec **推导出 MCP tools**；**`BackendConnector`**（`backend_connector.go`，需 PG）：五个发现型工具 + `execute_action` 调 `connector-runtime` Executor（SSRF 守护；私网默认拒绝，`GATEWAY_CONNECTOR_ALLOW_PRIVATE_NETWORK`）；`execute_action` 额外走 `Stage: connector` 策略；每工具配额 + policy + 审计（含 connector_* 字段）；`Registry` pgx-backed
+- **`mcp` = MCP 代理模式**（`mcp/handler.go`）：`Handler` 是 `httputil.ReverseProxy`，重写 auth header，调 quota，响应后写审计；出站拨号经过 `egress` 守护
+- **`mcphost` = MCP host 模式**（`mcphost/host.go`）：`BackendOpenAPI` 的 HTTP 调用同样受 `egress` 守护；托管 server 若有 `published_version_id`，工具与 backend config 只读 `mcp_server_versions` 的 published 版本，不回落草稿表或重新从 OpenAPI 推导
+- SSE session 在配置 `GATEWAY_MCP_SESSION_SECRET` 后使用 HMAC 签名的 `v1.<payload>.<mac>` ID，可跨副本验证；未配置时保持进程本地会话并记录警告
+- **`BackendConnector`**（需 PG）：五个发现型工具 + `execute_action` 调 `connector-runtime` Executor；每工具配额 + policy + 审计（含 connector_* 字段）
 
 ### wasmhost 包（插件链，`wasmhost/`）
 
@@ -218,10 +244,12 @@ apps/gateway/
 - `auth.PATVerifier` —— `agx-pat-*` token，DB 查询 + TTL cache（`GATEWAY_PAT_CACHE_TTL` 默认 5s）
 - `SessionGrantStore` —— 短期临时 scope
 - `PATRevocationStore` —— 从 admin 拉哈希列表（近实时吊销）
+- `SessionRevocationStore` —— `terminate_session` 本副本即时生效，并按 `GATEWAY_REMOTE_SESSION_REVOCATION_URL` 5s 缓存轮询快照，JWT 请求在 `identityFromRequest` 阶段返回 `auth:session_revoked`
 
 ### observability + metering
 
-- `observability.Registry`（`metrics.go`）Prometheus 指标：`agx_gateway_ttft_seconds` / `agx_gateway_tokens_per_second` / `agx_gateway_cache_hits_total` / `agx_gateway_cache_lookups_total` / `agx_gateway_channel_health` / `agx_gateway_active_streams` / `agx_gateway_upstream_error_total` / `agx_plugin_invocations_total` / `agx_plugin_errors_total` / `agx_plugin_latency_seconds` / `agx_gateway_http_requests_total` / `agx_gateway_http_request_duration_seconds`
+- `observability.Registry` 在既有 AI/HTTP/插件指标外增加 `gateway_config_apply_failures_total{domain}` 与 `gateway_config_last_success_timestamp_seconds{domain}`
+- `GET /internal/config-status` 返回 providers/channels/policy/mcp_servers 四域的来源、内容哈希、版本、生效/检查时间与连续失败；`configstatus.StartHeartbeat` 可每 30s POST 同一结构到 `GATEWAY_ADMIN_HEARTBEAT_URL`
 - 可选 Pyroscope 连续剖析
 - `metering.Reporter`（`reporter.go`）写 `UsageRecord` 到 PG `usage_records` 表，回退 `FileSink` jsonl
 
@@ -233,7 +261,7 @@ apps/gateway/
 
 **数据库**：`database/` 包支持 **PostgreSQL（pgx）与 MySQL 双方言**（`dialect.go`，`DATABASE_DIALECT` env 控制，默认 postgres）。PG 表：`usage_records`（metering）、`gateway_audit_events`（audit，与 IAM CRUD 用的 `audit_events` **分表**）、`gateway_budget_usage` / budget ledger（`GATEWAY_BUDGET_BACKEND=database`）、`connector_definitions` / `connector_connections`、PAT / session_grants / compliance。Redis：分布式限流、cache L1/L2。本地 `.runtime/` jsonl：优雅降级兜底。
 
-**与 admin-console 的内部集成**（通过 `GATEWAY_INTERNAL_TOKEN` Bearer 鉴权的 HTTPS GET，`gatewayinternal/http.go`）：
+**与 admin-console 的内部集成**（通过 `GATEWAY_INTERNAL_TOKEN` Bearer 鉴权的 HTTP(S) GET/POST，`gatewayinternal/http.go`）：
 
 | 环境变量 | 用途 | 刷新 |
 |---|---|---|
@@ -242,14 +270,21 @@ apps/gateway/
 | `GATEWAY_REMOTE_QUOTA_CONFIG_URL` | 等价 `quotas.json` | 10s |
 | `GATEWAY_REMOTE_PRICING_CONFIG_URL` | 计价快照 | 10s |
 | `GATEWAY_REMOTE_BUDGET_CONFIG_URL` | 成本/词元预算（v2；可按 `X-AgenticX-Tenant-Id` 分租户） | 10s |
+| `GATEWAY_REMOTE_VIRTUAL_MODELS_URL` | 虚拟模型快照；未配置时虚拟模型名按普通模型透传 | 5s |
 | `GATEWAY_BUDGET_BACKEND` | `database` 启用 PG budget ledger（否则文件 fail-open） | — |
 | `GATEWAY_CONNECTOR_MASTER_KEY` | 连接器连接凭据 AES 主密钥（base64 32B） | — |
 | `GATEWAY_CONNECTOR_ALLOW_PRIVATE_NETWORK` | 连接器上游私网/环回放行 | — |
 | `GATEWAY_REQUEST_TIMEOUT` | 全局 HTTP 请求 context 超时（默认 10m） | — |
 | `GATEWAY_REMOTE_PAT_REVOCATION_URL` | 吊销 hash 列表 | 按需 |
+| `GATEWAY_REMOTE_SESSION_REVOCATION_URL` | JWT session 吊销快照 | 调用时按 5s TTL 刷新 |
 | `GATEWAY_REMOTE_SESSION_GRANTS_URL` | 会话临时 scope | 按需 |
 | `GATEWAY_REMOTE_COMPLIANCE_URL` | 数据驻留 / 跨境策略 | 按需 |
 | `GATEWAY_REMOTE_CHANNELS_URL` | channel 列表 | 5s |
+| `GATEWAY_ADMIN_MODERATION_FILE` | 每租户第三方内容审核配置 | 10s |
+| `GATEWAY_ADMIN_ALERTS_FILE` | 每租户 webhook/飞书告警通道 | 10s |
+| `GATEWAY_EGRESS_GUARD_MODE` / `GATEWAY_EGRESS_ALLOWLIST` | MCP proxy/OpenAPI backend 出站守护（默认 audit） | 启动时 |
+| `GATEWAY_MCP_SESSION_SECRET` / `GATEWAY_MCP_SESSION_TTL` | MCP SSE 跨副本签名会话（TTL 默认 24h） | 启动/签发时 |
+| `GATEWAY_ADMIN_HEARTBEAT_URL` | 网关配置生效状态回传 admin | 30s |
 
 **上游 LLM provider**：OpenAI、DeepSeek、Moonshot (Kimi)、Anthropic Claude Messages、Google Gemini、Azure OpenAI、AWS Bedrock (SigV4)、自托管 OpenAI 兼容（Ollama、edge-agent）。
 
@@ -262,11 +297,12 @@ apps/gateway/
 | **Adaptor 模式** | `adaptor.Adaptor` 接口统一 vendor 协议；OpenAI 请求形状是规范的内部模型，`inbound/outbound/transform` 在边界翻译 Claude/Gemini/Responses |
 | **两层执行路径并存** | 旧 `provider.ChatProvider` 直连 vs 新 `relay.Executor` + `channel.Picker` + `keypool.Pool`；都产出相同的 `openai.ChatCompletionResponse` |
 | **Middleware/Hook 链** | wasm 插件通过 5 个 hook 点（`OnRequestHeaders/Body`、`OnResponseHeaders/Body`、`OnStreamChunk`）执行；policy engine 在前置/per-chunk/后置三阶段评估 |
-| **全栈热重载** | policy、providers、channels、quotas、pricing、budgets、PAT 吊销、session grants、compliance —— 全部 fsnotify 或 5-10s 轮询，无需重启 |
+| **最后可用快照** | providers/channels/policy/MCP server/virtual model 在解析失败或已成功加载后的远端 404 时保留旧快照，并将核心四域失败暴露到 config status |
 | **优雅降级** | 每个外部依赖可选：无 PG → file sink；无 Redis → 内存 limiter；无 key → mock；无 remote URL → 本地 JSON；无 Pyroscope env → 跳过 |
 | **防篡改审计链** | 每个 `Event` 携带 `prev_checksum` + `checksum`（blake2b-512 截 256-bit），首条 `GENESIS`，支持事后完整性校验 |
 | **Reserve/Settle 配额对账** | 流式开始 `ReserveContext` 预占，结束 `SettleContext(reserved, actual)` 对账，错误 `RollbackContext`——解决流式 token 数估算偏差 |
-| **Channel + Key 两级重试** | `IsChannelRetryable` / `IsKeyRetryable` 区分 401/429/5xx vs net error vs 不可重试（cancel / idle timeout）|
+| **Virtual + Channel + Key 分层容错** | 虚拟目标按 priority/weight 计划，channel 按 priority tier 与 LB 选取，key 在 channel 内轮转；流式输出提交后禁止再切换 |
+| **先审计后处置** | `handleInternalIncidentAction` 只有在 `incident_action` 成功写链后才执行本副本 PAT/session 吊销 |
 | **多协议入站** | 同一内部管线服务 OpenAI chat/embeddings、Claude Messages、Gemini generateContent (流+非流)、OpenAI Responses API —— 在入站边界翻译，由 `GATEWAY_INBOUND_*` 开关按需启用 |
 
 ## 与 admin-console / policy-engine 的关系
@@ -275,7 +311,7 @@ apps/gateway/
 |---|---|---|
 | `apps/admin-console` | 配置源（snapshot 拉取）| admin 是网关运行时配置的**唯一源头**；网关 5-10s 轮询其 `/api/internal/*`；admin 发布的 `policy-snapshot.json` 默认落 `enterprise/.runtime/admin/`，网关 `DefaultBudgetConfigPath` 等相对 `../../.runtime/admin/` 读取 |
 | `apps/web-portal` | 间接 | portal 通过 admin 控制网关；其 SSO JWT 由网关验证；portal `/api/chat/completions` 反向代理时填 `x-agenticx-provider` 头 |
-| `apps/edge-agent` | 上游（local route）| 默认 `local` 路由指向 `http://127.0.0.1:11434/v1`（Ollama 风格）；edge-agent Go 单二进制当前是 skeleton，**网关侧未硬接 edge-agent sidecar** |
+| `apps/edge-agent` | 上游（local route）/ 反向调用方 | 默认 `local` 路由指向 `http://127.0.0.1:11434/v1`（Ollama 风格），`edge-agent` 在默认 `Models[]` 中只是 provider 名；edge-agent v0.2（沙箱 + trace MVP，`127.0.0.1:7420`）的 model step 反向经网关转发并带 `X-AgenticX-Trace-Id` / `X-AgenticX-Trace-Step`，**网关侧没有专门对接 edge-agent sidecar 的代码路径** |
 | `packages/policy-engine` | Go 包 replace 引入 | 嵌入在网关进程内做 PII / 敏感词 / 字段级脱敏；**不嵌入 LiteLLM**，上游模型调用走 Go 标准库 `net/http` 的 OpenAI 兼容客户端 |
 | `plugins/moderation-*` / `plugins/wasm-*` | 策略规则 / wasm 插件 | policy 通过 manifest glob 装载；wasm 由 `wasmhost.Manager` 装载 |
 
@@ -289,12 +325,17 @@ apps/gateway/
 | 多 vendor adaptor（OpenAI/Claude/Gemini/Azure/Bedrock + SigV4） | ✅ |
 | 多协议入站（Claude Messages / Gemini generateContent / Responses，按 env 开关） | ✅ |
 | 三路由决策（local/private-cloud/third-party） | ✅ |
-| Channel + KeyPool + 双层重试 + 健康探测 + LB（weight/latency_aware/prefix_cache） | ✅ |
+| 虚拟模型（priority/weight/可用性回退）+ 真实模型配额归集 | ✅ |
+| Channel priority tier + KeyPool + 双层重试 + 健康探测 + LB | ✅ |
 | L1 内存/Redis + L2 语义缓存 + SSE 回放 | ✅ |
 | Wasm 插件链（wazero + 4 原生 builtin，5 hook 点，fsnotify 热重载） | ✅ |
-| MCP host（Streamable-HTTP/SSE + OpenAPI 推导 tools）+ MCP proxy | ✅ |
+| MCP host/proxy + published version 工具面 + SSE 跨副本签名 session | ✅ |
+| MCP/OpenAPI 出站地址守护（audit/enforce + allowlist） | ✅ |
 | Policy engine 字段级脱敏 + RBAC scope | ✅ |
+| 第三方内容审核（degraded/strict）+ category 回显 | ✅（按租户配置） |
 | 防篡改审计链（blake2b-512→256）+ File+PG 双写 + backfill | ✅ |
+| 告警分发（webhook/飞书、去重、过滤、限流）+ 审计链持续自检 | ✅ |
+| 事件处置（PAT/session 即时吊销；用户/模型动作留痕） | ✅ |
 | 跨境数据驻留判定（allow/block/require_approval） | ✅ |
 | 多维度配额（tokens/RPM/TPM/RPD/RPW/RPM/并发/MCP 限速）+ Redis 分布式限流 | ✅ |
 | Agent 维度配额（`Config.agents` / `AgentID`） | ✅ |
@@ -304,9 +345,9 @@ apps/gateway/
 | 公开检索分层策略（签名 `PolicyContext`） | ✅ |
 | 全局请求超时（`GATEWAY_REQUEST_TIMEOUT`） | ✅ |
 | Reserve/Settle/Rollback 流式预算对账 | ✅ |
-| PAT + Session Grant + 近实时吊销 | ✅ |
-| Prometheus 指标 + Pyroscope 连续剖析 | ✅ |
-| 全栈热重载（fsnotify + 5-10s 轮询 admin internal API） | ✅ |
+| PAT + Session Grant + PAT/session 近实时吊销 | ✅ |
+| Prometheus 指标 + 配置生效状态/心跳 + Pyroscope 连续剖析 | ✅ |
+| 配置热重载与最后可用快照保护 | ✅ |
 | 优雅降级（无 PG/Redis/key 均可工作） | ✅ |
 | PG + MySQL 双数据库方言 | ✅ |
 
@@ -316,19 +357,8 @@ apps/gateway/
 2. **PII 基线仅 5 类**：`engine.go:192` 的 `baselinePIIRegex` 只覆盖 `mobile` / `email` / `id-card` / `bank-card` / `api-key`。**"17 种密钥检测"仍留在 AgenticX Python 框架，未进 Go 网关**——客户方案中如需完整密钥扫描，需明确这不在网关侧。
 3. **文本 Evaluate 不处理 field 规则**：`engine.go:75` 的 `EvaluateWithContext` 只 switch `keyword/regex/pii`；`field` 规则需经 `fields.go:25` 的 `EvaluateJSONFields` 单独入口（`server.go` 的 `applyResponseFieldPolicy` 已正确分流调用）。
 4. **README 部分内容陈旧**：`README.md:9` 称审计写 "ClickHouse / 本地文件"，但实际代码写 PG `gateway_audit_events`（或 jsonl），**无 ClickHouse 集成**；`README.md:15` 称 "Go 1.22+"，`go.mod` 已为 `go 1.26.0`。
-5. **edge-agent 侧未硬接**：默认 `local` 路由指向 Ollama 风格的 `http://127.0.0.1:11434/v1`；`packaging/edge-agent` Go 单二进制是空壳 skeleton，网关进程内**没有**专门对接 edge-agent sidecar 的代码路径，描述端侧闭环时宜用「本地后端服务」等中性措辞。
+5. **edge-agent 侧未硬接**：默认 `local` 路由指向 Ollama 风格的 `http://127.0.0.1:11434/v1`；`enterprise/apps/edge-agent` 已是 v0.2 MVP（沙箱执行 + trace，见 [edge-agent_conclusion.md](edge-agent_conclusion.md)），但 Desktop 尚未接线，网关进程内也**没有**专门对接 edge-agent sidecar 的代码路径，描述端侧闭环时宜用「本地后端服务」等中性措辞。
 6. **配额与预算的「控制面」仍偏 admin 发布 + 网关执行**：网关侧已支持 `users` / `departments` / `apiTokens` / `agents` 配额，以及预算 v2 的 company/tenant/dept/user/group 多层（PG ledger 模式 fail-closed）；但 admin-console「额度控制」页仍以查询/展示为主，远程 budget 拉取依赖 admin 按租户返回正确 bundle——**不可仅凭 UI 现状口头承诺「部门/用户级 TPM 已在控制台可配」**。
-
-
-## 增量（30e57496 → 22d051f5）
-
-- `internal/connectorstore/`：OpenAPI 导入（`ImportOpenAPI`，destructive 需 `confirm_destructive`）、定义/连接 PG 持久化（凭据 AES-GCM，`GATEWAY_CONNECTOR_MASTER_KEY`）；`EnsureConnectorServer` 写入 `mcp_servers`（`name=connector`，`backend_type=connector`）。
-- `server/connector_handlers.go`：`/internal/connectors` 列表/导入/删除、连接 list/create/rotate/revoke（`gatewayInternalAuthorized`）。
-- `mcphost/backend_connector.go` + `host.go`：连接器 MCP 工具面；`execute_action` 的 `Stage: connector` 策略与 connector 审计字段。
-- `server/retrieval_policy.go` + `openai.PolicyContext`：公开检索 HMAC 验签与 `evaluateChatRequestPolicy` 双层 request 策略。
-- `server/desktop_audit_handlers.go`：`POST /v1/desktop/action-audit`（PAT + scope `desktop:managed`）。
-- `server/request_timeout.go`：Router 全局 `requestTimeout(GATEWAY_REQUEST_TIMEOUT)`。
-- `quota/budget.go` v2 + `budget_database.go`：多层预算与可选 PG ledger；`tracker.go` / `check_request.go` 增加 `agents` 维度与 `BudgetReceipt`。
-- `openai/request_compatibility.go`：relay/adaptor 出站前 `CompatibleRequest`；OpenAI SSE `[DONE]` 不完整流报错。
-- `gatewayinternal/http.go`：`HTTPGetWithHeaders`（budget 租户头）；`audit` PG 列扩展 connector_*。
-- `go.mod`：`go 1.26.0`，引入 `connector-runtime` replace。
+7. **事件处置并非全部由网关执行**：`terminate_session` 与 `revoke_pat` 只即时更新当前网关副本，跨副本/重启依赖控制台快照；`disable_user` 与 `block_model` 在网关仅写 `incident_action` 审计，真正持久化由控制台负责。
+8. **配置状态只覆盖四个核心域**：`configstatus.FillCoreDomains` 固定为 providers/channels/policy/mcp_servers；虚拟模型、moderation 与 alert channel 的加载状态不会出现在 `/internal/config-status` 或 heartbeat。
+9. **出站守护覆盖面有限**：`egress.NewHTTPClient` 已接入 MCP proxy 与 hosted OpenAPI backend，但第三方 moderation provider 仍使用普通 `http.Client`，不要把 `GATEWAY_EGRESS_GUARD_MODE` 描述成所有网关外呼的统一防线。

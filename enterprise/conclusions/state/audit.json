@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
   "module_id": "audit",
-  "generation": "55eeb8bf624743579fac938cb03c4c2b",
+  "generation": "47e579bee75f4437a66166dd9eea535f",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:e4dd08802cd82daea1b933721ae7d8eef31ba4c78bd1eb767b25a3bc87975a04",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:11f3e6b0c134ae298526aebff42444decf4776b16d79f27c7e31dcc70bf8aaec",
   "summary_path": "enterprise/conclusions/features/audit_conclusion.md",
   "summary_sha256": "sha256:f90d97086dae478f9a505cebf7561f23c970c1c7915726e1548ae76591d2c8f2",
-  "updated_at": "2026-10-25T03:42:34.484427+00:00"
+  "updated_at": "2026-11-14T12:24:37.014659+00:00",
+  "summary_review": "unchanged-after-review"
 }

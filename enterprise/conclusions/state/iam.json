@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
   "module_id": "iam",
-  "generation": "614aed70bb5f437e9032278f84866894",
+  "generation": "c2d00f0248674e669b3d2e2c9a1f1dac",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:ea242e0b205ce4f4724280937e79b763613676e919232f07968bcb16b133c6e1",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:611d7dd86398cf647759838b6dea2a1eae2ab6df9e8a50ca913883f82fea1a17",
   "summary_path": "enterprise/conclusions/features/iam_conclusion.md",
   "summary_sha256": "sha256:6caf6a5ab82526532e4eca99ff5c2fc64679cf36544f52813d4db857011d12b5",
-  "updated_at": "2026-10-24T13:52:52.887197+00:00"
+  "updated_at": "2026-11-14T12:24:37.884230+00:00",
+  "summary_review": "unchanged-after-review"
 }
