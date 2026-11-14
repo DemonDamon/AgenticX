@@ -78,7 +78,7 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.6.2",
-    "concurrently": "^9.1.2",
+    "concurrently": "^10.0.7",
     "cross-env": "^10.1.0",
     "electron": "^45.2.2",
     "electron-builder": "^26.18.0",
