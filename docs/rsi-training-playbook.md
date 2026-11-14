@@ -184,6 +184,8 @@ python3 scripts/rsi_preflight.py
 1. **训练后端接入**（唯一剩余项）：打通「harbor rollout → TokenRollout → GRPO 更新 → adapter 热同步」的 27B 全链路。四个纯逻辑件（门控/SPR/污染率/审计）已就位并有测试，剩下的是把它们接进 27B 训练循环——依赖后端选型决策（自研 GRPOTrainer 打底 vs 接 verl/AReaL/slime）与目标机 preflight 通过；
 2. **长度探测执行**：脚本就绪，需要在**目标训练机**上跑 200 题（跨架构墙钟不可比，本机 qemu 容器测出的值会污染分层阈值）。
 
+> **后端选型决策记录（2026-11-14）**：自研栈的 GRPO 数学移植自 verl（`core_algos.py`，有对拍测试）——抄的是 verl 最不易错的部分；verl 真正值钱的工程编排（Ray 跨机、FSDP 全参分片、54GB 全权重同步）恰好是我们的场景用不上的：LoRA 只同步 2GB adapter、单机 8 卡不需要 Ray、基座冻结单卡放得下不需要 FSDP。反之我们的差异化件（门控/α 预算/SPR/污染掩码/episode advantage）塞进 verl 的 Ray workflow 要动其源码。**结论：自研 GRPOTrainer 打底，vLLM `enable_lora` + `sync_lora()`（已实现，三级降级：V1 RPC → V0 API → 惰性 request）做热同步。止损判据——服务器冒烟时触发任一条即切 verl（预估接入 2-3 天）：① LoRA 热更新不生效或退化为 54GB 全量落盘；② 一步耗时超预算 2 倍且无法归因；③ 显存 OOM 三个自救方案内无解。**
+
 > 前置就绪判定：`python3 -m pytest tests/rl/test_promotion_gate.py tests/rl/test_spr.py tests/rl/test_contamination.py tests/rl/test_promotion_audit.py tests/trajectory/test_length_probe.py -q` → 49 通过。
 
 ### 4.3 启动顺序
