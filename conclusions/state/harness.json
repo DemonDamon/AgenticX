@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "harness",
+  "generation": "032c10b0100f4391b83ed3a67e037596",
+  "mapping_revision": 1,
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:de41979394b7ed2ac473426eb1b65334350ba09866329cf720b0384176588e90",
+  "summary_path": "conclusions/harness_module_conclusion.md",
+  "summary_sha256": "sha256:9a0b41b82cdd03e8842dae0bfac8e514e108f23c118e090dea53a771e3685c3b",
+  "updated_at": "2026-11-14T12:26:53.327133+00:00"
+}

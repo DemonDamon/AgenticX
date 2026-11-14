@@ -1,6 +1,6 @@
 # AgenticX Runtime 模块总结
 
-> 结论更新时间：2026-10-25（覆盖基线 `ca9d92bec05627539228094cacc30dd6d4879f47` 至 `22d051f5d18ad83a4c6083683342ab41d7850149` 的 runtime 变更）
+> 结论更新时间：2026-11-14（覆盖基线 `22d051f5d18ad83a4c6083683342ab41d7850149` 至 `cebdabd5883de1d5a62c96ae4084de6ad036b32f` 的 runtime 变更）
 
 ## 目录路径
 
@@ -50,6 +50,8 @@ agenticx/runtime/
 ├── group_facts.py          # (NEW) 群聊执行事实只读聚合（回复/工具/图节点/产物文件）
 ├── compactor.py            # ContextCompactor：历史消息压缩（经 compaction_journal 记账）
 ├── confirm.py              # ConfirmGate / AsyncConfirmGate / RiskAwareAutoConfirmGate + 风险分级
+├── disambiguation.py       # (NEW) 结构化消歧协议（candidate_select / info_supplement / conflict_resolve）
+├── studio_safety.py      # (NEW) Studio 主链路 SafetyLayer 桥接（validate_input / sanitize_output）
 ├── auto_solve.py           # 自动求解辅助
 ├── loop_controller.py      # 循环控制
 ├── loop_detector.py        # LoopDetector：工具调用循环检测
@@ -94,11 +96,13 @@ agenticx/runtime/
 ├── durable_jobs/           # 跨进程可恢复任务（SQLite CAS 租约 + Worker）
 ├── effect_guard.py         # 派发前副作用账本（CallLedger）与崩溃后 orphan 防护
 ├── enterprise_agent_policy.py # 企业登录态下的工具 subject 策略（deny/always_ask）
-├── enterprise_agent_sync.py # 本地 avatar 注册 / 拉取已发布企业 agent
+├── enterprise_agent_sync.py # 本地 avatar 注册 / 拉取已发布企业 agent / 单 agent 详情
+├── enterprise_agent_publish.py # (NEW) 分身 → agx.agent/v1 清单并提交企业草稿版本
+├── enterprise_agent_builder.py # (NEW) NL 草稿托管 agent 预览/差异/提交（不直发 publish）
 ├── enterprise_trace.py     # replay 回合摘要上传企业 trace inbox（outbox  drained）
 ├── enterprise_worker.py    # 企业任务 claim + 本地执行循环
 ├── parked_approvals.py     # 无人值守挂起确认注册表
-├── session_boundary.py     # 会话私有 work 目录 + 出站域名 allowlist
+├── session_boundary.py     # 会话私有 work 目录 + 出站域名 allowlist + EgressGuard ContextVar
 └── turn_abort.py           # 聊天 turn 中止 vs durable job 取消（作用域分离）
 ```
 
@@ -348,7 +352,8 @@ Meta-Agent 通过 `delegate_to_avatar(avatar_id, task)` 将任务注入目标分
 - **path_policy.py**：落地 `permissions.path_rules` 用户路径规则。deny 全局优先（任何命中即绝对拒绝，短路在确认门之前）；allow 是「跳过确认」的常设豁免，不能把工作区边界拆掉（`/**` 不会瓦解沙箱）。`normalize_path_rules()` 容忍手写坏规则（跳过而非炸掉执行路径），`match_path_rules()` 对 Windows 路径同时按原样与正斜杠形式匹配。
 - **command_sandbox.py（2026-10 补强）**：沙箱子进程环境剥离 `AGX_DESKTOP_TOKEN` / `AGX_CC_BRIDGE_TOKEN`，防止脚本回调本机 Studio 扩权；默认 deny 写 `**/.agx-mounts.json`；macOS 将 git 凭据 helper 指到会话 temp 内文件，避免 Keychain 弹窗挂死；纯 `git`（或 `cd … && git …` 单段脚本）可读 grant `~/.ssh` 等 git 凭据路径；原生连接器（腾讯会议/TAPD 等）按模板追加读写根；deny 扫描根不再遍历 `/usr` 等大前缀，避免 512 路径上限挤掉工作区规则。
 - **command_safety.py（2026-10）**：分类与 verdict 语义微调，配合 `enterprise_agent_policy.match_subject()` 对 `bash_exec` 内 `git push` 等 subject 做企业策略匹配。
-- **session_boundary.py**：`ensure_session_workdir()` 创建 `<sessions>/<id>/work`；`foreign_session_denial()` 禁止跨会话私有目录读写；`egress_denial()` + `configured_egress_allowlist()` 对 `runtime.egress_allow_domains` 出站 URL 做 host 后缀匹配（空列表=不额外限制）。
+- **session_boundary.py**：`ensure_session_workdir()` 创建 `<sessions>/<id>/work`；`foreign_session_denial()` 禁止跨会话私有目录读写；`egress_denial()` + `configured_egress_allowlist()` 对 `runtime.egress_allow_domains` 出站 URL 做 host 后缀匹配（空列表=不额外限制）。**EgressGuard**（`bind_egress_guard` / `current_egress_guard` / `unbind_egress_guard`）经 ContextVar 为托管会话 turn 绑定出站改写/鉴权策略；个人会话未绑定时调用方保持原行为。
+- **command_sandbox.py（network）**：`build_command_sandbox_plan(..., network="inherit"|"deny")` 在 confined 档切断子进程出站（macOS seatbelt `deny network-outbound`、Linux bwrap `--unshare-net`）；`danger-full-access` 与 Windows/未知平台在 `network="deny"` 时拒绝并抛 `CommandSandboxUnavailable`，避免名义禁网实则放行。
 
 ---
 
@@ -475,8 +480,10 @@ WorkGraph 运行时：把 Workforce 规划产物编译成 DAG，按依赖分波�
 | `AGX_EFFECT_GUARD` | （默认开） | 派发前副作用账本（`runtime.effect_guard` 可覆盖） |
 | `AGX_UNATTENDED_APPROVAL_PARKING` | （默认开） | 无人值守受保护操作是否挂起等人批（`unattended.approval_parking`） |
 | `AGX_UNATTENDED_APPROVAL_TIMEOUT_SEC` | 1200 | 挂起审批等待上限（clamp 60–7200） |
+| `AGX_STUDIO_SAFETY_LAYER` | 1 | Studio 主链路 SafetyLayer 总开关（`runtime.studio_safety_layer`） |
+| `AGX_STUDIO_SAFETY_MODE` | observe | `observe` 只记不改 / `enforce` 拦截输入并改写输出（`runtime.studio_safety_mode`） |
 
-企业桌面相关（非 env，见 `config.yaml`）：`enterprise.enabled` + `enterprise.token` + `enterprise.base_url` 为 worker/trace/audit 前置；`enterprise.worker.enabled` 控制本地 worker；`enterprise.trace_upload` 显式 `false` 才关 trace；`enterprise.agent_action_policy` 映射为 `EnterpriseAgentPolicy`（`denied_tools` / `always_ask_tools` / `disable_session_allow`）。
+企业桌面相关（非 env，见 `config.yaml`）：`enterprise.enabled` + `enterprise.token` + `enterprise.base_url` 为 worker/trace/audit 前置；`enterprise.worker.enabled` 控制本地 worker；`enterprise.worker.protocol` 为 `legacy` / `ma` / `dual`（托管 MA 任务 claim）；`enterprise.worker.ma_environment_ids` / `ma_environment_mode`（`auto` 发现环境）/ `ma_base_url` / `gateway_url` 驱动 `MAWorker`；`enterprise.trace_upload` 显式 `false` 才关 trace；`enterprise.agent_action_policy` 映射为 `EnterpriseAgentPolicy`（`denied_tools` / `always_ask_tools` / `disable_session_allow`）。
 
 Jev（TypeSafe）其余参数在 `config.yaml` 的 `typesafe:` 节（由 `agenticx/llms/typesafe_config.py` 解析）：`enabled`（默认关）、`group_routing`（默认开）、`kb_auto`（默认关）、`model`（默认 `jev-latest`）、`base_url`（默认 `https://api.typesafe.ai`）、`timeout_sec`（默认 8）、`soft_timeout_sec`（默认 2）、`act_above`（0.8）、`review_above`（0.5）。
 
@@ -506,6 +513,16 @@ from agenticx.runtime import (
     is_protected_confirm,
     protected_confirm_reason,
     confirm_denial_note,
+    ClarifyGate,
+    AsyncClarifyGate,
+    AutoSuspendClarifyGate,
+    DisambiguationMode,
+    DisambiguationRequest,
+    DisambiguationResponse,
+    DisambiguationCandidate,
+    DisambiguationSession,
+    DisambiguationGate,
+    SyncDisambiguationGate,
     HookRegistry,
     AgentHook,
     HookOutcome,
@@ -656,8 +673,8 @@ flowchart LR
   TA --> AUDIT
 ```
 
-- **EnterpriseWorker**（`enterprise_worker.py`）：`worker_enabled()`；claim/heartbeat/complete 企业任务并在本地 avatar session 跑 `AgentRuntime`；设备 id 落 `~/.agenticx/enterprise_worker/`。Studio：`register_enterprise_worker_routes` → `GET/PUT /api/enterprise-worker`、`GET /api/enterprise-agents`（`fetch_published_agents`）。
-- **enterprise_agent_sync**：`sync_local_avatar` → `POST {base}/api/desktop/agents/register`；`fetch_published_agents` → `GET …/agents`（best-effort，未登录 no-op）。
+- **EnterpriseWorker**（`enterprise_worker.py`）：`worker_enabled()`；claim/heartbeat/complete 企业任务并在本地 avatar session 跑 `AgentRuntime`；设备 id 落 `~/.agenticx/enterprise_worker/`。Studio：`register_enterprise_worker_routes` → `GET/PUT /api/enterprise-worker`、`GET /api/enterprise-agents`（`fetch_published_agents`）。**2026-11-14**：`worker_protocol` 可切换 MA/dual 托管 work item（见文末增量节）。
+- **enterprise_agent_sync**：`sync_local_avatar` → `POST {base}/api/desktop/agents/register`；`fetch_published_agents` → `GET …/agents`（best-effort，未登录 no-op）；`fetch_enterprise_agent_detail` 单条详情（404→`None`，其它失败→`EnterpriseCatalogError`）。
 - **enterprise_trace**：`replay_ledger.recorder` 在 run 完成时 `enqueue_completed_run`；outbox `~/.agenticx/enterprise_trace/outbox.jsonl`；上传 spans（无 tool args/result 正文，用户/助手 preview ≤500 字）；`trace_upload_enabled()` 需企业登录且未显式关 `enterprise.trace_upload`。
 - **action_audit**：`emit_action_audit()`（`effect_guard` / 工具路径调用）；outbox `~/.agenticx/action_audit/outbox.jsonl`，20MB 上限丢弃；`audit_enabled()` 同企业 token 门控。Desktop/Electron 负责 drain 上云，runtime 只 append。
 - **enterprise_agent_policy**：`load_enterprise_agent_policy()` 读 `enterprise.agent_action_policy`；subject 为 tool 名、`mcp:<tool>`、`git:push` 等 fnmatch；与确认门/allowlist 协同（`disable_session_allow` 可禁会话 sticky allow）。
@@ -730,6 +747,8 @@ Studio 只读路由：`register_run_replay_routes`（鉴权 + 嵌套 subagent_ru
 
 `apply_live_overrides`：磁盘 `SubAgentRunStore` 与同会话内存行合并；**不复活**已终态 run；live 行不够新则忽略。
 
+**SubAgentRunStore（store.py）增量**：`merge_detail_refs()` 合并 `detail_refs` 且不改 run 状态；`update_model()` 更新持久化 run 的 provider/model（WorkPanel 选模型）。
+
 ### AgentRuntime / meta / 预算
 
 - `agent_runtime.py`：接入 replay recorder、plan_mode 工具过滤、isolate 路径重写、用量/截断增强（本区间约 +780 行，细节以源码为准）。
@@ -738,3 +757,39 @@ Studio 只读路由：`register_run_replay_routes`（鉴权 + 嵌套 subagent_ru
 - `usage_metadata.py` / `usage_store.py`：继续归一化 cached/reasoning，并服务 `studio.usage_alive` 的截断窗口。
 - `command_sandbox.py`：沙箱计划/能力上报补强。
 - `group_router.py`：与 work_items / 图事件收敛继续对齐。
+
+---
+
+## 2026-11-14 增量（22d051f5 → cebdabd5）
+
+本区间约 +2173 行（`agenticx/runtime/`），延续桌面本地执行与企业 HTTP 对接；**不**改变 Go Enterprise Gateway 在仓库内的独立定位。
+
+### 结构化消歧（disambiguation.py）
+
+布尔 `ConfirmGate` 之外的开放确认协议：`DisambiguationMode`（`candidate_select` / `info_supplement` / `conflict_resolve`）、`DisambiguationRequest` / `DisambiguationResponse`、`DisambiguationFileStore` 多轮会话（默认 `~/.agenticx/.runtime/disambiguation`）、`apply_response_to_session()`。`DisambiguationGate` / `SyncDisambiguationGate` / `RecordingDisambiguationGate` 供测试与 Desktop transport 对接；根包 `__init__.py` 与 `clarify` 一并导出。
+
+### Studio SafetyLayer 主链路（studio_safety.py + harden_flags）
+
+`studio_safety_layer_enabled()` / `studio_safety_mode()`（默认 layer 开、`observe`）。`validate_input()` / `sanitize_output()` 接入 `agenticx.safety.layer.SafetyLayer` 四段管线；`bash_exec` 豁免 InputValidator（仍可对输出做清洗）。事件三路：`SafetyAuditLog`、`~/.agenticx/safety/events.jsonl`、`emit_action_audit(kind=safety_event)`；管线异常只打日志、不 raise。诊断：`layer_state()` / `latency_stats()` / `write_observation_report()`。
+
+### 企业托管 Agent 草稿与发布
+
+| 模块 | 职责 | 关键符号 |
+|------|------|----------|
+| `enterprise_agent_publish.py` | 本地 `AvatarConfig` → `agx.agent/v1` manifest，`sanitize_system_prompt()` 剥离 `${cred:}` / 密钥 / 本机路径 | `build_publish_manifest()`、`publish_avatar_draft()`、`EnterprisePublishError` |
+| `enterprise_agent_builder.py` | NL 侧列草稿、预览 diff、提交新版本（经桌面 publish API，不直接 publish） | `list_my_agents()`、`preview_manifest()`、`submit_draft()`、`synth_local_id()` |
+| `enterprise_agent_sync.py` | 目录拉取之外单条详情 | `enterprise_login_configured()`、`fetch_enterprise_agent_detail()`、`EnterpriseCatalogError` |
+
+`tool_search.BUILTIN_DEFER_ALLOWLIST` 纳入 `enterprise_agent_builder`，延迟加载时不掉工具名。
+
+### EnterpriseWorker MA 协议（enterprise_worker.py）
+
+`worker_protocol()` → `legacy`（原 SSE claim/execute）| `ma` | `dual`。`MAWorker` + `GatewayLLMFactory` + `_TrackedRunner(WorkItemRunner)`：claim 托管 work item，工作目录 `sessions_root()`，策略 `load_enterprise_agent_policy`。`ma_environment_mode=auto` 时 `list_eligible_environments()`（TTL 300s 缓存）；`add_interactive_environment()` 在 worker 未 enabled 时仍可短轮询（TTL 1800s）。`enterprise_login_settings` 仅需登录、不要求 `worker.enabled`。`status()` 扩展 `protocol` / `ma_work` / `interactive_environments` 等字段。
+
+### AgentRuntime harness 标记
+
+终答 `chat_history` / `FINAL` 事件默认 `metadata.harness="python-agent"`（外部 harness 可覆盖）。`regenerate_history=False` 且 caller 提供 `history_user_metadata.harness(_id)` 时，`restamp_tail_user_harness()` 改写末条 user 行并触发中途持久化，保证 UI 气泡随新 turn harness 一致。
+
+### 模块导出（增量）
+
+`studio_safety` 仍为子模块直引（`from agenticx.runtime import studio_safety`）；企业 builder/publish 经工具层暴露，未挂根 `__init__.__all__`。

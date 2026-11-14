@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "security-eval",
+  "generation": "0c3125ec35b242d9a474437d44ddaab6",
+  "mapping_revision": 1,
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:55036251743d5174a06049f41cbe9c753bfcca250e1dbf753c4142dfdae1b84a",
+  "summary_path": "conclusions/security_eval_module_conclusion.md",
+  "summary_sha256": "sha256:87c945b1bb445559ad3f122965e72d2d10ce07ffd48a72dcd27cdfcb7a85f1b9",
+  "updated_at": "2026-11-14T12:26:53.562825+00:00"
+}

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "retrieval",
-  "generation": "c7d3f9e23a414fd08648e8d50bc10186",
+  "generation": "16fd6c90500341cab496de71cab763e0",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:e6f6126ce5cb2774cd7cbab3d1072b06925e2966e19c67699c63a629fee9aad3",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:bb3492ab136db3984c6a5bcc14d9f5beb68d7c4721630db6009edc5a6e2dab32",
   "summary_path": "conclusions/retrieval_module_conclusion.md",
-  "summary_sha256": "sha256:b0dc99fa641cb18f8e75fa1b4a7f23fc4289dd8cac04b126cb3ce449120d76c9",
-  "updated_at": "2026-10-24T13:53:16.927780+00:00"
+  "summary_sha256": "sha256:22b01e4c31b673cddf427b7da0ab346b7fbb4cb7a3c19058e5e644a6b9950f0d",
+  "updated_at": "2026-11-14T12:24:34.486977+00:00"
 }
