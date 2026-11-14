@@ -114,7 +114,7 @@ data-sources = [
 ]
 # ── AGX Data Suite ClickHouse channel ──
 data-suite-ch = [
-    "clickhouse-connect>=0.7.0,<1",
+    "clickhouse-connect>=0.7.0,<2",
 ]
 # ── 额外 LLM 提供者 ──
 llm = [
