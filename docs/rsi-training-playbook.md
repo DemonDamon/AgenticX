@@ -6,8 +6,24 @@
 
 **配套资产**
 
-- 实验跟踪表（每个 run 一行，含指标与门控日志）：[AgenticX RSI 实验跟踪表](https://wv18cbjmgi0.feishu.cn/sheets/PF0cswwsUhMHUUtP70sc2dzwnFb)
-- 实验流程图：见本文档 §4.3 后的画板
+- 实验跟踪表（每个 run 一行，含指标与门控日志，数据回填的**唯一入口**）：[AgenticX RSI 实验跟踪表](https://wv18cbjmgi0.feishu.cn/sheets/PF0cswwsUhMHUUtP70sc2dzwnFb)
+- 实验流程图：见本文档 §4.4「训练主流程」画板
+
+### 给协作者：怎么用这份说明书
+
+说明书 + 实验跟踪表是一对，工作闭环：**读说明书 → 跑实验 → 数据填回表**。
+
+1. **开跑前**：通读本文档（重点 §0 一页看懂、§4.3 启动顺序、§9 复现命令）；到实验跟踪表把自己负责的 run 的 `status` 从 planned 改成 running，`owner` 填自己；
+2. **每轮晋升判定**：脚本自动写 `gate.json`，晋升与否只看 gate.json 的 `accepted` 字段——手工改表里的结论无效，且会被假晋升审计（`promotion_audit`）发现；
+3. **run 结束**：数据填回实验跟踪表（链接那张真表，不是任何快照副本）。各列取数来源：
+   - `heldout_pass` ← 评测 summary.json 的 pass_rate；
+   - `rsi_index` ← (final−initial)/(1−initial)；
+   - `cost_norm_index` ← rsi_index ÷ GPU-hours；
+   - `fpr` ← promotion_audit 输出的 AuditResult.fpr；
+   - `hack_rate` / `contamination` ← contamination.json 的 total_ratio；
+   - `adapter_path` ← runs/rsi-27b/adapters/\<run_id\>/；
+   - `tokens_per_task` ← 训练日志；
+   - `notes` 记录异常与是否触发止损线。
 
 ---
 
