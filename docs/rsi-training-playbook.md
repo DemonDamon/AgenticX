@@ -173,14 +173,18 @@ python3 scripts/rsi_preflight.py
 | `agenticx/learning/trajectory/replay_spans.py` | 选择性重放区间派生 |
 | `agenticx/trainer/adapters.py` | Adapter 注册表（租户命名空间） |
 | `agenticx/ops/rsi_slo.py` | SLO 指标与报告 |
+| `agenticx/rl/promotion_gate.py` | 晋升门控：全局 α 预算 + gate.json 账本 + 二值精确符号检验 |
+| `agenticx/rl/spr.py` | SPR 奖励层：strict/partial 分离，λ 0.5→0.1，harbor partial credit 提取 |
+| `agenticx/rl/contamination.py` | 污染率埋点：干预 token 占比的训练侧聚合 |
+| `agenticx/rl/promotion_audit.py` | 假晋升率审计：零假设置换检验（FPR vs 名义 α） |
+| `agenticx/learning/trajectory/length_probe.py` + `scripts/probe_task_lengths.py` | 长度探测：分层抽样 + 断点续跑 + calibration 格式回填 |
 
 ### 4.2 待完成（按优先级）
 
-1. **训练后端接入**：verl / AReaL / slime 三选一，打通「harbor rollout → TokenRollout → GRPO 更新 → adapter 热同步」；
-2. **门槛接进训练循环**：把 `wilcoxon_gate` + 全局 α 预算变成每轮晋升的强制关卡，判定写 `gate.json`；
-3. **SPR 奖励层**：strict success 与 bounded partial credit 分离，λ 从 0.5 线性降到 0.1；
-4. **污染率埋点**：`response_mask` + `generation_spans` 已具备，差一个训练侧聚合；
-5. **假晋升率审计**：置换检验，零假设下统计门控拒绝率。
+1. **训练后端接入**（唯一剩余项）：打通「harbor rollout → TokenRollout → GRPO 更新 → adapter 热同步」的 27B 全链路。四个纯逻辑件（门控/SPR/污染率/审计）已就位并有测试，剩下的是把它们接进 27B 训练循环——依赖后端选型决策（自研 GRPOTrainer 打底 vs 接 verl/AReaL/slime）与目标机 preflight 通过；
+2. **长度探测执行**：脚本就绪，需要在**目标训练机**上跑 200 题（跨架构墙钟不可比，本机 qemu 容器测出的值会污染分层阈值）。
+
+> 前置就绪判定：`python3 -m pytest tests/rl/test_promotion_gate.py tests/rl/test_spr.py tests/rl/test_contamination.py tests/rl/test_promotion_audit.py tests/trajectory/test_length_probe.py -q` → 49 通过。
 
 ### 4.3 启动顺序
 
@@ -269,10 +273,10 @@ $\kappa_e=\kappa_l=2$ 为默认。第一项惩罚工具调用错误，第二项�
 ### 7.3 SPR 部分信用（Success-Prioritized Reward）
 
 $$
-R_i = (1-\lambda_t)\,S_i + \lambda_t\, p_i,\qquad \lambda_t:\ 0.5 \rightarrow 0.1
+R_i = S_i + (1-S_i)\,\lambda_t\, p_i,\qquad \lambda_t:\ 0.5 \rightarrow 0.1
 $$
 
-$S_i\in\{0,1\}$ 是严格通过，$p_i\in[0,1]$ 是 verifier 检查点完成比例。前段给部分信用保探索，后段压低迫使收敛到严格通过。Terminal-RSI 实测该机制把失败轨迹的奖励占比从 50.09% 压到 28.72%。
+$S_i\in\{0,1\}$ 是严格通过，$p_i\in[0,1]$ 是 verifier 检查点完成比例。严格通过钉死满分、部分信用只给失败轨迹——这是 Terminal-RSI 线性混合 $R=(1-\lambda)S+\lambda p$ 的保守变体：终判已过但个别子检查未走全时，线性混合会罚掉已验证的成功，与 success-prioritized 语义矛盾；失败轨迹上两者等价（都剩 $\lambda p$）。前段给部分信用保探索，后段压低迫使收敛到严格通过。Terminal-RSI 实测该机制把失败轨迹的奖励占比从 50.09% 压到 28.72%。实现在 `agenticx/rl/spr.py`。
 
 ### 7.4 RSI-Index
 
