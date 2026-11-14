@@ -1,0 +1,73 @@
+# RSI 训练配置模板：27B + LoRA + GRPO
+# 用途：8×B300 上的闭环 RSI 主实验（臂 W / W+T / W+T+H / W+T+H+G）
+# 说明文档：docs/rsi-training-playbook（飞书同步版为唯一阅读入口）
+
+meta:
+  name: rsi-27b-lora
+  base_model: Qwen/Qwen3.8-27B          # 与 Terminal-RSI 同基座，便于 apples-to-apples
+  reference: "Terminal-RSI arXiv:2610.22192"
+  branch: feat/rsi-data-flywheel
+
+compute:
+  gpu_type: B300                        # 288GB HBM3e / 卡
+  gpus_total: 8
+  topology:
+    rollout_gpus: 6                     # vLLM/SGLang，KV 池优先
+    train_gpus: 2                       # LoRA + 梯度检查点
+  rollout:
+    engine: vllm
+    tensor_parallel: 3
+    replicas: 2
+    dtype: bfloat16
+    max_model_len: 32768                # 硬上限，超长走摘要/截断
+  train:
+    backend: fsdp                       # LoRA 下 2 卡足够；全参再切 ZeRO-3
+    micro_batch: 1
+    grad_accum: 8
+    gradient_checkpointing: true
+
+lora:
+  rank: 64
+  alpha: 128
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  # 每轮只同步 adapter（MB 级），不做全量权重重载
+
+algorithm:
+  name: grpo
+  group_size: 8                         # 同任务 8 采样做组内归一
+  clip_ratio: 0.2
+  kl_coef: 0.0                          # GRPO 不用 ref model，省一整份 27B
+  max_turns: 60
+  episode_timeout_sec: 1800             # 30 分钟硬截断，长尾记 0
+  arvo_penalty:
+    tool_error_kappa: 2.0
+    group_length_kappa: 2.0
+
+reward:
+  verifier: binary                      # 全池 executable/rule，零 LLM-judge
+  partial_credit: spr                   # Success-Prioritized Reward（Terminal-RSI）
+  spr_start_ratio: 0.5                  # 前 50% 训练步保留部分信用
+  spr_end_ratio: 0.1                    # 后段压到 0.1，迫使收敛到严格通过
+
+integrity:                              # 臂 W+T+H+G 才打开
+  private_split_prompt: true
+  hack_flag_detection: true
+  global_alpha_budget:                # REUSE 的 w_t · v_p 分配
+    total_alpha: 0.10
+    decay: 0.9
+  trajectory_purity:
+    mask_hint_segments: true
+    mask_replay_segments: true
+    track_contamination_rate: true
+
+data:
+  manifest: datasets/rsi/manifest.json
+  train_tiers: [short, medium]          # long 只进评测，控 rollout 墙钟
+  eval: heldout                          # 12 题 TB4.0，代码守卫 assert_trainable_task
+
+logging:
+  out_dir: runs/rsi-27b
+  metrics: [pass_rate, rsi_index, hack_rate, contamination_rate,
+            tokens_per_task, gpu_hours_per_pt]
+  gate: gate.json                        # 每次晋升决策落盘，含 α 扣减
