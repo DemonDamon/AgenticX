@@ -89,7 +89,7 @@ desktop-runtime = [
     "python-docx>=0.8.11,<2",
     "python-pptx>=0.6.21,<1",
     "docx2txt>=0.8,<1",
-    "numpy>=1.24.0,<2",
+    "numpy>=1.24.0,<3",
     # 知识库默认向量后端：agenticx.studio.kb.runtime._ChromaBackend 直接
     # `import chromadb`，缺失时 UI 上抛 "chromadb is required..." 而打包
     # 后的桌面端用户没法 pip install 进 bundle。
@@ -128,7 +128,7 @@ memory = [
     "qdrant-client>=1.10.0,<2",
     "redis>=5.0.0,<6",
     "pymilvus>=2.4.0,<3",
-    "numpy>=1.24.0,<2",
+    "numpy>=1.24.0,<3",
 ]
 # ── Graphiti temporal memory graph (Near memory graph panel) ──
 graphiti = [
@@ -167,7 +167,7 @@ graph = [
 # ── 数据分析 / 可视化 ──
 data = [
     "pandas>=2.0.0,<3",
-    "numpy>=1.24.0,<2",
+    "numpy>=1.24.0,<3",
     "scikit-learn>=1.3.0,<2",
     "scipy>=1.11.0,<2",
     "matplotlib>=3.7.0,<4",
