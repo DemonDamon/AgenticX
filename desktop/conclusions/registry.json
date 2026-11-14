@@ -42,7 +42,21 @@
     "setup.py",
     "pyproject.toml",
     "requirements.txt",
-    "enterprise"
+    "enterprise",
+    ".gitleaks.toml",
+    "SECURITY.md",
+    "cases",
+    "connector-runtime",
+    "diagrams",
+    "extension",
+    "gateway_config.dev.example.yaml",
+    "mobile",
+    "paper",
+    "plans",
+    "reports",
+    "requirements-docs.txt",
+    "results",
+    "wiki"
   ],
   "modules": [
     {
