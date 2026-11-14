@@ -177,6 +177,21 @@ python3 scripts/rsi_preflight.py
 
 ## 4. 代码工程准备
 
+### 4.0 B300 服务器初始化清单（协作者从这里开始）
+
+| 步骤 | 命令/位置 | 说明 |
+| --- | --- | --- |
+| ① 拉代码 | `git clone` 后 `git switch feat/rsi-data-flywheel` | 任务池清单（task_pool.json 3698 题）、拆分（task_split.json）、manifest 都随仓库分发，**不需要先下原始数据集** |
+| ② 装环境 | Python 3.11+、torch、vLLM、Docker | vLLM 版本必须支持 B300（sm_103 / Blackwell Ultra），`rsi_preflight.py` 会查 |
+| ③ 拉权重 | Qwen3.8-27B（HF），~54GB BF16 | 直连不通用 `HF_ENDPOINT=https://hf-mirror.com`（镜像已验证可达） |
+| ④ Docker 镜像源 | `hub.docker.com/xiaomimimo/mimo-v2.6-rl-oss` | 无需手动预拉：harbor 按题自动拉对应镜像，服务器能连 Docker Hub 即可 |
+| ⑤ 自检 | `python3 scripts/rsi_preflight.py` | GPU/显存/vllm/数据交叉/磁盘五项全 PASS 才继续 |
+| ⑥ 长度探测 | `python3 scripts/probe_task_lengths.py ...` | 先 `--limit 10` 验管线，再 200 题（方案 A：本机 27B） |
+| ⑦ 重建分层 | `python3 scripts/build_rsi_manifest.py` | 探测结果自动聚合，short 层应到 60–100 题 |
+| ⑧ 冒烟 → 开训 | 见 §4.3 | 冒烟 5 步通过才放四臂 |
+
+**数据从哪来（溯源）**：原始数据 = MiMo RL 开源环境（小米，Apache-2.0；HF 数据集 + 上述 Docker Hub 镜像 + 训练代码 github.com/XiaomiMiMo/verl）。数据工程管线：`build_task_pool.py`（parquet→3698 题清单）→ `calibrate_task_pool.py`（校准+实测墙钟）→ `probe_task_lengths.py`（200 题探测）→ `build_rsi_manifest.py`（训练/评测切分）。**注意**：TB4.0 不是训练集——它只贡献 66 题拆成 54 训练种子 / 12 held-out 考试卷；主力训练池是 MiMo 3698 题，与考试卷不同源（考试集污染会直接摧毁论文的可信晋升主张）。另：早期 12 题墙钟来自 DS Flash 校准，与 27B 分布不完全一致，方案 A 探测数据会逐步替换该偏差。
+
 ### 4.1 已完成
 
 | 文件 | 作用 |
