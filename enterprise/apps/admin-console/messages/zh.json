@@ -1074,6 +1074,8 @@
         "deniedTools": "禁止执行",
         "alwaysAskTools": "必须确认",
         "disableSessionAllow": "禁止员工使用『本会话不再询问』",
+        "traceContent": "员工运行记录附带对话摘录",
+        "traceContentHint": "开启后回传提问、回复与推理各前 500 字；关闭时只回传耗时、Token、工具名与状态。",
         "onePerLine": "每行一个，支持 * 通配",
         "saved": "已保存",
         "mcp": {
