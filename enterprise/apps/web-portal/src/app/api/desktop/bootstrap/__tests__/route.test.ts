@@ -101,6 +101,7 @@ describe("GET /api/desktop/bootstrap", () => {
       deniedTools: ["git:push"],
       alwaysAskTools: ["mcp:send_*"],
       disableSessionAllow: true,
+      traceContent: true,
     });
 
     const { GET } = await import("../route");
@@ -111,6 +112,7 @@ describe("GET /api/desktop/bootstrap", () => {
       deniedTools: ["git:push"],
       alwaysAskTools: ["mcp:send_*"],
       disableSessionAllow: true,
+      traceContent: true,
     });
     expect(loadDesktopAgentPolicy).toHaveBeenCalledWith("t1");
   });
@@ -137,6 +139,7 @@ describe("GET /api/desktop/bootstrap", () => {
       deniedTools: [],
       alwaysAskTools: [],
       disableSessionAllow: false,
+      traceContent: false,
     });
     expect(json.data.models).toEqual([{ id: "local/demo" }]);
   });

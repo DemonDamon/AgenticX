@@ -12,12 +12,15 @@ export type DesktopAgentActionPolicy = {
   alwaysAskTools: string[];
   /** When true, "don't ask again this session" has no effect. */
   disableSessionAllow: boolean;
+  /** When true, employee run traces may include user, reply, and reasoning excerpts. Default false. */
+  traceContent: boolean;
 };
 
 export const DEFAULT_DESKTOP_AGENT_ACTION_POLICY: DesktopAgentActionPolicy = {
   deniedTools: [],
   alwaysAskTools: [],
   disableSessionAllow: false,
+  traceContent: false,
 };
 
 const MAX_PATTERNS = 100;
@@ -48,5 +51,6 @@ export function normalizeDesktopAgentActionPolicy(raw: unknown): DesktopAgentAct
     deniedTools: normalizePatterns(source.deniedTools),
     alwaysAskTools: normalizePatterns(source.alwaysAskTools),
     disableSessionAllow: source.disableSessionAllow === true,
+    traceContent: source.traceContent === true,
   };
 }

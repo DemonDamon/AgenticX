@@ -1074,6 +1074,8 @@
         "deniedTools": "Deny execution",
         "alwaysAskTools": "Require confirmation",
         "disableSessionAllow": "Disable “don’t ask again this session”",
+        "traceContent": "Include conversation excerpts in employee run traces",
+        "traceContentHint": "When on, the first 500 characters of the prompt, reply, and reasoning are included. When off, only timing, tokens, tool names, and status are sent.",
         "onePerLine": "One pattern per line. * is a wildcard",
         "saved": "Saved",
         "mcp": {
