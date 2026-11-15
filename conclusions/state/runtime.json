@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "runtime",
-  "generation": "9a4cee446e9443558a3382fbac7eef8b",
+  "generation": "f21da545c04248f49192084d64c094ea",
   "mapping_revision": 1,
-  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
-  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
-  "source_fingerprint": "sha256:c2f3fcb768fd907cf1bad7d6a3f830bcb3b28825791cd4ee1d5300d47abf0f68",
+  "baseline_commit": "d01aba3a86520a9a55c5ed355207e237185380ec",
+  "baseline_tree": "dce800847dfe08fc4bc1299f1de94f47a4f4af5e",
+  "source_fingerprint": "sha256:37ffb9015c8b44546c54628795d9917917c2a98ecb36893aa6a1ca13c19dd0e7",
   "summary_path": "conclusions/runtime_module_conclusion.md",
-  "summary_sha256": "sha256:a1028b8d765a3309e83e6ba71c3e3539f606aa1d82f1088d94b7609644a722f7",
-  "updated_at": "2026-11-14T12:26:52.494598+00:00"
+  "summary_sha256": "sha256:70137ba222a0c4b6f995cdb59b603f6aa39fec26f2d9902648c4b4db8abc84ad",
+  "updated_at": "2026-11-15T15:45:46.622575+00:00"
 }

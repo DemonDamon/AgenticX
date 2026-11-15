@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "config",
-  "generation": "236647e099d74aa6881565f2813b27a4",
+  "generation": "2e650a412bb94a37b561c01e9d8bd040",
   "mapping_revision": 1,
-  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
-  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
-  "source_fingerprint": "sha256:dff0b73b07f4419ef25357b8cc00478f54c1383131fb262414e5ed5ec700e534",
+  "baseline_commit": "d01aba3a86520a9a55c5ed355207e237185380ec",
+  "baseline_tree": "dce800847dfe08fc4bc1299f1de94f47a4f4af5e",
+  "source_fingerprint": "sha256:a8e7b40238da5f10ff6dc8c9f1b657a5cb7ab08552ac3158abfc55adbb5a1b1e",
   "summary_path": "enterprise/conclusions/packages/config_conclusion.md",
-  "summary_sha256": "sha256:f61041c8008cab5cbc6be2b5e2e7b086ed755bd149036074caa2862bc63b26db",
-  "updated_at": "2026-11-14T12:26:55.533000+00:00"
+  "summary_sha256": "sha256:61d37f61cf1da4ff93d29b665306b8188c6d717e0aa1a2b4b432eea9b8afaed6",
+  "updated_at": "2026-11-15T15:45:48.029467+00:00"
 }

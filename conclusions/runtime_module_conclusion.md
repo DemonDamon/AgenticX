@@ -483,7 +483,7 @@ WorkGraph 运行时：把 Workforce 规划产物编译成 DAG，按依赖分波�
 | `AGX_STUDIO_SAFETY_LAYER` | 1 | Studio 主链路 SafetyLayer 总开关（`runtime.studio_safety_layer`） |
 | `AGX_STUDIO_SAFETY_MODE` | observe | `observe` 只记不改 / `enforce` 拦截输入并改写输出（`runtime.studio_safety_mode`） |
 
-企业桌面相关（非 env，见 `config.yaml`）：`enterprise.enabled` + `enterprise.token` + `enterprise.base_url` 为 worker/trace/audit 前置；`enterprise.worker.enabled` 控制本地 worker；`enterprise.worker.protocol` 为 `legacy` / `ma` / `dual`（托管 MA 任务 claim）；`enterprise.worker.ma_environment_ids` / `ma_environment_mode`（`auto` 发现环境）/ `ma_base_url` / `gateway_url` 驱动 `MAWorker`；`enterprise.trace_upload` 显式 `false` 才关 trace；`enterprise.agent_action_policy` 映射为 `EnterpriseAgentPolicy`（`denied_tools` / `always_ask_tools` / `disable_session_allow`）。
+企业桌面相关（非 env，见 `config.yaml`）：`enterprise.enabled` + `enterprise.token` + `enterprise.base_url` 为 worker/trace/audit 前置；`enterprise.worker.enabled` 控制本地 worker；`enterprise.worker.protocol` 为 `legacy` / `ma` / `dual`（托管 MA 任务 claim）；`enterprise.worker.ma_environment_ids` / `ma_environment_mode`（`auto` 发现环境）/ `ma_base_url` / `gateway_url` 驱动 `MAWorker`；`enterprise.trace_upload` 显式 `false` 才关 trace；`enterprise.agent_action_policy` 映射为 `EnterpriseAgentPolicy`（`denied_tools` / `always_ask_tools` / `disable_session_allow`）；其中 `trace_content` 为 `true` 时 trace 才附带对话摘录。
 
 Jev（TypeSafe）其余参数在 `config.yaml` 的 `typesafe:` 节（由 `agenticx/llms/typesafe_config.py` 解析）：`enabled`（默认关）、`group_routing`（默认开）、`kb_auto`（默认关）、`model`（默认 `jev-latest`）、`base_url`（默认 `https://api.typesafe.ai`）、`timeout_sec`（默认 8）、`soft_timeout_sec`（默认 2）、`act_above`（0.8）、`review_above`（0.5）。
 
@@ -675,7 +675,7 @@ flowchart LR
 
 - **EnterpriseWorker**（`enterprise_worker.py`）：`worker_enabled()`；claim/heartbeat/complete 企业任务并在本地 avatar session 跑 `AgentRuntime`；设备 id 落 `~/.agenticx/enterprise_worker/`。Studio：`register_enterprise_worker_routes` → `GET/PUT /api/enterprise-worker`、`GET /api/enterprise-agents`（`fetch_published_agents`）。**2026-11-14**：`worker_protocol` 可切换 MA/dual 托管 work item（见文末增量节）。
 - **enterprise_agent_sync**：`sync_local_avatar` → `POST {base}/api/desktop/agents/register`；`fetch_published_agents` → `GET …/agents`（best-effort，未登录 no-op）；`fetch_enterprise_agent_detail` 单条详情（404→`None`，其它失败→`EnterpriseCatalogError`）。
-- **enterprise_trace**：`replay_ledger.recorder` 在 run 完成时 `enqueue_completed_run`；outbox `~/.agenticx/enterprise_trace/outbox.jsonl`；上传 spans（无 tool args/result 正文，用户/助手 preview ≤500 字）；`trace_upload_enabled()` 需企业登录且未显式关 `enterprise.trace_upload`。
+- **enterprise_trace**：`replay_ledger.recorder` 在 run 完成时 `enqueue_completed_run`；outbox `~/.agenticx/enterprise_trace/outbox.jsonl`；上传 spans（无 tool args/result 正文）；`trace_upload_enabled()` 需企业登录且未显式关 `enterprise.trace_upload`。摘录字段 `_CONTENT_KEYS`（`user_text` / `reply` / `thought`，各 ≤500 字）仅在 `trace_content_allowed()`（读 `enterprise.agent_action_policy.trace_content`）为真时保留，否则入队前由 `_redact_content` 清空，`error_message` 不受影响。每行 outbox 带 `_acct`（门户地址 + 小写邮箱的 sha256 前 16 位，`_current_account_key()`）；`flush_outbox` 丢弃与当前账号不符或无标记的旧行，批次间账号变化即停止，上传前剥离 `_acct`。
 - **action_audit**：`emit_action_audit()`（`effect_guard` / 工具路径调用）；outbox `~/.agenticx/action_audit/outbox.jsonl`，20MB 上限丢弃；`audit_enabled()` 同企业 token 门控。Desktop/Electron 负责 drain 上云，runtime 只 append。
 - **enterprise_agent_policy**：`load_enterprise_agent_policy()` 读 `enterprise.agent_action_policy`；subject 为 tool 名、`mcp:<tool>`、`git:push` 等 fnmatch；与确认门/allowlist 协同（`disable_session_allow` 可禁会话 sticky allow）。
 

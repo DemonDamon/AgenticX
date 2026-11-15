@@ -53,7 +53,7 @@ summary_path: desktop/conclusions/desktop_conclusion.md
 - `desktop/electron/collab-cache.ts` + `collab-outbox-flusher.ts` — 项目/房间消息本机缓存与离线 outbox；`startOutboxFlusher`
 - `desktop/electron/canvas-case.ts` + `zip-store.ts` — 画布视图包提交/拉取企业案例库（`writeStoreZip` / `submitEnterpriseCase`）
 - `desktop/electron/action-audit-uploader.ts` — `startActionAuditUploader`：把 `<AGX_HOME>/action_audit/outbox.jsonl` 刷到 `{base_url}/api/desktop/action-audit`
-- `desktop/electron/enterprise-agent-policy.ts` — `normalizeAgentActionPolicy`：企业下发的 `denied_tools` / `always_ask_tools` / `disable_session_allow` 写入本地 config
+- `desktop/electron/enterprise-agent-policy.ts` — `normalizeAgentActionPolicy`：企业下发的 `denied_tools` / `always_ask_tools` / `disable_session_allow` / `trace_content` 写入本地 config
 - `desktop/electron/automation-run-health.ts` — `applyRunOutcome`：连续失败达 `AUTO_PAUSE_FAILURE_THRESHOLD`（3）自动暂停；启动时 `markInterruptedOnStartup`
 - `desktop/electron/desktop-notify.ts` — `deliverTaskCompleteNotification`；未聚焦时走系统通知（macOS 可走 osascript）
 - `desktop/electron/gateway-adapter-config.ts` — `mergeGatewayAdapters`：钉钉 / Slack / Telegram / QQ 写入 `config.yaml` 的 `gateway.adapters`
@@ -174,7 +174,8 @@ summary_path: desktop/conclusions/desktop_conclusion.md
 ### 审批、策略与审计
 
 - `ApprovalInbox.tsx` 的 `ApprovalInboxButton` 挂在 `Topbar` 与 `SidebarAccountBar`：普通会话轮询 `GET /api/approvals/pending`、确认走 `POST /api/confirm`；托管会话审批来自 `store.managedApprovals`，决策写回 MA `user.tool_confirmation`。
-- 企业动作策略在设备登录同步后经 `normalizeAgentActionPolicy` 写入 `config.yaml` 的 `enterprise.agent_action_policy`。
+- 企业动作策略在设备登录同步后经 `normalizeAgentActionPolicy` 写入 `config.yaml` 的 `enterprise.agent_action_policy`。同步只在登录成功与 Studio 就绪（且主窗口已存在）时触发，渲染进程不主动调用 `enterpriseSyncCapabilities`。
+- 运行记录回流：`AccountTab` 的企业账号卡片展示状态与开关，文案三态为已暂停 / 仅指标 / 含摘录（由 `load-enterprise-account` 返回的 `traceUpload` 与 `traceContent` 决定）；开关经 IPC `set-enterprise-trace-upload` 写 `enterprise.trace_upload`（缺省视为开启）。登录后卡片在同步完成前读取账号状态，摘录文案要重新打开设置才刷新。
 - 动作审计：Python 追加 outbox，主进程每 60s `flushActionAuditOnce`（批大小 200）。`enterprise.enabled` 且 token / `base_url` 齐全才上传；HTTP 400 丢弃该批，401/403 与传输失败留在磁盘。
 - 定时任务健康：`lastRunStatus` 含 `success` | `error` | `interrupted`；需用户处理的错误文案子串见 `NEEDS_USER_ACTION_MARKERS`（单次审批超时不在表内，走连续失败阈值）。
 
@@ -204,7 +205,8 @@ summary_path: desktop/conclusions/desktop_conclusion.md
 | `<AGX_HOME>/mcp.json`、`hooks/`、`connectors/`、`skills/` | 设置与连接器相关路径 |
 | `<AGX_HOME>/browser_bridge.{port,token}`、`browser_bridge_nm.sock` | 浏览器桥 HTTP 发现文件与 Native Messaging socket |
 | `config.yaml` → `gateway.adapters.{dingtalk,slack,telegram,qqbot}` | 渠道开关与密钥（`GatewayAdapterForm`） |
-| `config.yaml` → `enterprise.agent_action_policy` | `denied_tools` / `always_ask_tools` / `disable_session_allow` |
+| `config.yaml` → `enterprise.agent_action_policy` | `denied_tools` / `always_ask_tools` / `disable_session_allow` / `trace_content`（企业是否允许 trace 附带对话摘录） |
+| `config.yaml` → `enterprise.trace_upload` | 员工侧运行记录回流开关；仅显式 `false` 时暂停 |
 | `agx-composer-drafts-v1` | 按后端 scope 的未发送草稿；图片字节在 IndexedDB |
 | `agx-preferred-harness`、`agx-ma-last-session-v1` | 新会话默认 Harness；企业智能体最近会话映射 |
 | `config.yaml` → `enterprise.worker.ma_base_url` | MA 服务优先地址；缺省回退 `enterprise.base_url`，PAT 必须以 `agx-pat-` 开头 |

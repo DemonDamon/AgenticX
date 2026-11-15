@@ -301,7 +301,7 @@ apps/web-portal/
 
 - **协作房间**：`/api/rooms/**`、`/rooms` 页、`components/rooms/*`、`lib/collab-room/*`（PG/MySQL）。桌面经 `/api/desktop/rooms/**` 同源。
 - **桌面设备登录**：`/api/desktop/auth/device/{init,poll,approve,cancel}` + `/auth/desktop`；`desktop-device-auth.ts`、`desktop-token-policy.ts`。
-- **桌面 bootstrap / capabilities**：`/api/desktop/bootstrap`、`/api/desktop/capabilities`；`capability-packs-reader` / `capability-opt-outs-store`。
+- **桌面 bootstrap / capabilities**：`/api/desktop/bootstrap`、`/api/desktop/capabilities`；`capability-packs-reader` / `capability-opt-outs-store`。bootstrap 经 `desktop-agent-policy-reader` 下发 `policy.agentActions`（含 `traceContent`，读取失败或缺省为 `false`）。
 - **Deep Research**：`src/lib/deep-research/*` 编排器 + `/api/chat/deep-research/runs/**`（stream/export/resume）。
 - **Web Search**：`src/lib/web-search/*` 工具循环、page-fetch、providers、tenant-config；`/api/me/web-search`。
 - **附件 / 产物**：parse、original-store、`/api/chat/attachments/**`、`/api/chat/artifacts/**`、会话 artifacts、batch-delete。
@@ -320,5 +320,5 @@ apps/web-portal/
 - **模型默认**：`/api/me/models` 返回 `deptDefaultModelId`；`admin-providers-reader` / `dept-default-model.ts`。
 - **协作项目 UI**：`/projects`、`/projects/[projectId]`、`components/projects/*`、REST `/api/projects*`；Desktop 镜像 `/api/desktop/projects*`（成员、直聊 room）。
 - **Collab Agent**：`collab-room/agent-reply.ts` — 有在线 Desktop worker 则 `enqueueAgentTask`，否则 `runCloudAgentLoop`（MCP 经 `gateway-mcp-client`）。
-- **Desktop 扩展**：worker claim/complete/fail + heartbeat；`agent-traces`、`action-audit`；目录 `/api/desktop/directory/users`；房间 merge/sub-rooms/summarize；agents register 列表。
+- **Desktop 扩展**：worker claim/complete/fail + heartbeat；`agent-traces`（入库时按租户当前 `traceContent` 策略决定是否保留 metadata 中的 `user_text` / `reply` / `thought`，策略读取失败按不保留处理，旧客户端上传的摘录同样过滤）、`action-audit`；目录 `/api/desktop/directory/users`；房间 merge/sub-rooms/summarize；agents register 列表。
 - **品牌资源**：`public/favicon.ico`、`near-logo.png`、`near-mark.png`。

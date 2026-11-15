@@ -88,9 +88,9 @@ packages/config/
 
 ### desktop-agent-action-policy.ts
 
-- 类型 `DesktopAgentActionPolicy`：`deniedTools`、`alwaysAskTools`（fnmatch 语义匹配工具名 / `mcp:<tool>` / `git:push`，大小写不敏感）、`disableSessionAllow`。
-- 默认 `DEFAULT_DESKTOP_AGENT_ACTION_POLICY`：两列表均为 `[]`，`disableSessionAllow: false`。
-- `normalizeDesktopAgentActionPolicy(raw)`：非 object 回退默认；每条 pattern 须匹配 `^[A-Za-z0-9_:*./-]{1,128}$`，trim 去重，每列表最多 **100** 条；`disableSessionAllow` 仅 **`=== true`** 生效。
+- 类型 `DesktopAgentActionPolicy`：`deniedTools`、`alwaysAskTools`（fnmatch 语义匹配工具名 / `mcp:<tool>` / `git:push`，大小写不敏感）、`disableSessionAllow`、`traceContent`（是否允许 Desktop trace 附带对话摘录）。
+- 默认 `DEFAULT_DESKTOP_AGENT_ACTION_POLICY`：两列表均为 `[]`，`disableSessionAllow: false`，`traceContent: false`。
+- `normalizeDesktopAgentActionPolicy(raw)`：非 object 回退默认；每条 pattern 须匹配 `^[A-Za-z0-9_:*./-]{1,128}$`，trim 去重，每列表最多 **100** 条；`disableSessionAllow` 与 `traceContent` 仅 **`=== true`** 生效。
 
 ### feature-usage-limits.ts
 

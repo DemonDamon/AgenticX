@@ -145,7 +145,7 @@ admin-console 是 gateway 运行时配置的**唯一写入源**，热加载有�
 - Agents：`/api/admin/agents` + `/admin/agents` 管理租户 Agent 实体（iam-core）
 - 模型服务：provider 注册、API key 信封加密、per-model 开关、部门默认模型（`dept-default-model`）、上游模型拉取
 - Gateway channel：key pool、probe、health；**Connectors**：OpenAPI spec 导入与 connection CRUD（`gateway-connectors-store`）
-- MCP：server 托管 + OpenAPI introspect + stats；能力页 `/admin/capabilities` 含 packs / skills / mcp / **桌面 Agent 策略**（`desktop-agent-policy-store` + `DesktopAgentPolicyPanel`）
+- MCP：server 托管 + OpenAPI introspect + stats；能力页 `/admin/capabilities` 含 packs / skills / mcp / **桌面 Agent 策略**（`desktop-agent-policy-store` + `DesktopAgentPolicyPanel`；含「附带对话摘录」开关 `traceContent`，默认关闭，PG / MySQL 均存于策略 JSON 列，无单独迁移）
 - 内容与交付：`/api/admin/projects`（可见域过滤）、`/api/admin/cases` 列表与状态 transition（依赖 `enterprise_cases` 表迁移）
 - 观测：`/api/dashboard/runtime` + `observation-center` 聚合 trace/会话指标；`/ops/logs` 统一入口
 - API Token / Session Grant：PAT 生命周期 + 吊销 snapshot、短期临时授权
