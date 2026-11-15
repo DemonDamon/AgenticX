@@ -1160,6 +1160,13 @@ declare global {
         email?: string;
         displayName?: string;
         portalUrl?: string;
+        traceUpload?: boolean;
+        traceContent?: boolean;
+      }>;
+      setEnterpriseTraceUpload: (payload: { enabled: boolean }) => Promise<{
+        ok: boolean;
+        traceUpload?: boolean;
+        error?: string;
       }>;
       enterpriseLoginStart: (payload: { portalUrl?: string }) => Promise<{
         ok: boolean;

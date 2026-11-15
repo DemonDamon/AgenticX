@@ -1215,6 +1215,14 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       email?: string;
       displayName?: string;
       portalUrl?: string;
+      traceUpload?: boolean;
+      traceContent?: boolean;
+    }>,
+  setEnterpriseTraceUpload: async (payload: { enabled: boolean }) =>
+    ipcRenderer.invoke("set-enterprise-trace-upload", payload) as Promise<{
+      ok: boolean;
+      traceUpload?: boolean;
+      error?: string;
     }>,
   enterpriseLoginStart: async (payload: { portalUrl?: string }) =>
     ipcRenderer.invoke("enterprise-login-start", payload) as Promise<{

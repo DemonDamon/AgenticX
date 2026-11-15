@@ -468,6 +468,8 @@ type AgxConfig = {
     /** 仅用于设置页展示当前登录者，非鉴权依据。 */
     user_email?: string;
     user_display_name?: string;
+    /** 员工本人对运行记录回流的开关；缺省视为开启，仅显式 false 暂停。 */
+    trace_upload?: boolean;
   };
   /** Near 官网 / Supabase 账号（桌面端轮询写入，勿在日志中打印 token） */
   agx_account?: {
@@ -9173,6 +9175,8 @@ function registerIpc(): void {
       email: ent?.user_email ?? "",
       displayName: ent?.user_display_name ?? "",
       portalUrl: normalizePortalBase(ent?.base_url || ent?.default_portal_url || ""),
+      traceUpload: ent?.trace_upload !== false,
+      traceContent: normalizeAgentActionPolicy(ent?.agent_action_policy).trace_content,
     };
   });
 
@@ -9297,6 +9301,14 @@ function registerIpc(): void {
       portalUrl: normalizePortalBase(cfg.enterprise?.default_portal_url ?? ""),
     });
     return { ok: true };
+  });
+
+  ipcMain.handle("set-enterprise-trace-upload", async (_event, payload?: { enabled?: unknown }) => {
+    if (typeof payload?.enabled !== "boolean") return { ok: false, error: "invalid-payload" };
+    const cfg = loadAgxConfig();
+    cfg.enterprise = { ...(cfg.enterprise ?? {}), trace_upload: payload.enabled };
+    saveAgxConfig(cfg);
+    return { ok: true, traceUpload: payload.enabled };
   });
 
   registerManagedSessionIpc();
