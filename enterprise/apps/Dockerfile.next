@@ -23,7 +23,9 @@ COPY apps ./apps
 COPY features ./features
 COPY packages ./packages
 COPY plugins ./plugins
-RUN pnpm install --frozen-lockfile
+# pnpm-lock.yaml 由各环境本地生成且不入库（见 enterprise/.gitignore），
+# --frozen-lockfile 会让镜像构建在干净 clone 上必然失败。
+RUN pnpm install --no-frozen-lockfile
 
 FROM deps AS build
 ARG APP_NAME

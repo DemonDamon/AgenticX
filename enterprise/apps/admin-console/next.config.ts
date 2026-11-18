@@ -9,6 +9,8 @@ const navPrefetchEnabled =
   process.env.npm_lifecycle_event !== "dev:webpack";
 
 const config: NextConfig = {
+  // Dockerfile.next 只拷贝 .next/standalone；缺这项会打出空镜像
+  output: "standalone",
   // Dependabot/lock refresh left eslint-config-next peers incomplete; don't block production compile.
   eslint: { ignoreDuringBuilds: true },
 
