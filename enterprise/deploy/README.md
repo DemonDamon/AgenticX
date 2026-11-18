@@ -26,6 +26,24 @@ docker compose -f prod.yml --profile postgresql up -d
 
 （`prod.yml` 会通过 `${ADMIN_CONSOLE_LOGIN_PASSWORD?...}` / `${DATABASE_URL?...}` 强制要求相关变量已导出；内置 Postgres 需加 `--profile postgresql`。）
 
+### 容器部署的两个坑（每套环境都要确认）
+
+1. **web-portal 调网关不能用 `127.0.0.1`。** `127.0.0.1` 在容器内指向容器自己，网关根本不在那儿。`prod.yml` 已默认 `GATEWAY_COMPLETIONS_URL=http://gateway-a:8088/v1/chat/completions`；网关不在同一 compose 网络时，改成实际可达的内网地址。缺失时聊天会报 `Gateway 不可用：connect http://127.0.0.1:8088/v1/chat/completions: fetch failed`。
+2. **`NEXT_PUBLIC_*` 是构建期内联，运行期改环境变量不生效。** 生产构建必须按实际对外地址传参，否则前端会回落到 `127.0.0.1` / `localhost`：
+
+```bash
+docker build -f apps/Dockerfile.next \
+  --build-arg APP_NAME=admin-console \
+  --build-arg APP_PACKAGE=@agenticx/app-admin-console \
+  --build-arg APP_PORT=3001 \
+  --build-arg NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL=https://<网关对外域名> \
+  -t <registry>/enterprise-admin-console:<tag> .
+```
+
+`NEXT_PUBLIC_ADMIN_CONSOLE_URL` 默认 `/admin/`（同源，由 nginx 代理），一般无需覆盖。
+
+改完环境变量必须重建容器（`docker compose up -d --force-recreate web-portal`），`restart` 不会重新读取。
+
 ## 移动云私有镜像仓库生产部署
 
 移动云部署优先使用移动云控制台提供的私有镜像仓库访问地址，避免运行时依赖 Docker Hub、GHCR、公共代理或跨云 ACR。`prod.ecloud.yml` 不内置任何猜测的域名：不同地域、网络类型或交付环境的地址可能不同，必须从当前移动云项目的控制台复制实际 Registry 域名。
