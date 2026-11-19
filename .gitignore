@@ -120,7 +120,13 @@ enterprise/.runtime/
 deploy/observability/pours/
 
 # RSI 数据飞轮产出物（数据集/轨迹库不入库，card 例外由脚本显式 add）
-datasets/
+# SP30/RSI：任务池清单、拆分、训练 manifest 是数据工程产物，协作者 clone 即得（playbook §4.0 依赖）
+datasets/*
+!datasets/task_pool.json
+!datasets/task_split.json
+!datasets/rsi/
+datasets/rsi/*
+!datasets/rsi/manifest.json
 # 决策层原始轨迹/标注数据不入库（捕获的终端输出可能含环境变量与凭证；汇总报告 .md/.json 例外）
 results/**/*.jsonl
 
