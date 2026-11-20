@@ -1,0 +1,116 @@
+name: Portal viewport regressions
+
+on:
+  pull_request:
+    paths:
+      - "enterprise/apps/web-portal/src/components/**"
+      - "enterprise/apps/web-portal/src/app/globals.css"
+      - "enterprise/apps/web-portal/postcss.config.mjs"
+      - "enterprise/apps/web-portal/package.json"
+      - "enterprise/features/chat/**"
+      - "enterprise/packages/ui/**"
+      - "enterprise/package.json"
+      - "enterprise/tsconfig.base.json"
+      - "enterprise/tsconfig.portal-viewport-contracts.json"
+      - "enterprise/vitest.portal-viewport.config.mts"
+      - "enterprise/scripts/ci/portal-viewport-browser.mts"
+      - ".github/workflows/portal-viewport-regressions.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "enterprise/apps/web-portal/src/components/**"
+      - "enterprise/apps/web-portal/src/app/globals.css"
+      - "enterprise/apps/web-portal/postcss.config.mjs"
+      - "enterprise/apps/web-portal/package.json"
+      - "enterprise/features/chat/**"
+      - "enterprise/packages/ui/**"
+      - "enterprise/package.json"
+      - "enterprise/tsconfig.base.json"
+      - "enterprise/tsconfig.portal-viewport-contracts.json"
+      - "enterprise/vitest.portal-viewport.config.mts"
+      - "enterprise/scripts/ci/portal-viewport-browser.mts"
+      - ".github/workflows/portal-viewport-regressions.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-viewports-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: enterprise
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - run: pnpm install --no-frozen-lockfile
+      - name: Typecheck viewport contracts and browser harness
+        run: pnpm exec tsc --project tsconfig.portal-viewport-contracts.json
+      - name: Geometry, focus, panel and navigation contracts
+        shell: bash
+        run: |
+          files=(
+            features/chat/src/utils/fold-segment-layout.test.ts
+            features/chat/src/hooks/useUsableViewport.test.ts
+            features/chat/src/components/molecules/AttachmentContentPanel.mobile.test.tsx
+            features/chat/src/components/molecules/DeepResearchFilesPanel.layout.test.tsx
+            features/chat/src/components/molecules/deep-research-files-panel-resize.test.ts
+            apps/web-portal/src/components/WorkspaceShell.modes.test.tsx
+            features/chat/src/utils/scroll-near-bottom.test.ts
+          )
+          for file in "${files[@]}"; do
+            test -f "$file" || { echo "Missing viewport regression: $file"; exit 1; }
+          done
+          pnpm exec vitest run --config vitest.portal-viewport.config.mts --reporter=default --reporter=junit --outputFile="${RUNNER_TEMP}/portal-viewport-tests.xml"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: portal-viewport-contracts
+          path: ${{ runner.temp }}/portal-viewport-tests.xml
+          if-no-files-found: error
+
+  browser-layout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, webkit]
+    defaults:
+      run:
+        working-directory: enterprise
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - run: pnpm install --no-frozen-lockfile
+      - name: Install isolated browser runtime
+        env:
+          TEST_ENGINE: ${{ matrix.engine }}
+        run: pnpm exec playwright install --with-deps "$TEST_ENGINE"
+      - name: Simulated keyboard, folds and preview layouts
+        env:
+          PORTAL_VIEWPORT_BROWSER: ${{ matrix.engine }}
+          PORTAL_VIEWPORT_ARTIFACTS: ${{ runner.temp }}/portal-viewport-artifacts
+        run: pnpm exec tsx scripts/ci/portal-viewport-browser.mts
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: portal-viewport-${{ matrix.engine }}
+          path: ${{ runner.temp }}/portal-viewport-artifacts
+          if-no-files-found: error
