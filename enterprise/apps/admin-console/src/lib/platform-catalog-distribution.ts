@@ -6,7 +6,7 @@ import {
   type ShelfStatus,
 } from "@agenticx/config";
 
-import type { GrantStatus, RevokePolicy } from "../db-stores/postgresql/platform-catalog-store";
+import type { GrantStatus, RevokePolicy } from "./platform-catalog-store";
 
 export function shouldPushCatalogUpdateToTenant(
   grantStatus: GrantStatus | undefined,
