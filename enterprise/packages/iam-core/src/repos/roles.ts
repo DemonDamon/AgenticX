@@ -1,3 +1,4 @@
+import { assertActorHasScope, assertActorMayGrantScopes, type AdministrativeActor } from "./privilege-guard";
 import { roles, userRoles, users } from "@agenticx/db-schema";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { ulid } from "ulid";
@@ -210,8 +211,11 @@ export async function createCustomRole(input: {
   code: string;
   name: string;
   scopes: string[];
+  actor: AdministrativeActor;
   actorUserId?: string | null;
 }): Promise<RoleRow> {
+  assertActorHasScope(input.actor, input.tenantId, "role:create");
+  assertActorMayGrantScopes(input.actor, input.tenantId, input.scopes);
   if (resolveDatabaseConfig().dialect === "mysql") {
     return mysqlRolesRepo.createCustomRole(input);
   }
@@ -236,7 +240,7 @@ export async function createCustomRole(input: {
 
   await insertAuditEvent({
     tenantId: input.tenantId,
-    actorUserId: input.actorUserId ?? null,
+    actorUserId: input.actor.kind === "user" ? input.actor.userId : null,
     eventType: "iam.role.create",
     targetKind: "role",
     targetId: id,
@@ -248,11 +252,14 @@ export async function createCustomRole(input: {
 
 export async function updateRole(input: {
   tenantId: string;
+  actor: AdministrativeActor;
   actorUserId?: string | null;
   id: string;
   name?: string;
   scopes?: string[];
 }): Promise<RoleRow> {
+  assertActorHasScope(input.actor, input.tenantId, "role:update");
+  if (input.scopes) assertActorMayGrantScopes(input.actor, input.tenantId, input.scopes);
   if (resolveDatabaseConfig().dialect === "mysql") {
     return mysqlRolesRepo.updateRole(input);
   }
@@ -263,6 +270,7 @@ export async function updateRole(input: {
     .where(and(eq(roles.tenantId, input.tenantId), eq(roles.id, input.id)))
     .limit(1);
   if (!row[0]) throw new Error("角色不存在");
+  assertActorMayGrantScopes(input.actor, input.tenantId, (row[0].scopes as string[]) ?? []);
   if (row[0].immutable) throw new Error("系统内置角色不可编辑");
 
   const now = new Date();
@@ -277,7 +285,7 @@ export async function updateRole(input: {
 
   await insertAuditEvent({
     tenantId: input.tenantId,
-    actorUserId: input.actorUserId ?? null,
+    actorUserId: input.actor.kind === "user" ? input.actor.userId : null,
     eventType: "iam.role.update",
     targetKind: "role",
     targetId: input.id,
@@ -290,8 +298,10 @@ export async function updateRole(input: {
 export async function deleteRole(input: {
   tenantId: string;
   id: string;
+  actor: AdministrativeActor;
   actorUserId?: string | null;
 }): Promise<void> {
+  assertActorHasScope(input.actor, input.tenantId, "role:delete");
   if (resolveDatabaseConfig().dialect === "mysql") {
     return mysqlRolesRepo.deleteRole(input);
   }
@@ -302,6 +312,7 @@ export async function deleteRole(input: {
     .where(and(eq(roles.tenantId, input.tenantId), eq(roles.id, input.id)))
     .limit(1);
   if (!row[0]) throw new Error("角色不存在");
+  assertActorMayGrantScopes(input.actor, input.tenantId, (row[0].scopes as string[]) ?? []);
   if (row[0].immutable) throw new Error("系统内置角色不可删除");
 
   const used = await db
@@ -315,7 +326,7 @@ export async function deleteRole(input: {
 
   await insertAuditEvent({
     tenantId: input.tenantId,
-    actorUserId: input.actorUserId ?? null,
+    actorUserId: input.actor.kind === "user" ? input.actor.userId : null,
     eventType: "iam.role.delete",
     targetKind: "role",
     targetId: input.id,
@@ -328,8 +339,10 @@ export async function duplicateRole(input: {
   sourceId: string;
   newCode: string;
   newName: string;
+  actor: AdministrativeActor;
   actorUserId?: string | null;
 }): Promise<RoleRow> {
+  assertActorHasScope(input.actor, input.tenantId, "role:create");
   if (resolveDatabaseConfig().dialect === "mysql") {
     return mysqlRolesRepo.duplicateRole(input);
   }
@@ -341,6 +354,7 @@ export async function duplicateRole(input: {
     name: input.newName,
     scopes: [...source.scopes],
     actorUserId: input.actorUserId,
+    actor: input.actor,
   });
 }
 

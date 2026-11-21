@@ -42,3 +42,4 @@ export * from "./repos/contracts";
 export * from "./session-grant-service";
 export * from "./compliance-service";
 export * from "./quota-remaining";
+export * from "./repos/privilege-guard";
