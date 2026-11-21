@@ -1,0 +1,10 @@
+agx-robot-bridge
+Copyright AgenticX contributors. Licensed under the Apache License, Version 2.0.
+
+Optional runtime dependency (installed via the `lerobot` extra, not vendored):
+
+  LeRobot — https://github.com/huggingface/lerobot
+  Licensed under the Apache License, Version 2.0.
+
+This package does not contain LeRobot source code; it only calls its public
+Python API at runtime when the `lerobot` backend is selected.
