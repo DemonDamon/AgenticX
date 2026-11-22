@@ -64,7 +64,7 @@
     "zustand": "^5.1.0"
   },
   "devDependencies": {
-    "@electron/notarize": "^2.5.0",
+    "@electron/notarize": "^3.1.2",
     "@electron/rebuild": "^4.0.3",
     "@playwright/test": "^1.65.1",
     "@testing-library/react": "^16.3.3",
