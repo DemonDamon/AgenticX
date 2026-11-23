@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "plugins-overview",
-  "generation": "3d90c5ace9ef4d009f12e053a0af727e",
+  "generation": "af234f6be429455cb23f51264c162175",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:b6b2ab10054b9023ab96958d6ee87fffbc53148d9ba4a841f7dcc2d54f5be82b",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:0dcfc1f370d68ecaedb2a5d1d5e3c4b99486acf8e3d2e56e1b9ea5bdd8e987ca",
   "summary_path": "enterprise/conclusions/plugins/plugins_overview_conclusion.md",
-  "summary_sha256": "sha256:2eae8d964b64b609557bc886adf7208f3acc0b15c42d4d64d2386b088835ddb3",
-  "updated_at": "2026-10-24T13:52:56.739826+00:00"
+  "summary_sha256": "sha256:6fd5bdf1a6bff7f6216ee89fc3ab665a52675313a2126c9bd990bcfff3507e42",
+  "updated_at": "2026-11-14T12:26:55.247371+00:00"
 }

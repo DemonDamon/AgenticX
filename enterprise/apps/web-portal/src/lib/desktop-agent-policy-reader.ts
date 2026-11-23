@@ -47,6 +47,7 @@ export async function loadDesktopAgentPolicy(tenantId: string): Promise<DesktopA
       deniedTools: [],
       alwaysAskTools: [],
       disableSessionAllow: false,
+      traceContent: false,
     };
   }
 
@@ -58,6 +59,7 @@ export async function loadDesktopAgentPolicy(tenantId: string): Promise<DesktopA
         deniedTools: [],
         alwaysAskTools: [],
         disableSessionAllow: false,
+        traceContent: false,
       };
     }
     return normalizeDesktopAgentActionPolicy(config);
@@ -68,6 +70,7 @@ export async function loadDesktopAgentPolicy(tenantId: string): Promise<DesktopA
         deniedTools: [],
         alwaysAskTools: [],
         disableSessionAllow: false,
+        traceContent: false,
       };
     }
     throw error;

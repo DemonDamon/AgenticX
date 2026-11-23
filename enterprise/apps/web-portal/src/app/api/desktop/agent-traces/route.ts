@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { loadDesktopAgentPolicy } from "../../../../lib/desktop-agent-policy-reader";
 import { insertDesktopAgentTraces, type DesktopTraceSpan } from "../../../../lib/desktop-agent-traces";
 import { resolveDesktopIdentity } from "../../../../lib/desktop-auth";
 
@@ -14,6 +15,7 @@ const INT_FIELDS = [
   "duration_ms",
   "cost_usd",
 ] as const;
+const CONTENT_METADATA_KEYS = ["user_text", "reply", "thought"] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -63,8 +65,17 @@ function spanError(span: unknown): string | null {
   return null;
 }
 
-function asSpan(span: Record<string, unknown>, userId: string): DesktopTraceSpan {
-  const metadata = isPlainObject(span.metadata) ? span.metadata : {};
+function asSpan(
+  span: Record<string, unknown>,
+  userId: string,
+  allowContent: boolean,
+): DesktopTraceSpan {
+  const metadata = isPlainObject(span.metadata) ? { ...span.metadata } : {};
+  if (!allowContent) {
+    for (const key of CONTENT_METADATA_KEYS) {
+      delete metadata[key];
+    }
+  }
   const model = typeof span.model === "string" ? span.model : undefined;
   const provider = typeof span.provider === "string" ? span.provider : undefined;
   const errorMessage = typeof span.error_message === "string" ? span.error_message : undefined;
@@ -114,13 +125,17 @@ export async function POST(request: Request) {
     );
   }
 
+  const allowContent = await loadDesktopAgentPolicy(identity.tenantId)
+    .then((policy) => policy.traceContent === true)
+    .catch(() => false);
+
   const prepared: DesktopTraceSpan[] = [];
   for (let index = 0; index < spans.length; index += 1) {
     const reason = spanError(spans[index]);
     if (reason) {
       return NextResponse.json({ code: "40001", index, message: reason }, { status: 400 });
     }
-    prepared.push(asSpan(spans[index] as Record<string, unknown>, identity.userId));
+    prepared.push(asSpan(spans[index] as Record<string, unknown>, identity.userId, allowContent));
   }
 
   try {

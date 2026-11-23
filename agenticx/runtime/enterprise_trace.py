@@ -2,9 +2,12 @@
 """Upload one completed replay turn to the enterprise agent-trace inbox.
 
 Spans carry the run trajectory: who spoke, which model or tool ran, status,
-timing, and token counts. The user message and the assistant reply preview
-are copied, clipped to 500 characters. Tool arguments, tool results, and
-subagent task text are never copied into the outbox or the HTTP body.
+timing, and token counts. The user message, assistant reply preview, and
+reasoning preview (each clipped to 500 characters) are copied only when the
+tenant policy sets ``trace_content``. Each outbox line is tagged with the
+signed-in account and is dropped, not posted, when a different account
+flushes. Tool arguments, tool results, and subagent task text are never
+copied into the outbox or the HTTP body.
 
 The outbox file is ``~/.agenticx/enterprise_trace/outbox.jsonl``. The path is
 resolved at call time through :func:`agenticx.utils.agx_home.agx_home`, the
@@ -15,6 +18,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -63,6 +67,8 @@ _ZERO_USAGE = {
     "reasoning_tokens": 0,
     "total_tokens": 0,
 }
+_CONTENT_KEYS = ("user_text", "reply", "thought")
+_ACCOUNT_FIELD = "_acct"
 
 _io_lock = threading.Lock()
 _flush_guard = threading.Lock()
@@ -102,6 +108,36 @@ def trace_upload_enabled() -> bool:
     except Exception:
         logger.debug("enterprise trace config read failed", exc_info=True)
         return False
+
+
+def trace_content_allowed() -> bool:
+    """True only when the tenant policy explicitly allows content excerpts.
+
+    Reads ``enterprise.agent_action_policy.trace_content`` (desktop writes
+    snake_case; ``traceContent`` is accepted too). Anything else is False.
+    """
+
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        policy = ConfigManager.get_value("enterprise.agent_action_policy")
+    except Exception:
+        logger.debug("enterprise trace policy read failed", exc_info=True)
+        return False
+    if not isinstance(policy, dict):
+        return False
+    return policy.get("trace_content") is True or policy.get("traceContent") is True
+
+
+def _redact_content(spans: list[dict[str, Any]]) -> None:
+    """Remove user, reply, and reasoning excerpts from span metadata in place."""
+
+    for span in spans:
+        metadata = span.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        for key in _CONTENT_KEYS:
+            metadata.pop(key, None)
 
 
 def build_spans(run: ReplayRunRecord, events: list[RunEvent]) -> list[dict[str, Any]]:
@@ -253,6 +289,8 @@ def enqueue_completed_run(store: ReplayLedgerStore, run_id: str) -> None:
         spans = build_spans(run, events)
         if not spans:
             return
+        if not trace_content_allowed():
+            _redact_content(spans)
         _append_outbox(spans)
         _start_flush_thread()
     except Exception:
@@ -269,15 +307,30 @@ def flush_outbox(timeout_s: float = 10.0) -> int:
 
     if not trace_upload_enabled():
         return 0
+    account = _current_account_key()
     uploaded = 0
     while True:
         with _io_lock:
             entries = _load_entries_unlocked()
+            own = [
+                (line, span)
+                for line, span in entries
+                if span.get(_ACCOUNT_FIELD) == account
+            ]
+            if len(own) != len(entries):
+                _write_raw_lines(outbox_path(), [line for line, _span in own])
+                logger.info(
+                    "enterprise trace dropped %d queued spans from another account",
+                    len(entries) - len(own),
+                )
+            entries = own
             if not entries:
                 return uploaded
             batch = entries[:_UPLOAD_BATCH]
             batch_lines = [line for line, _span in batch]
             batch_spans = [span for _line, span in batch]
+        if _current_account_key() != account:
+            return uploaded
         outcome = _post_spans(batch_spans, timeout_s)
         if outcome == "keep":
             return uploaded
@@ -759,10 +812,34 @@ def _hydrate_usage_from_blobs(store: ReplayLedgerStore, events: list[RunEvent]) 
             event.payload = merged
 
 
+def _current_account_key() -> str:
+    """Short stable id for the signed-in portal and user. Empty when unknown."""
+
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        base_url = ConfigManager.get_value("enterprise.base_url")
+        email = ConfigManager.get_value("enterprise.user_email")
+    except Exception:
+        logger.debug("enterprise trace account read failed", exc_info=True)
+        return ""
+    base = base_url.strip().rstrip("/") if isinstance(base_url, str) else ""
+    if not base:
+        return ""
+    user = email.strip().lower() if isinstance(email, str) else ""
+    return hashlib.sha256(f"{base}\n{user}".encode("utf-8")).hexdigest()[:16]
+
+
 def _append_outbox(spans: list[dict[str, Any]]) -> None:
     path = outbox_path()
+    account = _current_account_key()
     lines = [
-        json.dumps(span, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        json.dumps(
+            {**span, _ACCOUNT_FIELD: account},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         for span in spans
     ]
     with _io_lock:
@@ -875,6 +952,10 @@ def _post_spans(spans: list[dict[str, Any]], timeout_s: float) -> str:
         return "keep"
     base_url, token = endpoint
     url = f"{base_url}/api/desktop/agent-traces"
+    wire = [
+        {key: value for key, value in span.items() if key != _ACCOUNT_FIELD}
+        for span in spans
+    ]
     try:
         with httpx.Client(
             timeout=timeout_s, trust_env=not _local_host(base_url)
@@ -885,7 +966,7 @@ def _post_spans(spans: list[dict[str, Any]], timeout_s: float) -> str:
                     "Authorization": f"Bearer {token}",
                     "Content-Type": "application/json",
                 },
-                json={"spans": spans},
+                json={"spans": wire},
             )
     except Exception:
         logger.debug("enterprise trace upload failed", exc_info=True)

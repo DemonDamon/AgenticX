@@ -30,12 +30,14 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Textarea,
   toast,
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@agenticx/ui";
+import { ModelAdmissionPanel } from "./model-admission";
 import { useTranslations } from "next-intl";
 import {
   Activity,
@@ -52,6 +54,7 @@ import {
   Server,
 } from "lucide-react";
 import { inferModelCapabilities, isEmbeddingModelId } from "../../../lib/infer-model-capabilities";
+import { VirtualModelsPanel } from "./virtual-models";
 
 type ProviderRoute = "local" | "private-cloud" | "third-party";
 
@@ -380,22 +383,56 @@ export default function ModelProvidersPage() {
     toast.success(t("toast.modelAdded"));
   };
 
-  const handleToggleModel = async (modelName: string, enabled: boolean) => {
+  // SP2 model admission: enable blocked by threshold -> recorded override flow
+  const [overridePending, setOverridePending] = useState<{
+    model: string;
+    score?: number;
+    minScore?: number;
+    reason?: string;
+  } | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [overrideTicket, setOverrideTicket] = useState("");
+
+  const handleToggleModel = async (
+    modelName: string,
+    enabled: boolean,
+    override?: { reason: string; ticket?: string }
+  ) => {
     if (!active) return;
     const res = await fetch(
       `/api/admin/providers/${active.id}/models/${encodeURIComponent(modelName)}`,
       {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enabled }),
+        body: JSON.stringify({ enabled, override }),
       }
     );
     const json = (await res.json()) as ProviderResp;
+    if (res.status === 403 && (json as unknown as { code?: string }).code === "40310") {
+      const detail = (json as unknown as { data?: { score?: number; minScore?: number; reason?: string } }).data;
+      setOverridePending({ model: modelName, ...detail });
+      return;
+    }
     if (!res.ok || !json.data) {
       toast.error(json.message ?? t("toast.updateFailed"));
       return;
     }
     setProviders((prev) => prev.map((p) => (p.id === active.id ? json.data!.provider : p)));
+  };
+
+  const handleConfirmOverride = async () => {
+    if (!overridePending) return;
+    if (overrideReason.trim().length < 5) {
+      toast.error(t("admission.overrideReasonRequired"));
+      return;
+    }
+    const modelName = overridePending.model;
+    const override = { reason: overrideReason.trim(), ticket: overrideTicket.trim() || undefined };
+    setOverridePending(null);
+    setOverrideReason("");
+    setOverrideTicket("");
+    await handleToggleModel(modelName, true, override);
+    toast.success(t("admission.overrideRecorded"));
   };
 
   const handleDeleteModel = async (modelName: string) => {
@@ -498,6 +535,11 @@ export default function ModelProvidersPage() {
         }),
       });
       const json = (await res.json()) as ProviderResp;
+      if (res.status === 403 && (json as unknown as { code?: string }).code === "40310") {
+        const detail = (json as unknown as { data?: { score?: number; minScore?: number } }).data;
+        setOverridePending({ model: modelName, ...detail });
+        return;
+      }
       if (!res.ok || !json.data) {
         toast.error(json.message ?? t("toast.addModelFailed"));
         return;
@@ -807,6 +849,59 @@ export default function ModelProvidersPage() {
         </Card>
       </div>
 
+      <ModelAdmissionPanel />
+
+      <Dialog
+        open={overridePending !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setOverridePending(null);
+            setOverrideReason("");
+            setOverrideTicket("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("admission.overrideTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("admission.overrideDescription", {
+                model: overridePending?.model ?? "",
+                score: overridePending?.score ?? "-",
+                minScore: overridePending?.minScore ?? "-",
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>{t("admission.overrideReason")}</Label>
+              <Textarea
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                rows={3}
+                placeholder={t("admission.overrideReasonPlaceholder")}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t("admission.overrideTicket")}</Label>
+              <Input
+                value={overrideTicket}
+                onChange={(e) => setOverrideTicket(e.target.value)}
+                placeholder="SEC-42"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setOverridePending(null)}>
+              {t("admission.overrideCancel")}
+            </Button>
+            <Button size="sm" onClick={() => void handleConfirmOverride()}>
+              {t("admission.overrideConfirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AddProviderDialog
         open={addOpen}
         onOpenChange={setAddOpen}
@@ -942,6 +1037,7 @@ export default function ModelProvidersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <VirtualModelsPanel />
     </div>
   );
 }

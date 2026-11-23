@@ -40,7 +40,7 @@ export async function applyAssignedSkillPrompt<T extends Message>(input: {
   const focused = catalog.find((item) => item.id === input.focusedId && item.scanVerdict === "safe" && !item.optedOut);
   if (focused) {
     const source = states.find((item) => item.id === focused.id);
-    const body = await loadSkillBody(source?.bundleUri || null);
+    const body = await loadSkillBody(source?.bundleUri || null, source?.bundleDigest || null);
     if (!body) {
       log("warn", { event: "chat.skill_bundle_skipped", skill_id: focused.id });
     }

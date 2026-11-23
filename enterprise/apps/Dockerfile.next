@@ -9,7 +9,11 @@
 #     --build-arg APP_NAME=admin-console \
 #     --build-arg APP_PACKAGE=@agenticx/app-admin-console \
 #     --build-arg APP_PORT=3001 \
+#     --build-arg NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL=https://gateway.example.com \
 #     -t ghcr.io/agenticx/enterprise-admin-console:local .
+#
+# NEXT_PUBLIC_* 在构建期被内联进前端产物，运行期再设环境变量不生效：
+# 生产构建必须按实际对外地址传入，否则前端会回落到 127.0.0.1 / localhost 默认值。
 
 FROM node:20-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm
@@ -23,15 +27,23 @@ COPY apps ./apps
 COPY features ./features
 COPY packages ./packages
 COPY plugins ./plugins
-RUN pnpm install --frozen-lockfile
+# pnpm-lock.yaml 由各环境本地生成且不入库（见 enterprise/.gitignore），
+# --frozen-lockfile 会让镜像构建在干净 clone 上必然失败。
+RUN pnpm install --no-frozen-lockfile
 
 FROM deps AS build
 ARG APP_NAME
 ARG APP_PACKAGE
 ARG BUILD_DATABASE_DIALECT=postgresql
 ARG BUILD_DATABASE_URL=postgresql://agenticx:agenticx@127.0.0.1:5432/agenticx?sslmode=disable
+# 前端 NEXT_PUBLIC_* 构建期内联，必须在这里给定，运行期环境变量不会生效。
+# 管理后台入口默认走同源 /admin/（nginx 已代理），无需按客户域名单独配置。
+ARG NEXT_PUBLIC_ADMIN_CONSOLE_URL=/admin/
+ARG NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL=
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_ADMIN_CONSOLE_URL=${NEXT_PUBLIC_ADMIN_CONSOLE_URL}
+ENV NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL=${NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL}
 ENV DATABASE_DIALECT=${BUILD_DATABASE_DIALECT}
 ENV DATABASE_URL=${BUILD_DATABASE_URL}
 RUN pnpm --filter "${APP_PACKAGE}" build
@@ -40,9 +52,12 @@ RUN mkdir -p "apps/${APP_NAME}/public"
 FROM node:20-bookworm-slim AS runner
 ARG APP_NAME
 ARG APP_PORT=3000
+# 服务端路由（如 /api/desktop/capabilities）运行期也读这个变量，沿用构建期取值。
+ARG NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL=
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=${APP_PORT}
+ENV NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL=${NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL}
 WORKDIR /app/apps/${APP_NAME}
 
 RUN groupadd --system --gid 1001 nodejs \

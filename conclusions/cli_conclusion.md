@@ -1,6 +1,6 @@
 # AgenticX CLI 模块总结
 
-> 结论更新时间：2026-10-25（覆盖基线 `ca9d92bec05627539228094cacc30dd6d4879f47` 至 `22d051f5d18ad83a4c6083683342ab41d7850149` 的变更）
+> 结论更新时间：2026-11-14（覆盖基线 `22d051f5d18ad83a4c6083683342ab41d7850149` 至 `cebdabd5883de1d5a62c96ae4084de6ad036b32f` 的变更）
 
 ## 目录路径
 
@@ -33,6 +33,10 @@ agenticx/cli/
 ├── generate_commands.py     # generate 子命令
 ├── hooks_commands.py        # hooks 子命令
 ├── harness_app.py           # harness 子命令（agx harness review 会话工作循环健康审查）
+├── harness_surface_commands.py  # (NEW) `agx harness-surface serve` / `list`（统一 harness HTTP 控制面）
+├── ma_commands.py           # (NEW) `agx ma serve`（--dev MA Host）/ `worker`
+├── ma_client_commands.py    # (NEW) `agx ma apply` / `get *` / `sessions` / `tail`（对接 /ma/v1 PAT 客户端）
+├── security_eval_commands.py  # (NEW) `agx security-eval run` / `show`（模型红队计分卡 SP2）
 ├── skills_commands.py       # skills 子命令（含 `install-from-repo` 从 GitHub tarball 安装完整技能目录 + guard）
 ├── volcengine_commands.py   # 火山引擎专属命令
 ├── log_config.py            # 日志配置
@@ -69,6 +73,10 @@ agenticx/cli/
 | `mcp_configs` | Dict | **(NEW)** 同为 read-through property → `GlobalMcpManager`，多 session 共享单一 Hub，不再 per-session 派生子进程 |
 | `connected_servers` | set | **(NEW)** 同为 read-through property → `GlobalMcpManager` |
 | `session_mode` | str | **(NEW)** Harness 模式：`code_dev`（四层上下文）vs `daily_office`（默认） |
+| `harness_id` / `harness_thread_id` / `harness_options` | Optional | **(NEW)** 绑定的 coding harness 标识、原生线程句柄与 spawn 选项（`None` = 内置 Python runtime） |
+| `harness_session_id` | Optional[str] | **(NEW)** 统一 control surface 上 adapter 侧会话 id（冷启动可由 `harness_thread_id` 重建） |
+| `managed_command_env` / `managed_command_network` | Optional | **(NEW)** Managed Agent 会话覆盖子进程环境变量；`managed_command_network == "deny"` 时命令沙箱须启用且禁止 `danger-full-access` |
+| `managed_tool_overrides` | Optional[Dict] | **(NEW)** 按工具名注入替代分发器（Managed 运行时工具表覆写） |
 | `current_user_intent` | Optional[str] | **(NEW)** 本会话当前用户意图（不持久化到 messages.json） |
 | `mcp_server_ops` | Dict[str, Dict] | 每个 MCP 服务器的最新操作状态（`phase`/`message`/`error`/`updated_at`），供 Desktop MCP 卡片渲染细粒度进度 |
 | `todo_manager` | TodoManager | 结构化 Todo 跟踪 |
@@ -120,6 +128,7 @@ agenticx/cli/
 | Skill | `skill_list`, `skill_use`, **(NEW)** `skill_manage`（create/patch/delete + guard 扫描）, `skill_import_repo`（批量从 GitHub 仓库导入）, **`skillhub_search` / `skillhub_install`**, **`clawhub_install`**（市场安装，禁止用 bash/curl 绕路） |
 | 用户交互 | **`present_choices`**（版本化澄清/对比面板）, `request_clarification` / `request_action_confirmation`（结构化选项与确认 verdict） |
 | 连接器 | **`connector_manage`**（REST/MCP 连接器创建与密钥收集，经 gateway MCP 暴露 actions） |
+| 企业智能体草稿 | **(NEW)** `enterprise_agent_builder`（`list`/`get`/`preview`/`submit`；仅草稿、须确认后不发布，委托 `agenticx.runtime.enterprise_agent_builder`） |
 | LSP | `lsp_hover`, `lsp_goto_definition`, `lsp_find_references`, `lsp_diagnostics` |
 | 文档解析 | `liteparse` |
 | 定时/自动化 | **(NEW)** `schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, `cancel_scheduled_task`, `get_automation_task_logs` |
@@ -132,17 +141,19 @@ agenticx/cli/
 | Ops 只读排障 | **(NEW，2026-09)** 经 `agenticx.ops.tools.merge_ops_tools_into` 注入 `get_trace` / `get_logs` / `get_recent_changes` / `get_session_review` / `get_umodel` / `sync_changeplane` / `get_trace_parity` / `get_channel_slo`（`ops.tools_enabled` 默认开） |
 
 **dispatch_tool_async(tool_name, arguments, session, confirm_gate, event_callback, team_manager)**：
-- 按 tool_name 路由到对应工具实现；对外返回经 `credential_store.redact_text` 脱敏（内部 `_dispatch_tool_async_unredacted`）
+- **(NEW)** 主链策略收口：入口先 `studio_safety.validate_input`（六规则输入校验）；字符串结果经 `redact_text` 后再 `studio_safety.sanitize_output`（四段输出管线）；`arguments` 中的 `__tool_call_id` / `__agent_id` 仅用于审计关联；受 `AGX_STUDIO_SAFETY_MODE` 控制 observe/enforce
+- 按 tool_name 路由到对应工具实现；对外返回经 `credential_store.redact_text` 脱敏（内部 `_dispatch_tool_async_unredacted`）；**`session.managed_tool_overrides`** 命中时优先生效
 - 支持 `event_callback` 异步回调（用于向 Runtime 传递 confirm_required 等中间事件）
 - **(NEW，2026-09)** 入口即策略收口：先查 `tool_denied_by_session_permissions`（会话权限 deny），再查 `_dispatch_path_rule_denial`（`permissions.path_rules` 对 `path`/`from_path` 参数的 deny，读写都拦、优先于 confirm），通过后才进入具体工具
 - **(NEW)** 会话工具结果预算 ≥80% 时 `_budget_locked_explore_denial` 拒绝探索类工具（`file_read` 大文件预检降级）；`foreign_session_denial` 拦截跨会话路径
 - **(NEW)** Enterprise `load_enterprise_agent_policy()`：`enterprise_denied_subject` 直接 ERROR + `action_audit`；`enterprise_ask_subject` 走 `_confirm(enterprise_policy=True)` 且同轮 `_enterprise_ask_satisfied_tool` 免重复弹窗
 - 安全确认：高风险工具经 `ConfirmGate` 确认；**(NEW)** `_confirm` 改为按 gate 能力（`should_emit_prompt`）决定是否发 `confirm_required` 事件，先注册 pending 请求再发布 ID 避免竞态挂起；拒绝原因经 `confirm_denial_note` 挂到 gate 的 `last_denial_note`，`_cancelled()` 文案据此区分「用户拒绝 / 无人值守拦截 / 等待超时」；`is_service_mode()` 取代 `isinstance(AsyncConfirmGate)` 判定交互态；本会话 `sticky_allowed_tools` 可对非受保护工具自动放行确认
 - **(NEW)** `near_browser_open`：`validate_public_http_url` + 会话级 `profile_id` 附着；`mcp_connect` / `mcp_import` 经确认包装后再连接
+- **(NEW)** `_fetch_http_bytes`：若 `current_egress_guard()` 存在，经 httpx `event_hooks.request` 做出站允许校验、URL 改写与 Authorization 剥离；`web_fetch` 将 `egress blocked` 透传为 ERROR
 
 **(NEW，2026-09) bash_exec 安全模型重写**（commits `b0d2f0b4` / `3742f8f9` / `f007c2c3` 等）：
 - 旧的 `SAFE_COMMANDS` 白名单集合已删除，改为 `agenticx.runtime.command_safety.assess_command` 对命令做风险分类（`destructive_filesystem` / `arbitrary_code_execution` / `version_control_change` / `external_publish` 等 code + 中文证据），`_bash_exec_safety_confirm` 据此给出 `high` / `non_whitelisted` 两档中文确认文案；`NEVER_AUTO_APPROVED_CATEGORIES` 类别永不可被豁免
-- `_apply_command_sandbox` 用 `agenticx.runtime.command_sandbox.build_command_sandbox_plan` 把 argv 包进 OS 级沙箱（可读/可写 roots 来自 `_session_workspace_root_sets`，`permissions.path_rules` 的 deny glob 经 `denied_path_patterns_for_sandbox` 下沉为进程级边界）；`permissions.command_permissions` 三档：`read-only` / `workspace-write`（默认）/ `danger-full-access`（脱离隔离需显式确认）；沙箱后端不可用时需确认后才裸跑
+- `_apply_command_sandbox` 用 `agenticx.runtime.command_sandbox.build_command_sandbox_plan` 把 argv 包进 OS 级沙箱（可读/可写 roots 来自 `_session_workspace_root_sets`，`permissions.path_rules` 的 deny glob 经 `denied_path_patterns_for_sandbox` 下沉为进程级边界）；**Managed 会话**经 `_managed_command_environ` / `_managed_command_network` 向沙箱计划注入 overlay 环境与 `network`（`deny` 时禁止 `danger-full-access`，沙箱不可用则直接 ERROR）；`permissions.command_permissions` 三档：`read-only` / `workspace-write`（默认）/ `danger-full-access`（脱离隔离需显式确认）；沙箱后端不可用时需确认后才裸跑
 - `permissions.allowed_tools` 语义改为「跳过确认」（`tool_allowed_without_confirm`），不放开沙箱；`unattended_allow_workspace_scripts=true` 时无人值守场景仅放行「工作区内已存在脚本」的调用（解释器按字面路径判定以兼容 venv 符号链接）
 - `_BASH_BG_LOG_DIR` 改为 `_bash_bg_log_dir()` 惰性解析（`agenticx.utils.agx_home.lazy_home_path`），不再 import 时定死 `Path.home()`
 
@@ -189,7 +200,7 @@ agenticx/cli/
 | `get/set_mcp_extra_search_paths_config` | 读写 `~/.agenticx/config.yaml` 中的 `mcp.extra_search_paths`（去重 + 屏蔽 canonical 路径） |
 | `append/remove_mcp_auto_connect_name` | 维护 `mcp.auto_connect` 白名单，支持 `"all"` 旧值迁移 |
 | `get/set_mcp_disabled_tools_config` | 维护 `{server_name: [disabled_tool_names]}`，对 UI 单独禁用 MCP 工具 |
-| `agenticx_home_mcp_path()` | `~/.agenticx/mcp.json` 规范路径 |
+| `agenticx_home_mcp_path()` | 活动数据根下 `mcp.json` 规范路径（`agx_home() / "mcp.json"`，非固定 `Path.home()`） |
 
 **错误语义**：所有面向 agent/UI 的失败走 `_format_mcp_call_error()`（统一前缀 `ERROR: mcp_call:` + 长度上限），避免调用方因空响应误判成功或上下文爆炸。
 
@@ -239,7 +250,7 @@ agenticx/cli/
 - `ConfigManager._deep_merge(global_data, project_data)`：项目配置覆盖全局配置
 
 **(NEW，2026-09) 读取路径两处重构**（commits `cc45657d` / `e334ea6b`）：
-- `GLOBAL_CONFIG_PATH` 由 import 时固化的类属性改为 `_ConfigManagerMeta` 元类在**读取时**解析 `Path.home()`——修复测试把 `HOME` 指到沙箱后仍读到开发者真实 `config.yaml`（含真实 API key）的问题；`monkeypatch.setattr` 写法照常兼容
+- `GLOBAL_CONFIG_PATH` 由 import 时固化的类属性改为 `_ConfigManagerMeta` 元类在**读取时**解析；**(NEW)** 现经 `agx_home() / "config.yaml"`（与 MCP 等路径同源，支持非默认 AgenticX 数据根）——修复测试把 `HOME` 指到沙箱后仍读到开发者真实 `config.yaml`（含真实 API key）的问题；`monkeypatch.setattr` 写法照常兼容
 - `_load_yaml` 增加解析缓存 `_yaml_cache`：以 `(mtime_ns, size, inode)` 为指纹，命中时返回深拷贝（防调用方就地改污染缓存）；`_dump_yaml` 原子写入（tmp + fsync + `os.replace`，可选 `.bak`、保留 mode）后 `_invalidate_yaml_cache`
 - **(NEW)** `AgxConfig.get_provider` 对 `api_key` / `secret_key` 经 `runtime.credential_store.resolve_refs` 解析 `${...}` 引用后再构造 `ProviderConfig`
 
@@ -276,6 +287,9 @@ agenticx/cli/
 - `generate`：代码生成（来自 generate_commands.py）
 - `skills`：Skill 管理（来自 skills_commands.py）
 - **(NEW)** `harness`：会话工作循环健康审查（来自 harness_app.py，延迟导入注册）
+- **(NEW)** `harness-surface`：延迟导入 `harness_surface_commands.harness_surface_app`；`serve` 默认 `127.0.0.1:9744`，Token 走 `HARNESS_SURFACE_TOKEN` / config `harness_surface.token` / 自动生成；`list` 本地 registry（`--json`）
+- **(NEW)** `ma`：延迟导入 `ma_commands.ma_app`；`serve --dev` 单租户 MA Host（默认 `8092`，`--fake-llm` / `--enable-tasks` / `--enable-threads`）；`worker` 桌面 worker 轮询 Host；子命令 `apply`/`get`/`sessions`/`tail` 经 `MAApiClient` + `AGX_MA_TOKEN`（`agx-pat-`）访问 control/runtime 平面
+- **(NEW)** `security-eval`：延迟导入 `security_eval_commands.security_eval_app`；`run` 对攻击语料跑模型矩阵输出 `scorecard.json`/`scorecard.md`（`--mock` CI 安全）；`show` 回看历史计分卡
 - **(NEW，2026-09)** `wb-bridge`：延迟导入 `wb_bridge_commands.wb_bridge_app`，`agx wb-bridge serve`（`--host`/`--port`/`--token`，默认 9743）
 - **(NEW)** `case`：`compile`（plan.mdc → 本地 case-entry，可选 `--push` context-service）、`search`（本地/`--remote`）、`init`（从 case 初始化项目并注入 wiki/skills）
 - **(NEW)** `wiki`：`push` 推送 `./wiki` 至企业 context-service（可选 `--no-compile`）
@@ -291,6 +305,20 @@ agenticx/cli/
 - 会话目录解析 `_resolve_session_dir`：默认取 `~/.agenticx/sessions/` 下最近修改的会话，或 `--session/-s` 指定
 - 核心逻辑委托 `agenticx.learning.loop_review`（`review_session` / `format_review_text` / `write_review`）：五维度评分、证据强度封顶
 - 选项：`--json` 输出机读 JSON；`--write` 把 `loop_review.json` 持久化进会话目录（默认不落盘）
+
+### harness_surface_commands.py — 统一 Harness 控制面（NEW）
+
+**功能**：`agx harness-surface serve` 拉起 `agenticx.harness.http_app:app`（uvicorn）；`list` 经 `default_registry().descriptors()` 列出 adapter 可用性与 capabilities（Rich 表或 `--json`）。
+
+### ma_commands.py / ma_client_commands.py — Managed Agents CLI（NEW）
+
+**Host 侧**（`ma_commands.py`）：`agx ma serve --dev` 仅 dev 模式，`build_dev_config` + `create_ma_app`；数据默认 `agx_home() / "ma"`。`agx ma worker` 以 `MAWorker` 长轮询 Host（`--once` 单次作业）。
+
+**API 客户端**（`ma_client_commands.register_client_commands`）：`apply -f` YAML（`validate_manifest` + create/patch version，可选 `--publish`/`--dry-run`）；`get agents|agent|versions|version|environments`；`sessions`（默认 mine，`--all` 租户）；`tail SESSION_ID` SSE（`--until-idle`）。
+
+### security_eval_commands.py — 模型安全红队计分（NEW）
+
+**功能**：`agx security-eval run` 经 `build_corpus` + `run_eval` 对 `--model provider/model`（可重复）或 `--mock` 生成 `security-eval-reports/<run_id>/scorecard.{json,md}`；`show <run_dir>` 用 `load_scorecard` 回看。
 
 ### scaffold.py — 项目脚手架
 

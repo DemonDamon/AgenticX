@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "sdk-py",
-  "generation": "a451d0e7ae7b4c279e2300e4643cb0cb",
+  "generation": "242b329f73b44049a51955d172462889",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:b7fba798c8e5ae8a5be69603351da6f14f83889c452fc48d9aa89499ec68fa77",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:e55a28c7748d3ea0769fe042a270afe3ec99751f464b7e663090470e05cc9c52",
   "summary_path": "enterprise/conclusions/packages/sdk-py_conclusion.md",
-  "summary_sha256": "sha256:85d131e7db80de58182d2675b9ef726fde6c2cfc9b95366453824f633b71a77c",
-  "updated_at": "2026-10-24T13:52:55.919799+00:00"
+  "summary_sha256": "sha256:037d215e406075ac435855b3dac944a90f84e2ae02c38d64e075b1d347a429c1",
+  "updated_at": "2026-11-14T12:26:54.400936+00:00"
 }

@@ -9,6 +9,7 @@ import {
 
 import { useTranslation } from "react-i18next";
 import { Button } from "./ds/Button";
+import { SettingsSwitch } from "./settings/SettingsSwitch";
 import { useAppStore } from "../store";
 import { i18n } from "../i18n/i18n";
 
@@ -80,6 +81,9 @@ export function AccountTab() {
   const [entWaiting, setEntWaiting] = useState(false);
   const [entVerifyUrl, setEntVerifyUrl] = useState("");
   const [entError, setEntError] = useState("");
+  const [entTraceUpload, setEntTraceUpload] = useState(true);
+  const [entTraceContent, setEntTraceContent] = useState(false);
+  const [entTraceSaving, setEntTraceSaving] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -90,6 +94,8 @@ export function AccountTab() {
         setEntEmail(String(r.email ?? ""));
         setEntDisplayName(String(r.displayName ?? ""));
         setEntPortalUrl(String(r.portalUrl ?? ""));
+        setEntTraceUpload(r.traceUpload !== false);
+        setEntTraceContent(r.traceContent === true);
       } catch {
         // 企业账号是可选能力，读取失败不影响本地使用
       }
@@ -104,6 +110,16 @@ export function AccountTab() {
       setEntEmail(String(payload.email ?? ""));
       setEntDisplayName(String(payload.displayName ?? ""));
       if (payload.portalUrl) setEntPortalUrl(String(payload.portalUrl));
+      if (payload.loggedIn) {
+        void window.agenticxDesktop
+          .loadEnterpriseAccount()
+          .then((account) => {
+            if (cancelled) return;
+            setEntTraceUpload(account.traceUpload !== false);
+            setEntTraceContent(account.traceContent === true);
+          })
+          .catch(() => undefined);
+      }
     });
     const offFailed = window.agenticxDesktop.onEnterpriseLoginFailed((payload) => {
       setEntWaiting(false);
@@ -228,6 +244,24 @@ export function AccountTab() {
     setEntDisplayName("");
   };
 
+  const onToggleTraceUpload = async (next: boolean) => {
+    if (entTraceSaving) return;
+    setEntTraceSaving(true);
+    setEntTraceUpload(next);
+    try {
+      const r = await window.agenticxDesktop.setEnterpriseTraceUpload({ enabled: next });
+      if (!r.ok) {
+        setEntTraceUpload(!next);
+        setEntError(r.error || t("account.traceUploadSaveFailed"));
+      }
+    } catch (e) {
+      setEntTraceUpload(!next);
+      setEntError(String(e));
+    } finally {
+      setEntTraceSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6 text-sm text-text-strong">
       <div className="flex items-start gap-3">
@@ -309,6 +343,26 @@ export function AccountTab() {
               {entPortalUrl ? (
                 <div className="text-xs text-text-subtle font-mono">{entPortalUrl}</div>
               ) : null}
+              <div className="flex items-start justify-between gap-3 rounded-md bg-surface-hover px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-text-primary">{t("account.traceUploadTitle")}</div>
+                  <div className="mt-0.5 text-xs leading-relaxed text-text-subtle">
+                    {!entTraceUpload
+                      ? t("account.traceUploadOff")
+                      : entTraceContent
+                        ? t("account.traceUploadOnContent")
+                        : t("account.traceUploadOnMetrics")}
+                  </div>
+                </div>
+                <SettingsSwitch
+                  size="sm"
+                  checked={entTraceUpload}
+                  disabled={entTraceSaving}
+                  onChange={(next) => void onToggleTraceUpload(next)}
+                  aria-label={t("account.traceUploadTitle")}
+                />
+              </div>
+              {entError ? <p className="text-xs text-amber-500">{entError}</p> : null}
               <Button
                 type="button"
                 variant="ghost"

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "iam-core",
-  "generation": "6c84e025e5d94c14b0ed33042c4fd1f6",
+  "generation": "940f98b62c044a14a03cbd11a967e766",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:ea8f6b78626aaaf4027fae5d8cc3832285cb9c438833000c54c10f79188dcf03",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:6ef04162ce22b6306d4fb39f0c9a1ef332cbfd5ffd5488ac5ab339d83de263ee",
   "summary_path": "enterprise/conclusions/packages/iam-core_conclusion.md",
-  "summary_sha256": "sha256:e65aea5c5d99371dc373fabba8136a28890e1dc08027c8534234724a98f3bf08",
-  "updated_at": "2026-10-25T03:42:36.586644+00:00"
+  "summary_sha256": "sha256:08c69c039d58cf2f4b45600e9cb68eb85c96e9ae842be7ffea9a5f9a9911a840",
+  "updated_at": "2026-11-14T12:24:38.855681+00:00"
 }

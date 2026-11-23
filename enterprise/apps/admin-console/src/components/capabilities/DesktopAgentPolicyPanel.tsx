@@ -33,6 +33,7 @@ export function DesktopAgentPolicyPanel() {
   const [denied, setDenied] = useState("");
   const [alwaysAsk, setAlwaysAsk] = useState("");
   const [disableSessionAllow, setDisableSessionAllow] = useState(false);
+  const [traceContent, setTraceContent] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -48,6 +49,7 @@ export function DesktopAgentPolicyPanel() {
               deniedTools?: unknown;
               alwaysAskTools?: unknown;
               disableSessionAllow?: unknown;
+              traceContent?: unknown;
             };
           };
         };
@@ -60,6 +62,7 @@ export function DesktopAgentPolicyPanel() {
         setDenied(fromLines(policy?.deniedTools));
         setAlwaysAsk(fromLines(policy?.alwaysAskTools));
         setDisableSessionAllow(policy?.disableSessionAllow === true);
+        setTraceContent(policy?.traceContent === true);
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : tc("states.error"));
@@ -82,6 +85,7 @@ export function DesktopAgentPolicyPanel() {
           deniedTools: toLines(denied),
           alwaysAskTools: toLines(alwaysAsk),
           disableSessionAllow,
+          traceContent,
         }),
       });
       const json = (await response.json().catch(() => ({}))) as {
@@ -91,6 +95,7 @@ export function DesktopAgentPolicyPanel() {
             deniedTools?: unknown;
             alwaysAskTools?: unknown;
             disableSessionAllow?: unknown;
+            traceContent?: unknown;
           };
         };
       };
@@ -103,6 +108,7 @@ export function DesktopAgentPolicyPanel() {
         setDenied(fromLines(policy.deniedTools));
         setAlwaysAsk(fromLines(policy.alwaysAskTools));
         setDisableSessionAllow(policy.disableSessionAllow === true);
+        setTraceContent(policy.traceContent === true);
       }
       toast.success(t("saved"));
     } catch (saveError) {
@@ -110,7 +116,7 @@ export function DesktopAgentPolicyPanel() {
     } finally {
       setSaving(false);
     }
-  }, [alwaysAsk, denied, disableSessionAllow, t, tc]);
+  }, [alwaysAsk, denied, disableSessionAllow, t, tc, traceContent]);
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -134,6 +140,17 @@ export function DesktopAgentPolicyPanel() {
           id="agent-policy-session-allow"
           checked={disableSessionAllow}
           onCheckedChange={setDisableSessionAllow}
+        />
+      </div>
+      <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+        <div className="space-y-1">
+          <Label htmlFor="agent-policy-trace-content">{t("traceContent")}</Label>
+          <p className="text-muted-foreground text-xs">{t("traceContentHint")}</p>
+        </div>
+        <Switch
+          id="agent-policy-trace-content"
+          checked={traceContent}
+          onCheckedChange={setTraceContent}
         />
       </div>
       {error ? <p className="text-destructive text-sm">{error}</p> : null}

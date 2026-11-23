@@ -3,11 +3,23 @@
  */
 
 import { getAdminMysqlDb } from "./database";
-import { mcpServers, mcpTools } from "@agenticx/db-schema/mysql";
+import { mcpServerVersions, mcpServers, mcpTools } from "@agenticx/db-schema/mysql";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 
 import { decryptBackendConfig, encryptBackendConfig } from "../../mcp-backend-config-crypto";
+import {
+  assertCanPublishCurrent,
+  assertCanPublishDraft,
+  assertCanRollback,
+  nextVersionNumber,
+  storedJsonToTool,
+  surfaceContentHash,
+  toolToStoredJson,
+  versionManaged,
+  type McpShelfStatus,
+  type VersionTool,
+} from "../../mcp-server-versions";
 
 export type McpServerStatus = "active" | "disabled";
 
@@ -21,6 +33,7 @@ export interface McpServerRecord {
   backendConfig: Record<string, unknown>;
   requiredScopes: string[];
   status: McpServerStatus;
+  publishedVersionId: string | null;
   rateLimit: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -57,6 +70,8 @@ export interface UpdateMcpServerInput {
   requiredScopes?: string[];
   status?: McpServerStatus;
   rateLimit?: Record<string, unknown>;
+  /** 只由路由从会话写入，不接受请求体里的同名字段。 */
+  createdBy?: string;
 }
 
 function requiredTenantId(): string {
@@ -76,6 +91,7 @@ function rowToServer(row: typeof mcpServers.$inferSelect): McpServerRecord {
     backendConfig: decryptBackendConfig(row.backendConfig),
     requiredScopes: Array.isArray(row.requiredScopes) ? row.requiredScopes.map(String) : [],
     status: (row.status as McpServerStatus) || "active",
+    publishedVersionId: row.publishedVersionId ?? null,
     rateLimit: (row.rateLimit as Record<string, unknown>) ?? {},
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
@@ -147,15 +163,23 @@ export async function createMcpServer(input: CreateMcpServerInput): Promise<McpS
 export async function updateMcpServer(id: string, input: UpdateMcpServerInput): Promise<McpServerRecord> {
   const db = getAdminMysqlDb();
   const tenantId = requiredTenantId();
+  const deferBackend = input.backendConfig !== undefined && (await isServerVersionManaged(id));
   const patch: Partial<typeof mcpServers.$inferInsert> = { updatedAt: new Date() };
   if (input.displayName !== undefined) patch.displayName = input.displayName;
   if (input.transport !== undefined) patch.transport = input.transport;
   if (input.backendType !== undefined) patch.backendType = input.backendType;
-  if (input.backendConfig !== undefined) patch.backendConfig = encryptBackendConfig(input.backendConfig);
+  if (input.backendConfig !== undefined && !deferBackend) patch.backendConfig = encryptBackendConfig(input.backendConfig);
   if (input.requiredScopes !== undefined) patch.requiredScopes = input.requiredScopes;
   if (input.status !== undefined) patch.status = input.status;
   if (input.rateLimit !== undefined) patch.rateLimit = input.rateLimit;
   await db.update(mcpServers).set(patch).where(and(eq(mcpServers.tenantId, tenantId), eq(mcpServers.id, id)));
+  if (deferBackend && input.backendConfig) {
+    await insertToolSurfaceDraft(id, {
+      tools: await toolsForNextDraft(id),
+      backendConfig: encryptBackendConfig(input.backendConfig),
+      createdBy: input.createdBy,
+    });
+  }
   const updated = await getMcpServer(id);
   if (!updated) throw new Error("server not found");
   return updated;
@@ -174,6 +198,17 @@ export async function listMcpTools(serverId: string): Promise<McpToolRecord[]> {
 }
 
 export async function replaceMcpTools(serverId: string, tools: Omit<McpToolRecord, "id" | "serverId">[]): Promise<McpToolRecord[]> {
+  if (await isServerVersionManaged(serverId)) {
+    await insertToolSurfaceDraft(serverId, {
+      tools: recordsToVersionTools(tools),
+      backendConfig: await storedBackendForDraft(serverId),
+    });
+    return listMcpTools(serverId);
+  }
+  return writeLiveTools(serverId, tools);
+}
+
+async function writeLiveTools(serverId: string, tools: Omit<McpToolRecord, "id" | "serverId">[]): Promise<McpToolRecord[]> {
   const db = getAdminMysqlDb();
   await db.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
   const now = new Date();
@@ -232,6 +267,266 @@ export async function getMcpServerHealth(serverName: string): Promise<McpHealthS
   };
 }
 
+export interface McpServerVersionSummary {
+  id: string;
+  version: number;
+  shelfStatus: McpShelfStatus;
+  createdBy: string | null;
+  createdAt: string;
+  publishedAt: string | null;
+  toolCount: number;
+}
+
+function isoTime(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  return value instanceof Date ? value.toISOString() : String(value);
+}
+
+function asShelf(value: string): McpShelfStatus {
+  if (value === "draft" || value === "published") return value;
+  throw new Error("version not found");
+}
+
+function recordsToVersionTools(tools: Array<Omit<McpToolRecord, "id" | "serverId"> | McpToolRecord>): VersionTool[] {
+  return tools.map((tool) => ({
+    toolName: tool.toolName,
+    description: tool.description,
+    inputSchema: tool.inputSchema ?? {},
+    outputSchema: tool.outputSchema ?? null,
+    enabled: tool.enabled,
+    sourceOperationId: tool.sourceOperationId ?? null,
+    metadata: tool.metadata ?? {},
+  }));
+}
+
+function versionToolsToRecords(tools: VersionTool[]): Omit<McpToolRecord, "id" | "serverId">[] {
+  return tools.map((tool) => ({
+    toolName: tool.toolName,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    outputSchema: tool.outputSchema ?? undefined,
+    enabled: tool.enabled,
+    sourceOperationId: tool.sourceOperationId ?? undefined,
+    metadata: tool.metadata ?? {},
+  }));
+}
+
+async function loadServerRow(serverId: string) {
+  const db = getAdminMysqlDb();
+  const tenantId = requiredTenantId();
+  const rows = await db
+    .select()
+    .from(mcpServers)
+    .where(and(eq(mcpServers.tenantId, tenantId), eq(mcpServers.id, serverId)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+async function loadVersionNumbers(serverId: string): Promise<number[]> {
+  const db = getAdminMysqlDb();
+  const rows = await db
+    .select({ version: mcpServerVersions.version })
+    .from(mcpServerVersions)
+    .where(eq(mcpServerVersions.serverId, serverId));
+  return rows.map((row) => row.version);
+}
+
+async function isServerVersionManaged(serverId: string): Promise<boolean> {
+  const row = await loadServerRow(serverId);
+  if (!row) return false;
+  const numbers = await loadVersionNumbers(serverId);
+  return versionManaged(row.publishedVersionId, numbers.length);
+}
+
+async function toolsForNextDraft(serverId: string): Promise<VersionTool[]> {
+  const row = await loadServerRow(serverId);
+  if (!row) throw new Error("server not found");
+  if (row.publishedVersionId) {
+    const db = getAdminMysqlDb();
+    const versions = await db
+      .select()
+      .from(mcpServerVersions)
+      .where(eq(mcpServerVersions.id, row.publishedVersionId))
+      .limit(1);
+    const tools = versions[0]?.toolsJson;
+    if (Array.isArray(tools)) return tools.map(storedJsonToTool);
+  }
+  return recordsToVersionTools(await listMcpTools(serverId));
+}
+
+async function storedBackendForDraft(serverId: string): Promise<Record<string, unknown>> {
+  const row = await loadServerRow(serverId);
+  if (!row) throw new Error("server not found");
+  if (row.publishedVersionId) {
+    const db = getAdminMysqlDb();
+    const versions = await db
+      .select()
+      .from(mcpServerVersions)
+      .where(eq(mcpServerVersions.id, row.publishedVersionId))
+      .limit(1);
+    const config = versions[0]?.backendConfigJson;
+    if (config && typeof config === "object" && !Array.isArray(config)) return config;
+  }
+  return (row.backendConfig as Record<string, unknown>) ?? {};
+}
+
+async function insertToolSurfaceDraft(
+  serverId: string,
+  input: { tools: VersionTool[]; backendConfig: Record<string, unknown>; createdBy?: string },
+): Promise<McpDraftRef> {
+  const row = await loadServerRow(serverId);
+  if (!row) throw new Error("server not found");
+  const db = getAdminMysqlDb();
+  const version = nextVersionNumber(await loadVersionNumbers(serverId));
+  const id = ulid();
+  const now = new Date();
+  await db.insert(mcpServerVersions).values({
+    id,
+    serverId,
+    version,
+    toolsJson: input.tools.map(toolToStoredJson),
+    backendConfigJson: input.backendConfig,
+    contentHash: surfaceContentHash(input.tools, input.backendConfig),
+    shelfStatus: "draft",
+    createdBy: input.createdBy ?? null,
+    createdAt: now,
+  });
+  return { id, version, shelfStatus: "draft" };
+}
+
+async function loadOwnedVersion(serverId: string, versionId: string) {
+  const row = await loadServerRow(serverId);
+  if (!row) throw new Error("server not found");
+  const db = getAdminMysqlDb();
+  const versions = await db
+    .select()
+    .from(mcpServerVersions)
+    .where(and(eq(mcpServerVersions.serverId, serverId), eq(mcpServerVersions.id, versionId)))
+    .limit(1);
+  return { server: row, version: versions[0] ?? null };
+}
+
+function openApiBackendType(stored: Record<string, unknown>): "openapi" | undefined {
+  const plain = decryptBackendConfig(stored);
+  return typeof plain.openapi_json === "string" && plain.openapi_json.trim() ? "openapi" : undefined;
+}
+
+export async function listMcpServerVersions(serverId: string): Promise<{
+  publishedVersionId: string | null;
+  versions: McpServerVersionSummary[];
+}> {
+  const row = await loadServerRow(serverId);
+  if (!row) throw new Error("server not found");
+  const db = getAdminMysqlDb();
+  const versions = await db
+    .select()
+    .from(mcpServerVersions)
+    .where(eq(mcpServerVersions.serverId, serverId))
+    .orderBy(desc(mcpServerVersions.version));
+  return {
+    publishedVersionId: row.publishedVersionId ?? null,
+    versions: versions.map((version) => ({
+      id: version.id,
+      version: version.version,
+      shelfStatus: asShelf(version.shelfStatus),
+      createdBy: version.createdBy ?? null,
+      createdAt: isoTime(version.createdAt) ?? "",
+      publishedAt: isoTime(version.publishedAt),
+      toolCount: Array.isArray(version.toolsJson) ? version.toolsJson.length : 0,
+    })),
+  };
+}
+
+export async function publishCurrentMcpSurface(serverId: string, createdBy?: string): Promise<McpServerRecord> {
+  const row = await loadServerRow(serverId);
+  if (!row) throw new Error("server not found");
+  assertCanPublishCurrent((await loadVersionNumbers(serverId)).length);
+  const tools = recordsToVersionTools(await listMcpTools(serverId));
+  const backend = (row.backendConfig as Record<string, unknown>) ?? {};
+  const db = getAdminMysqlDb();
+  const id = ulid();
+  const now = new Date();
+  await db.insert(mcpServerVersions).values({
+    id,
+    serverId,
+    version: 1,
+    toolsJson: tools.map(toolToStoredJson),
+    backendConfigJson: backend,
+    contentHash: surfaceContentHash(tools, backend),
+    shelfStatus: "published",
+    createdBy: createdBy ?? null,
+    createdAt: now,
+    publishedAt: now,
+  });
+  await db
+    .update(mcpServers)
+    .set({ publishedVersionId: id, updatedAt: now })
+    .where(and(eq(mcpServers.tenantId, row.tenantId), eq(mcpServers.id, serverId)));
+  const updated = await getMcpServer(serverId);
+  if (!updated) throw new Error("server not found");
+  return updated;
+}
+
+export async function publishMcpServerVersion(serverId: string, versionId: string): Promise<McpServerRecord> {
+  const { server, version } = await loadOwnedVersion(serverId, versionId);
+  if (!version) throw new Error("version not found");
+  assertCanPublishDraft(asShelf(version.shelfStatus));
+  const tools = Array.isArray(version.toolsJson) ? version.toolsJson.map(storedJsonToTool) : [];
+  const backend =
+    version.backendConfigJson && typeof version.backendConfigJson === "object" && !Array.isArray(version.backendConfigJson)
+      ? version.backendConfigJson
+      : {};
+  const db = getAdminMysqlDb();
+  const now = new Date();
+  await db
+    .update(mcpServerVersions)
+    .set({ shelfStatus: "published", publishedAt: now })
+    .where(eq(mcpServerVersions.id, versionId));
+  const patch: Partial<typeof mcpServers.$inferInsert> = {
+    publishedVersionId: versionId,
+    backendConfig: backend,
+    updatedAt: now,
+  };
+  const backendType = openApiBackendType(backend);
+  if (backendType) patch.backendType = backendType;
+  await db
+    .update(mcpServers)
+    .set(patch)
+    .where(and(eq(mcpServers.tenantId, server.tenantId), eq(mcpServers.id, serverId)));
+  await writeLiveTools(serverId, versionToolsToRecords(tools));
+  const updated = await getMcpServer(serverId);
+  if (!updated) throw new Error("server not found");
+  return updated;
+}
+
+export async function rollbackMcpServerVersion(serverId: string, versionId: string): Promise<McpServerRecord> {
+  const { server, version } = await loadOwnedVersion(serverId, versionId);
+  if (!version) throw new Error("version not found");
+  assertCanRollback(asShelf(version.shelfStatus), versionId === server.publishedVersionId);
+  const tools = Array.isArray(version.toolsJson) ? version.toolsJson.map(storedJsonToTool) : [];
+  const backend =
+    version.backendConfigJson && typeof version.backendConfigJson === "object" && !Array.isArray(version.backendConfigJson)
+      ? version.backendConfigJson
+      : {};
+  const db = getAdminMysqlDb();
+  const now = new Date();
+  const patch: Partial<typeof mcpServers.$inferInsert> = {
+    publishedVersionId: versionId,
+    backendConfig: backend,
+    updatedAt: now,
+  };
+  const backendType = openApiBackendType(backend);
+  if (backendType) patch.backendType = backendType;
+  await db
+    .update(mcpServers)
+    .set(patch)
+    .where(and(eq(mcpServers.tenantId, server.tenantId), eq(mcpServers.id, serverId)));
+  await writeLiveTools(serverId, versionToolsToRecords(tools));
+  const updated = await getMcpServer(serverId);
+  if (!updated) throw new Error("server not found");
+  return updated;
+}
+
 /** Parse OpenAPI JSON and return candidate operations for admin whitelist UI. */
 export function previewOpenAPIOperations(
   specJson: string
@@ -280,12 +575,19 @@ function buildToolInputSchema(op: Record<string, unknown>): Record<string, unkno
   return schema;
 }
 
+export interface McpDraftRef {
+  id: string;
+  version: number;
+  shelfStatus: "draft";
+}
+
 export async function importOpenAPITools(
   serverId: string,
   specJson: string,
   allowedOperationIds: string[],
-  baseUrl?: string
-): Promise<McpServerRecord> {
+  baseUrl?: string,
+  createdBy?: string,
+): Promise<{ server: McpServerRecord; draft: McpDraftRef | null }> {
   const server = await getMcpServer(serverId);
   if (!server) throw new Error("server not found");
   const allowed = new Set(allowedOperationIds.map((s) => s.trim()).filter(Boolean));
@@ -308,9 +610,17 @@ export async function importOpenAPITools(
     allowed_operation_ids: [...allowed],
     ...(baseUrl?.trim() ? { base_url: baseUrl.trim() } : {}),
   };
-  await updateMcpServer(serverId, { backendConfig, backendType: "openapi" });
-  await replaceMcpTools(serverId, tools);
-  const updated = await getMcpServer(serverId);
-  if (!updated) throw new Error("update failed");
-  return updated;
+  if (!(await isServerVersionManaged(serverId))) {
+    await updateMcpServer(serverId, { backendConfig, backendType: "openapi" });
+    await writeLiveTools(serverId, tools);
+    const updated = await getMcpServer(serverId);
+    if (!updated) throw new Error("update failed");
+    return { server: updated, draft: null };
+  }
+  const draft = await insertToolSurfaceDraft(serverId, {
+    tools: recordsToVersionTools(tools),
+    backendConfig: encryptBackendConfig(backendConfig),
+    createdBy,
+  });
+  return { server, draft };
 }

@@ -1,0 +1,105 @@
+# 每行一个列表页 URL；空行和 # 开头的行是注释。
+# 分组标题形如「# ===== [核心] 名称 =====」。[核心] 分组每次都扫；其余分组在 depth=quick 时跳过。
+# URL 上一行写「# 需浏览器」的源，普通抓取只拿到空壳页面，要用浏览器渲染后再读列表。
+# 抓取时先试该站的 RSS / Atom，拿不到再读 HTML，见 daily-digest.md 第 1 步。
+
+# ===== [核心] 国际一线实验室 =====
+https://www.anthropic.com/research
+https://www.anthropic.com/engineering
+https://www.anthropic.com/news
+# 需浏览器；RSS 可直接读：https://openai.com/news/rss.xml
+https://openai.com/news/
+https://deepmind.google/blog/
+https://blog.google/technology/ai/
+https://research.google/blog/
+# 需浏览器
+https://ai.meta.com/blog/
+https://www.microsoft.com/en-us/research/blog/
+https://developer.nvidia.com/blog/
+https://huggingface.co/blog
+https://mistral.ai/news/
+# 需浏览器
+https://x.ai/news
+https://thinkingmachines.ai/blog/
+
+# ===== [核心] Agent 工程与平台 =====
+https://www.langchain.com/blog
+https://claude.dev/blog
+https://github.com/anthropics/claude-agent-sdk-typescript/releases
+https://platform.claude.com/docs/en/release-notes/api
+https://cursor.com/blog
+https://manus.im/blog
+
+# ===== [核心] 国内一线 =====
+https://www.deepseek.com/news/
+# 需浏览器
+https://qwen.ai/research
+https://platform.moonshot.cn/blog
+# 2026-11-09 用户添加：Kimi 新闻
+https://www.kimi.com/news/
+https://www.minimax.io/news
+https://zhipu-ai.feishu.cn/wiki/YInmwPmyii67VRkzU3BchPNzncg
+https://seed.bytedance.com/en/public_papers
+# 需浏览器
+https://seed.bytedance.com/en/blog
+# 需浏览器
+https://hunyuan.tencent.com/blog
+# 需浏览器
+https://www.stepfun.com/news
+https://www.shlab.org.cn/info
+# 需浏览器
+https://www.baai.ac.cn/news
+
+# ===== [核心] 安全与评测 =====
+https://www.far.ai/topic/model-evaluation
+https://metr.org/blog/
+https://www.apolloresearch.ai/blog
+
+# ===== 分析与评论 =====
+https://www.interconnects.ai/archive
+
+# ===== 论文列表 =====
+# 需浏览器
+https://openai.com/research/index/publication/
+https://deepmind.google/research/publications/
+
+# ===== 国际：平台与工具 =====
+https://unsloth.ai/blog
+https://rasa.com/blog/
+https://www.runlayer.com/blog
+https://circleci.com/blog/
+https://www.snowflake.com/en/blog/engineering/
+https://blog.cloudflare.com/zh-cn/
+https://www.palantir.com/blog/
+https://aws.amazon.com/blogs/machine-learning/
+https://machinelearning.apple.com/
+https://cohere.com/blog
+https://www.together.ai/blog
+https://www.databricks.com/blog/category/research
+https://sakana.ai/blog/
+# 需浏览器
+https://www.perplexity.ai/hub/blog
+https://groq.com/blog
+https://stability.ai/news-updates
+https://research.ibm.com/blog
+
+# ===== 国际：高校与开源研究 =====
+https://blog.eleuther.ai/
+https://bair.berkeley.edu/blog/
+https://hai.stanford.edu/news
+https://allenai.org/blog
+
+# ===== 国内：平台、社区与研究 =====
+https://java2ai.com/blog/
+https://nacos.io/blog/
+https://longcat.chat/platform/docs/zh/ChangeLog.html
+https://docs.siliconflow.cn/cn/release-notes/overview
+https://www.53ai.com/news/OpenSourceLLM/
+https://developer.volcengine.com/articles
+https://ai.feishu.cn/wiki/HhHOwodFciggqqkTeF8cK3Wcnyb
+https://ai.feishu.cn/wiki/LxpHw7iyuiX66FkebN0ceQtFnVb
+https://waytoagi.feishu.cn/wiki/QPe5w5g7UisbEkkow8XcDmOpn8e
+https://www.noahlab.com.hk/news
+# 需浏览器
+https://mimo.mi.com/docs/zh-CN/news
+https://air.tsinghua.edu.cn/lby.jsp?order=1&urltype=tree.TreeTempUrl&wbtreeid=1007

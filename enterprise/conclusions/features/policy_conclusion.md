@@ -1,6 +1,6 @@
 # @agenticx/feature-policy 模块总结
 
-> 结论再生时间：2026-07-21（基于 `enterprise/features/policy` 源码重写）
+> 结论再生时间：2026-11-14（target `cebdabd5`，基于 `enterprise/features/policy` 源码重写）
 
 > 说明：本文档描述**敏感规则配置 feature 包**（`@agenticx/feature-policy`），由 `apps/admin-console` 在 policy 页面消费，发布产物（`PolicySnapshot`）经 admin-console 的 `/api/internal/policy-snapshot` 或本地 `.runtime/admin/policy-snapshot.json` 被 Go 网关 `apps/gateway` 热加载，喂给 `policy-engine` 做运行时评估。本包只管"配置侧"，**不做运行时评估**。
 
@@ -21,6 +21,7 @@ features/policy/
 ├── README.md
 ├── tests/
 │   ├── rule-utils.test.ts           # 3 case：normalize/findRuleMatches
+│   ├── rule-category.test.ts        # category 透传：pg/mysql `normalizeRulePayload` 同构（5+1 case）
 │   └── snapshot-writer.test.ts       # 4 case：写/读/CAS/坏文件（均走 legacy 文件路径）
 └── src/
     ├── index.ts                     # barrel：types/audit/snapshot/services
@@ -49,21 +50,23 @@ features/policy/
 - `PolicySnapshot`：`tenantId/version/publishId/publishedAt/publisher/deptIndex/packs[]`。
 - `PolicyPublishEvent`：含完整 `snapshot` + `summary` + `status`。
 - `PublishResult`：`{ event, snapshotPath }`。
+- `PolicyRulePayload.category?`：合规内容类别（如 politics/porn/terrorism/ad），随 payload 入库并进入发布快照。
+- `PolicyTestHit.category?`：规则测试预览命中时回显 payload 中的类别。
 
 ## Store API（`PgPolicyStore` / `MysqlPolicyStore` 一致）
 
 ### Pack 管理
 - `listPacks/getPack/createPack/updatePack/deletePack`。
 - `builtin` 包可启停、可改 description/appliesTo，**不可改名、不可删除**（`updatePack`/`deletePack` 显式抛错）。
-- `ensureBuiltinSeed(tenantId)`：扫描 `enterprise/plugins/moderation-*/manifest.yaml`，按 `(tenantId, code)` upsert builtin pack 与 rule，幂等（进程内 `builtinSeeded` Set 缓存）。
+- `ensureBuiltinSeed(tenantId)`：扫描 `enterprise/plugins/moderation-*/manifest.yaml`，按 `(tenantId, code)` upsert builtin pack 与 rule；manifest 规则可选 `category` 写入 payload，幂等（进程内 `builtinSeeded` Set 缓存）。
 
 ### Rule 管理
 - `listRules(filter)` / `upsertRule` / `deleteRule` / `setRuleStatus`。
-- `upsertRule`：同包 `code` 唯一性校验；命中已停用编码会提示"恢复或换编码"；`normalizeRulePayload` 按 kind 校验。
+- `upsertRule`：同包 `code` 唯一性校验；命中已停用编码会提示"恢复或换编码"；Store 内 `normalizeRulePayload`（已从 `pg-store`/`mysql-store` 导出，`index` 经 `export *` 暴露 PG 侧）按 kind 校验，非空 `payload.category` trim 后保留进快照。
 - `setRuleStatus`：`draft/active/disabled` 三态切换。
 
 ### 测试预览
-- `testRules(tenantId, ruleIds, sampleText, stage, previewByRuleId?)`：把规则在样本文本上跑命中，`block` 置 `blocked=true`，`redact` 把命中片段替换为 `[REDACTED]`，`warn` 只记 hit。
+- `testRules(tenantId, ruleIds, sampleText, stage, previewByRuleId?)`：把规则在样本文本上跑命中，`block` 置 `blocked=true`，`redact` 把命中片段替换为 `[REDACTED]`，`warn` 只记 hit；每条 `PolicyTestHit` 带 `category`（来自有效 payload，无则 `null`）。
 - `previewByRuleId` 支持合并**未保存的表单改动**再跑测试（admin-console `/api/policy/test` 用）。
 
 ### 发布与回滚
@@ -105,7 +108,7 @@ features/policy/
 | `mysql2 ^3` | MySQL 驱动 |
 | `ulid ^3` | 规则/发布 ID |
 | `yaml ^2` | 解析 builtin moderation manifest |
-| `vitest ^3` | 测试 |
+| `vitest ^5` | 测试 |
 
 ## 与 admin-console 的关系（配置侧消费者）
 
@@ -132,7 +135,7 @@ features/policy/
 6. **legacy 迁移只跑一次**：`legacyFileMigrated` 是模块级 flag，进程生命周期内只迁移一次；若 DB 已有行则永远不再读 legacy 文件，即使 legacy 文件后续变化也不会再迁移。
 7. **policy 审计不进哈希链**：`insertPolicyAuditEvent` 写 `prevChecksum/checksum` 硬编码 `"admin-policy"`、`signature=null`，与网关审计的 Blake2b 哈希链是两套语义，admin-console 审计查询需注意区分。
 8. **builtin seed 静默吞错**：`ensureBuiltinSeed` 读 `plugins/` 失败时 `catch` 后直接 `add(tenantId)` 返回，builtin 规则可能悄无声息地不装载。
-9. **测试覆盖薄**：仅 7 个 case，且 `snapshot-writer.test.ts` 全部通过 `ENTERPRISE_POLICY_SNAPSHOT_FILE` 指向 tmpdir 走 **legacy 文件路径**，**未覆盖 PG/MySQL 写入与 DB 级 CAS**；Store 的 publish/rollback/testRules/upsertRule 等核心路径**无单测**。
+9. **测试覆盖薄**：`rule-utils`/`snapshot-writer` 共 7 case + `rule-category` 6 case（仅 Store `normalizeRulePayload` category 透传）；`snapshot-writer.test.ts` 仍全走 legacy 文件路径，**未覆盖 PG/MySQL 写入与 DB 级 CAS**；publish/rollback/testRules/upsertRule 等核心路径**仍无单测**。`services/rule-utils.ts` 的 `normalizeRulePayload` **仍未保留 category**，与 Store 副本继续漂移。
 10. **redact 顺序敏感**：`testRules` 用 `redactedText.split(item).join("[REDACTED]")` 逐条替换，重叠/嵌套匹配可能重复替换或顺序依赖，预览结果不保证幂等。
 11. **`migrateLegacySnapshotFileOnce` 在 MySQL 路径下用 `getPolicyMysqlDb()`，PG 路径下用 `getIamDb()`，但二者共享同一 `legacyFileMigrated` flag**：若进程内先以方言 A 触发迁移、再切方言 B，flag 已置位，方言 B 不会再迁移（理论上同进程切换方言极少见）。
 

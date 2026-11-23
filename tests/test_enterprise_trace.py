@@ -20,6 +20,7 @@ from agenticx.runtime import enterprise_trace
 from agenticx.runtime.enterprise_trace import (
     build_spans,
     flush_outbox,
+    trace_content_allowed,
     trace_upload_enabled,
 )
 from agenticx.runtime.replay_ledger.contracts import ReplayRunRecord, RunEvent
@@ -441,7 +442,7 @@ def test_enqueue_copies_blob_usage_without_message_text(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _enable(monkeypatch, tmp_path)
+    _enable(monkeypatch, tmp_path, agent_action_policy={"trace_content": True})
     monkeypatch.setattr(enterprise_trace, "_start_flush_thread", lambda: None)
     from agenticx.runtime.replay_ledger.store import ReplayLedgerStore
 
@@ -532,3 +533,204 @@ def test_finish_enqueues_after_close_and_survives_errors(
     other.start_turn(turn_id="turn2", user_input="hi")
     other.finish("failed")
     assert other._finished is True
+
+
+def test_enqueue_redacts_content_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable(monkeypatch, tmp_path)
+    monkeypatch.setattr(enterprise_trace, "_start_flush_thread", lambda: None)
+    from agenticx.runtime.replay_ledger.store import ReplayLedgerStore
+
+    store = ReplayLedgerStore(tmp_path / "sessions")
+    run = _run()
+    store.open_run(run)
+    blob_ref = store.write_blob(
+        run.run_id,
+        {
+            "text": "SECRET_BODY",
+            "reasoning": "visible thought",
+            "usage_metadata": {
+                "input_tokens": 7,
+                "output_tokens": 3,
+                "reasoning_tokens": 1,
+                "total_tokens": 10,
+            },
+        },
+    )
+    store.append_event(
+        run.run_id,
+        _event(1, 1.0, "user_message", payload={"text": "SECRET_USER"}),
+    )
+    store.append_event(
+        run.run_id,
+        _event(
+            0,
+            2.0,
+            "assistant_output_completed",
+            payload={"text_preview": "visible reply", "terminal_reason": "model_final"},
+            payload_ref=blob_ref,
+        ),
+    )
+    store.close_run(run.run_id, "completed", 3.0)
+    enterprise_trace.enqueue_completed_run(store, run.run_id)
+    encoded = json.dumps(_outbox_spans())
+    assert "visible reply" not in encoded
+    assert "visible thought" not in encoded
+    assert "SECRET_USER" not in encoded
+    spans = _outbox_spans()
+    model = next(span for span in spans if span["step_kind"] == "model")
+    assert model["input_tokens"] == 7
+    run_span = next(span for span in spans if span["step_kind"] == "run")
+    assert run_span["metadata"]["agent_id"] == "meta"
+
+
+@pytest.mark.parametrize(
+    ("enterprise", "expected"),
+    [
+        ({}, False),
+        ({"agent_action_policy": {"trace_content": True}}, True),
+        ({"agent_action_policy": {"traceContent": True}}, True),
+        ({"agent_action_policy": {"trace_content": "true"}}, False),
+        ({"agent_action_policy": []}, False),
+    ],
+)
+def test_trace_content_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    enterprise: dict[str, Any],
+    expected: bool,
+) -> None:
+    _isolate_config(monkeypatch, tmp_path, enterprise)
+    assert trace_content_allowed() is expected
+
+
+_ROTATED_PAT = "rotated-pat"
+
+
+def _install_transport(
+    monkeypatch: pytest.MonkeyPatch, handler: Any
+) -> None:
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+
+    def factory(*args: Any, **kwargs: Any) -> httpx.Client:
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(enterprise_trace.httpx, "Client", factory)
+
+
+def test_flush_drops_spans_from_other_account(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable(monkeypatch, tmp_path, user_email="a@corp.test")
+    _seed_outbox(
+        [
+            {"trace_id": "near:sess:a", "step_no": 1, "step_kind": "run"},
+            {"trace_id": "near:sess:a", "step_no": 2, "step_kind": "model"},
+        ]
+    )
+    _enable(monkeypatch, tmp_path, user_email="b@corp.test")
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    _install_transport(monkeypatch, handler)
+    assert flush_outbox() == 0
+    assert calls == []
+    assert _outbox_spans() == []
+
+
+def test_flush_stops_when_account_changes_between_batches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable(monkeypatch, tmp_path, user_email="a@corp.test")
+    _seed_outbox(
+        [
+            {"trace_id": f"near:sess:{index}", "step_no": 1, "step_kind": "run"}
+            for index in range(enterprise_trace._UPLOAD_BATCH + 50)
+        ]
+    )
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        _enable(monkeypatch, tmp_path, user_email="b@corp.test")
+        return httpx.Response(200, json={"ok": True})
+
+    _install_transport(monkeypatch, handler)
+    assert flush_outbox() == enterprise_trace._UPLOAD_BATCH
+    assert len(calls) == 1
+    assert len(_outbox_spans()) == 50
+
+
+def test_flush_same_account_after_relogin_uploads(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable(monkeypatch, tmp_path, user_email="a@corp.test")
+    _seed_outbox(
+        [
+            {"trace_id": "near:sess:a", "step_no": 1, "step_kind": "run"},
+            {"trace_id": "near:sess:a", "step_no": 2, "step_kind": "model"},
+        ]
+    )
+    _enable(monkeypatch, tmp_path, user_email="a@corp.test", token=_ROTATED_PAT)
+    seen_auth: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_auth.append(request.headers["authorization"])
+        return httpx.Response(200, json={"ok": True})
+
+    _install_transport(monkeypatch, handler)
+    assert flush_outbox() == 2
+    assert seen_auth == [f"Bearer {_ROTATED_PAT}"]
+
+
+def test_flush_strips_account_field(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable(monkeypatch, tmp_path, user_email="a@corp.test")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["spans"]
+        for span in body["spans"]:
+            assert "_acct" not in span
+        return httpx.Response(200, json={"ok": True})
+
+    _install_transport(monkeypatch, handler)
+    _seed_outbox(
+        [
+            {"trace_id": "near:sess:a", "step_no": 1, "step_kind": "run"},
+            {"trace_id": "near:sess:a", "step_no": 2, "step_kind": "model"},
+        ]
+    )
+    assert flush_outbox() == 2
+
+
+def test_flush_drops_legacy_lines_without_account(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable(monkeypatch, tmp_path)
+    path = enterprise_trace.outbox_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        '{"trace_id":"near:s:a","step_no":1,"step_kind":"run"}\n',
+        encoding="utf-8",
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True})
+
+    _install_transport(monkeypatch, handler)
+    assert flush_outbox() == 0
+    assert not path.exists()

@@ -1,11 +1,11 @@
 # Package Root 模块结论
 
-> 结论更新时间：2026-10-25（mapping 刷新，基线覆盖至 `22d051f5`：`cases` / `connectors` / `rl` 拆为独立模块；本 diff 同步版本 `0.6.5`）
+> 结论更新时间：2026-11-14（mapping 刷新，基线覆盖至 `cebdabd5`：`data_suite` / `harness` / `managed` / `rules` / `security_eval` 拆为独立模块；本 diff 同步版本 `0.6.5`）
 
 ## Responsibility
 - 作为 `agenticx` 顶层 Python 包的**门面与胶水层**：版本号、可选依赖导入辅助、产品品牌常量、Agent 预设模板，以及在非 CLI 启动时聚合导出 core/llms/tools/memory 等子包公共 API。
 - 与 `pyproject.toml`、`requirements.txt` 共同定义包元数据、Python 版本下限（>=3.10）与核心/可选 extras 依赖契约（`requirements.txt` 为 `pyproject.toml [project.dependencies]` 的镜像，注释要求先改 pyproject）。
-- Explicit non-responsibilities: 不实现各子包业务逻辑；一级子目录（含 `ops/`、`reliability/`、`wb_bridge/`、`cases/`、`connectors/`、`rl/`，以及 `core/`、`studio/`、`runtime/`、`cc_bridge/` 等）由对应 module conclusion 覆盖；本结论不含 `agenticx/**/*.py` 除根目录五个文件外的任何代码。
+- Explicit non-responsibilities: 不实现各子包业务逻辑；一级子目录（含 `ops/`、`reliability/`、`wb_bridge/`、`cases/`、`connectors/`、`rl/`、`data_suite/`、`harness/`、`managed/`、`rules/`、`security_eval/`，以及 `core/`、`studio/`、`runtime/`、`cc_bridge/` 等）由对应 module conclusion 覆盖；本结论不含 `agenticx/**/*.py` 除根目录五个文件外的任何代码，亦不记录上述已拆分模块内部实现。
 
 ## Entry points and public interfaces
 - `agenticx/__init__.py`：`__version__`（来自 `_version`）、`__author__` / `__email__`、`CLI_BOOTSTRAP_NAMES`（CLI 启动名白名单 frozenset）；非 CLI 时 re-export 大量符号（Agent、Task、Workflow、LLM providers、memory、protocols、hooks、flow、delegation、observability 等），见模块末尾 `__all__`。
@@ -28,8 +28,8 @@
 
 ## Data and configuration
 - 版本与作者：`pyproject.toml` `[project]`（name `agenticx`、version、authors、classifiers、keywords）。
-- 依赖分层：`[project.dependencies]` 核心轻量栈；`[project.optional-dependencies]` 含 `desktop-runtime`、`dev`、`memory`、`graph` 等 extras（详见 pyproject，不在此枚举）。
-- `requirements.txt`：核心依赖镜像 + 安装说明（`pip install -e .` / extras / 可选 lock）。
+- 依赖分层：`[project.dependencies]` 核心轻量栈（`docstring-parser>=0.11,<0.19`；`ujson>=5.8.0,<7`；`psutil>=5.9.0,<8`）；`[project.optional-dependencies]` 含 `desktop-runtime`、`dev`、`memory`、`graph` 等 extras（详见 pyproject，不在此枚举）；新增 `data-suite-ch`（`clickhouse-connect>=0.7.0,<1`）；`desktop-runtime` / `mcp` 中 `mcp>=1.0.0,<3`，`semble>=0.1.10,<0.8.0`；`llm` 中 `anthropic>=0.40.0,<2`；`graphiti` 上界 `<0.32`；`volcengine` 中 `agentkit-sdk-python>=0.2.0,<0.9`；`dev` 中 `pytest>=7.4.0,<10`、`mypy>=1.0.0,<3`。
+- `requirements.txt`：核心依赖镜像（与 `[project.dependencies]` 同步：`docstring-parser` / `ujson` / `psutil` 上界同上）+ 安装说明（`pip install -e .` / extras / 可选 lock）。
 - 包内资源：`[tool.setuptools.package-data]` 对 `agenticx` 打包 `*.yaml/*.yml/*.json/*.toml/*.txt/*.md/*.png`（含子目录 `**/`），PNG 资源（如 `agenticx/avatar/near_cube_luma.png`）随 wheel 分发。
 - 品牌常量硬编码于 `branding.py`，运行时可通过各调用方 env（如 `AGX_WECHAT_REPLY_NAME`）覆盖展示名，但非本模块职责。
 
