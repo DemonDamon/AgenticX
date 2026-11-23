@@ -7,6 +7,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { createAssistantMdComponents } from "../../markdown/assistant-markdown-components";
 import { OriginalPdfViewer } from "./OriginalPdfViewer";
+import { usePreviewDialog, usePreviewPanelLayout } from "../../hooks/usePreviewPanelLayout";
+import { usableViewportStyle } from "../../utils/usable-viewport";
 import "../../markdown/chat-prism-themes.css";
 
 export type AttachmentContentPanelProps = {
@@ -126,6 +128,11 @@ export function AttachmentContentPanel({
   const [scalePercent, setScalePercent] = React.useState(100);
   const [originalError, setOriginalError] = React.useState<string | null>(null);
   const [clientReady, setClientReady] = React.useState(false);
+  const { panelRef, overlay } = usePreviewPanelLayout(open);
+  usePreviewDialog(panelRef, open && (fullscreen || overlay), () => {
+    if (fullscreen) setFullscreen(false);
+    else onOpenChange(false);
+  });
   const components = React.useMemo(() => createAssistantMdComponents({ variant: "document" }), []);
   const body = attachment?.parsed_text?.trim() ?? "";
   const title = attachment?.name ?? "附件";
@@ -150,15 +157,6 @@ export function AttachmentContentPanel({
     setOriginalError(null);
   }, [attachment?.attachment_id, attachment?.name]);
 
-  React.useEffect(() => {
-    if (!fullscreen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setFullscreen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [fullscreen]);
-
   if (!open || !attachment) return null;
 
   const canDownloadOriginal = Boolean(attachment.attachment_id);
@@ -167,15 +165,23 @@ export function AttachmentContentPanel({
 
   return (
     <aside
+      ref={panelRef}
       className={[
         fullscreen
-          ? "fixed inset-0 z-50 flex min-h-0 w-full flex-col bg-background shadow-2xl"
-          : "flex h-full min-h-0 w-[min(48%,36rem)] shrink-0 flex-col border-l border-border bg-background",
+          ? "fixed z-50 box-border flex min-h-0 w-full flex-col bg-background pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl"
+          : overlay
+            ? "fixed z-40 box-border flex min-h-0 w-full flex-col bg-background pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-xl"
+            : "flex h-full min-h-0 w-[min(48%,36rem)] shrink-0 flex-col border-l border-border bg-background",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
       data-testid="attachment-content-panel"
+      style={fullscreen || overlay ? usableViewportStyle : undefined}
+      data-layout={fullscreen ? "fullscreen" : overlay ? "overlay" : "docked"}
+      data-preview-modal={fullscreen || overlay ? "true" : undefined}
+      role={fullscreen || overlay ? "dialog" : undefined}
+      aria-modal={fullscreen || overlay ? true : undefined}
       aria-label="附件预览"
     >
       <div className="flex shrink-0 items-center gap-0.5 px-4 pb-1 pt-3.5 sm:gap-1">
@@ -268,6 +274,7 @@ export function AttachmentContentPanel({
                 onOpenChange(false);
               }}
               aria-label="关闭"
+              data-preview-close
             >
               <IconClose className="h-4 w-4" />
             </Button>
