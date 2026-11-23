@@ -55,6 +55,8 @@ import {
   disposeHistoryOutbox,
   startHistoryOutboxCoordinator,
   useChatStore,
+  useUsableViewport,
+  usableViewportStyle,
   type HistoryAppendPayload,
 } from "@agenticx/feature-chat";
 import {
@@ -142,32 +144,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const [historyPanelOpen, setHistoryPanelOpen] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const workspaceRef = React.useRef<HTMLElement>(null);
-  React.useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!viewport) return;
-    const mobile = window.matchMedia("(max-width: 1023px)");
-    const update = () => {
-      const element = workspaceRef.current;
-      if (!element) return;
-      if (!mobile.matches) {
-        element.style.removeProperty("--chat-viewport-height");
-        element.style.removeProperty("top");
-        return;
-      }
-      if (viewport.scale !== 1) return;
-      element.style.setProperty("--chat-viewport-height", `${viewport.height}px`);
-      element.style.top = `${viewport.offsetTop}px`;
-    };
-    update();
-    viewport.addEventListener("resize", update);
-    viewport.addEventListener("scroll", update);
-    mobile.addEventListener("change", update);
-    return () => {
-      viewport.removeEventListener("resize", update);
-      viewport.removeEventListener("scroll", update);
-      mobile.removeEventListener("change", update);
-    };
-  }, []);
+  const compactViewport = useUsableViewport(workspaceRef);
   const [panelMode, setPanelMode] = React.useState<PanelMode>("chat");
   const [deepResearchMode, setDeepResearchMode] = React.useState(false);
   /** Tenant gate: sidebar entry hidden when admin disables deep research. Default ON. */
@@ -409,15 +386,19 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   return (
     <ChatLocaleProvider locale={locale === "en" ? "en" : "zh"}>
     <TooltipProvider delayDuration={200}>
-      <main ref={workspaceRef} className="fixed inset-x-0 top-0 flex h-[var(--chat-viewport-height,100dvh)] min-w-0 overflow-hidden bg-background pt-[env(safe-area-inset-top)] text-foreground lg:static">
+      <main ref={workspaceRef} style={usableViewportStyle} data-compact={compactViewport ?? undefined} className="fixed box-border flex min-w-0 overflow-hidden bg-background pt-[env(safe-area-inset-top)] text-foreground">
         {/* 侧栏 */}
         <aside
           data-collapsed={collapsed ? "1" : undefined}
           data-mobile-open={mobileOpen ? "1" : undefined}
           className={[
-            "group/sidebar fixed inset-y-0 left-0 z-40 flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width,transform] duration-200",
+            "group/sidebar inset-y-0 left-0 z-40 flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width,transform] duration-200",
             "w-[272px] data-[collapsed=1]:w-[72px]",
-            "-translate-x-full data-[mobile-open=1]:translate-x-0 lg:static lg:translate-x-0",
+            compactViewport === null
+              ? "absolute -translate-x-full data-[mobile-open=1]:translate-x-0 lg:relative lg:translate-x-0"
+              : compactViewport
+                ? "absolute -translate-x-full data-[mobile-open=1]:translate-x-0"
+                : "relative translate-x-0",
           ].join(" ")}
         >
           {/* 顶部品牌 + 收起侧栏（与主区分界侧对齐，见设计稿图2；窄栏时纵向排布） */}
@@ -450,7 +431,8 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
                   onClick={() => setCollapsed((prev) => !prev)}
                   aria-label={sidebarToggleLabel}
                   className={[
-                    "hidden shrink-0 border-sidebar-border/80 bg-background/60 text-muted-foreground shadow-none hover:bg-muted/80 hover:text-foreground lg:inline-flex",
+                    "shrink-0 border-sidebar-border/80 bg-background/60 text-muted-foreground shadow-none hover:bg-muted/80 hover:text-foreground",
+                    compactViewport === null ? "hidden lg:inline-flex" : compactViewport ? "hidden" : "inline-flex",
                     collapsed ? "h-7 w-7" : "h-8 w-8",
                   ].join(" ")}
                 >
@@ -701,7 +683,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
 
         {mobileOpen && (
           <div
-            className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm lg:hidden"
+            className={["absolute inset-0 z-30 bg-black/40 backdrop-blur-sm", compactViewport === null ? "lg:hidden" : compactViewport ? "" : "hidden"].join(" ")}
             onClick={() => setMobileOpen(false)}
             aria-hidden
           />
@@ -709,7 +691,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
 
         {/* 主区 */}
         <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-          <div className="absolute left-4 top-4 z-30 lg:hidden">
+          <div className={["absolute left-4 top-4 z-30", compactViewport === null ? "lg:hidden" : compactViewport ? "" : "hidden"].join(" ")}>
             <Button
               variant="ghost"
               size="icon-sm"
