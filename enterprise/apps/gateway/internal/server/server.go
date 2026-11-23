@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 
 	"path/filepath"
@@ -56,6 +57,7 @@ import (
 )
 
 type Server struct {
+	trustedProxies        []netip.Prefix
 	cfg                   config.Config
 	logger                *slog.Logger
 	provider              provider.ChatProvider
@@ -119,6 +121,10 @@ var (
 )
 
 func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
+	trustedProxies, err := parseTrustedProxies(cfg.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, fmt.Errorf("configure trusted proxies: %w", err)
+	}
 	// metering：开发态可选数据库，未配 DATABASE_URL 时降级到本地 jsonl，
 	// 让前台 token chip 与 admin 看用量都能继续工作而不必启数据库。
 	dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
@@ -224,6 +230,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	}
 
 	srv := &Server{
+		trustedProxies:    trustedProxies,
 		cfg:               cfg,
 		logger:            logger,
 		provider:          provider.NewOpenAICompatibleProvider(),
@@ -742,7 +749,7 @@ func (s *Server) reportPolicyFailure(err error) {
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	r.Use(trustedProxyRealIP(s.trustedProxies))
 	r.Use(middleware.Recoverer)
 	r.Use(requestTimeout(requestTimeoutFromEnv(s.logger)))
 	if s.metrics != nil && s.metrics.Enabled() {

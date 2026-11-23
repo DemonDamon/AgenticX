@@ -1,4 +1,4 @@
-import { OidcCallbackError, OidcClaimError, OidcConfigError, validateStateFromCookie } from "@agenticx/auth";
+import { OidcCallbackError, OidcClaimError, OidcConfigError, resolveOidcIdentitySubject, validateStateFromCookie } from "@agenticx/auth";
 import { insertAuditEvent, sanitizeSsoAuditDetail } from "@agenticx/iam-core";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -87,12 +87,13 @@ export async function GET(request: Request) {
       expectedNonce: decoded.nonce,
       codeVerifier: decoded.codeVerifier,
     });
-    subjectForAudit = exchanged.mapped.externalId ?? null;
+    subjectForAudit = resolveOidcIdentitySubject(exchanged.claims);
 
     const loginResult = await loginWithOidcClaims({
       providerId: provider.providerId,
       issuer: provider.issuer,
-      subject: exchanged.mapped.externalId,
+      subject: resolveOidcIdentitySubject(exchanged.claims),
+      emailVerified: exchanged.mapped.emailVerified,
       email: exchanged.mapped.email,
       displayName: exchanged.mapped.displayName,
       deptHint: exchanged.mapped.deptHint,

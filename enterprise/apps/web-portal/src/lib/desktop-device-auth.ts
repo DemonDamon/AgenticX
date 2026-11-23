@@ -141,6 +141,7 @@ export async function pollDesktopDeviceAuth(input: {
     const expireDays = desktopPatExpireDays();
     const pat = await createPat({
       tenantId: claimed.tenantId,
+      actor: { kind: "user", tenantId: claimed.tenantId, userId: claimed.userId!, scopes: [] },
       userId: claimed.userId!,
       deptId: claimed.deptId,
       name: desktopPatDisplayName(claimed.deviceName),

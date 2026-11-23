@@ -2,14 +2,14 @@
 name: agenticx-fusion-digest
 slug: agenticx-fusion-digest
 displayName: 情报搜集
-version: "1.0.6"
+version: "1.0.9"
 summary: 装给智能体后可当 AI 日报助手（冷启动巡检、可扩充监控源、按用户偏好记忆定制内容），也可当情报分析专家（围绕问题多轮检索核实，或对日报里值得关注的方向建立聚焦专题持续深挖）。结果落盘到本地文件夹、飞书知识库或文档库、GitHub 仓库。
 license: Apache-2.0
 homepage: https://www.agxbuilder.com/
 description: Use when collecting and synthesizing information, either as a recurring digest from a watchlist or as targeted multi-round research on a specific question, and saving the result to a local folder, a Feishu doc or wiki, or a GitHub repo. 用户说「情报搜集」「帮我调研一下 X」「深度研究 X」「收集一下 X 的资料」「X 和 Y 怎么选，帮我查查」「整理一份 X 的竞品情报」「写今天的 AI 日报」「跑一下 AI 日报」「写一篇 AI 周报」「把这几篇融会贯通写一篇」「别只罗列，要有观点」「巡检一下监控源」「加上这个源」「以后日报都按这样写」「把 X 方向作为重点持续盯」「对 X 做专题情报」「把结果存到飞书 / 本地 / GitHub」时启用；也用于战略类智能体发起聚焦专题请求。不用于单篇翻译、摘抄、纯链接目录或 changelog 归档。
 metadata:
   author: Damon Li
-  version: "1.0.6"
+  version: "1.0.9"
 ---
 
 # 情报搜集
@@ -54,13 +54,13 @@ metadata:
 | `mode` | `daily` / `research` / `focus` | 按上文「选模式」判断 |
 | `question` | 定向搜集要回答的问题 | `research` 模式必填 |
 | `focus` | 聚焦专题请求，字段见 `references/focus-tracking.md`；或已有专题的短名，表示跑下一轮 | `focus` 模式必填 |
-| `depth` | `quick` / `standard` / `deep` | `standard` |
+| `depth` | `quick` / `standard` / `deep`；日报模式下 `quick` 只扫监控源清单的 `[核心]` 分组 | `standard` |
 | `watchlist` | 监控源清单路径 | 状态目录下的 `watchlist.txt`，冷启动时从 `references/watchlist-urls.txt` 复制 |
 | `add_sources` | 本次要加入监控源的 URL 列表 | 无 |
 | `preferences` | 调用方直接设定的内容偏好，写入方式同用户反馈 | 无 |
 | `product_context` | 产品能力说明文档的路径，聚焦专题据此写「对产品的启示」 | 无；没有时不写该节 |
 | `sinks` | 落盘位置列表，写法见 `references/delivery-sinks.md`：`local:<目录>`、`local-temp`、`feishu`、`feishu:<位置>`、`github:<仓库>:<目录>`、`github-new:<仓库名>:<目录>` | `local:./intel` |
-| `state_dir` | 快照、账本、偏好、监控源清单、聚焦专题的存放位置 | 主落盘位置下的 `.state/` |
+| `state_dir` | 快照、账本、偏好、监控源清单、聚焦专题的存放位置 | 主落盘位置是 `local:<目录>` 时为该目录下的 `.state/`；是飞书、GitHub 或 `local-temp` 时为 `./intel/.state/` |
 | `interactive` | 能否向用户提问 | `true`；定时任务和后台调用设为 `false` |
 
 `interactive` 为 `false` 时不提问：缺省项一律用默认值，把采用的默认值写进报告的「范围与假设」或运行日志。
@@ -72,6 +72,7 @@ metadata:
 | 需要什么 | 缺了会怎样 |
 | --- | --- |
 | 网页搜索和网页正文抓取工具 | 定向搜集无法检索、日报无法扫源。停止并说明缺这项能力；用户直接贴来的材料仍可照常写 |
+| 能渲染脚本的浏览器工具 | 监控源清单里标了「需浏览器」的页面读不到列表，按下文「脚本渲染的空壳页」记失败，其余源照常扫 |
 | 能查看图片的多模态能力 | 不能按「先看图」选图。退回 `references/figure-extraction.md` 的保守规则，拿不准就不放图 |
 | `lark-cli` 且已登录 | 飞书来源记为失败并跳过；飞书落盘改写到本地文件夹，并说明原因 |
 | `git` 和已登录的 `gh` | GitHub 落盘改写到本地文件夹，并说明原因；公开仓库仍可通过网页读取 |
@@ -89,16 +90,18 @@ metadata:
 | 404、410 | 页面不存在 | 不重试 | `URL 已失效，建议从清单删除或换成新地址` |
 | 401、403、登录墙 | 跳转登录页，或正文是登录提示 | 不重试 | `需要登录；飞书来源请先执行 lark-cli auth login` |
 | 反爬拦截 | 验证码页、挑战页、429 | 不重试，本轮跳过 | `被站点拦截，下次再试；连续多次失败可改用浏览器抓取` |
+| 脚本渲染的空壳页 | 去掉脚本和样式后正文不到 200 字 | 有浏览器工具就渲染后重读一次；没有就跳过 | `需浏览器渲染；可在清单里该 URL 上一行加「# 需浏览器」` |
 | 内容无法解析 | 拿到页面但找不到正文或日期 | 不重试 | `页面结构无法识别，需要人工确认地址` |
 
-飞书文档和知识库来源用 `lark-cli docs +fetch --as user` 读取；GitHub 来源优先读 README、Release、Issue 和提交记录，可用 `gh` 命令或网页。
+列表页先试 RSS / Atom，拿不到再读 HTML，细则见 `references/daily-digest.md` 第 1 步。飞书文档和知识库来源用 `lark-cli docs +fetch --as user` 读取；GitHub 来源优先读 README、Release、Issue 和提交记录，可用 `gh` 命令或网页。
 
 ## 共用的硬规则
 
 - **有判断，不罗列。** 每一节先说结论，再给证据。禁止「日期 · 标题 + 两句摘要」的条目堆砌。
 - **证据可核对。** 每个数字、每个事实都能在来源里找到出处。找不到就写「未找到公开资料」，不用推测补空。
 - **选材要打分。** 日报按五项打分选文，定向搜集按来源分级定结论强度；配图一律过选图四问。都不能凭第一印象挑。
-- **写原文没写的东西。** 观察、推论、边界、分歧才是成稿的价值，复述原文结论不算。
+- **写原文没写的东西。** 观察、推论、边界、分歧才是成稿的价值，复述原文结论不算。先写判断和观察，再挑证据；具体做法见 `references/writing-guide.md`「洞察的五种做法」。
+- **先删再交。** 初稿写完按 `references/writing-guide.md`「删改一遍」删掉指路空话、转述清单和重复解释，再做自检。
 - **文风。** 不用 emoji，不用「速览」「硬核」「重磅」「两边开花」这类口号，不连续用三个以上排比。
 - **落盘可信。** 写入失败时改写到本地并原样说明原因，不声称已写入。
 
@@ -107,6 +110,7 @@ metadata:
 交付前逐项检查，任一项不过就改。各模式的细则文件里还有附加检查项。
 
 - [ ] 随便抽一节，能找到判断、可核对的证据，以及原文没写的观察或推论。
+- [ ] 删掉那一节的观察，剩下的不是一篇新闻稿；换掉公司名，观察不会照样成立。
 - [ ] 每个数字都能在来源里找到出处，会变的数字（价格、Star 数、版本）写了取数日期。
 - [ ] 每张图都过了选图四问，没有重复、没有封面图。
 - [ ] 文中链接和来源清单都能点开。
