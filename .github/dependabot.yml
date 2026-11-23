@@ -20,6 +20,20 @@ updates:
       npm-dev-deps:
         dependency-type: "development"
         update-types: ["minor", "patch"]
+      # 强耦合栈必须同 PR 升，避免半升级（如只升 react-dom 不升 react）
+      react-stack:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+        update-types: ["major", "minor", "patch"]
+      vite-stack:
+        patterns: ["vite", "@vitejs/plugin-react"]
+        update-types: ["major", "minor", "patch"]
+      i18n-stack:
+        patterns: ["i18next", "react-i18next"]
+        update-types: ["major", "minor", "patch"]
+    ignore:
+      # @types/node 大版本须与 Electron 内置 Node 对齐后手动升，不自动开 PR
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # npm：mobile
   - package-ecosystem: npm
@@ -31,6 +45,10 @@ updates:
       npm-dev-deps:
         dependency-type: "development"
         update-types: ["minor", "patch"]
+      # Expo SDK 升级必须整族同 PR，避免单个 expo-* 包与 expo 本体版本错位
+      expo-stack:
+        patterns: ["expo", "expo-*"]
+        update-types: ["major", "minor", "patch"]
 
   # npm：enterprise workspace（pnpm-lock，web-portal / admin-console 等）
   - package-ecosystem: npm

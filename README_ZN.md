@@ -106,7 +106,7 @@ Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路�
 - **运行时边界**: Gateway 是企业合规与模型请求中继，不等同于 Python Agent Runtime；Enterprise Edge Agent 为非默认 MVP，Cluster Runtime 尚未开始
 
 ### 安全与沙箱
-- **安全基础组件**: 泄露检测、输入清洗、注入检测、策略引擎、输入验证、工具 Guardrails、权限确认与审计；Studio 主链路组合使用 Hooks、权限与路径防护，尚未统一经过完整 `SafetyLayer`
+- **安全基础组件**: 泄露检测、输入清洗、注入检测、策略引擎、输入验证、工具 Guardrails、权限确认与审计；Studio 主链路已统一接入完整 `SafetyLayer` 管线（`AGX_STUDIO_SAFETY_LAYER` 默认开启，`AGX_STUDIO_SAFETY_MODE` 默认 observe 观察模式、enforce 生效拦截；安全事件本地落盘并桥接企业审计）
 - **沙箱**: Docker / Microsandbox / Subprocess / 远端 HTTP 后端；Jupyter 内核管理器、有状态代码解释器、沙箱模板、JSONL 执行审计
 - **会话持久化**: Studio 默认写入 `~/.agenticx/sessions` 文件树，可选 Redis 会话后端；数据库会话服务属于独立 SDK 模块，并非 Studio 默认路径
 
@@ -481,7 +481,7 @@ python examples/data_suite/delivery_pack/apply.py
 | **M8** | ✅ | 通信协议 — A2A（客户端 / 服务端 / AgentCard / 技能即工具）、MCP 资源访问、AGUI 协议 |
 | **M9** | ✅ | 可观测性 — 回调系统、实时监控、轨迹分析、Span Tree、WebSocket 流式推送、Prometheus / OpenTelemetry 集成 |
 | **M10** | ✅ | 开发者体验 — CLI（`agx` 含 20+ 命令）、Studio Server（FastAPI REST + SSE）、Near Desktop（Electron + React + Zustand，多窗格） |
-| **M11** | ✅ | 安全基础组件 — 泄露检测、清洗、注入检测、策略、Guardrails、Hooks、权限确认与多后端沙箱；Studio 尚未统一接入完整 `SafetyLayer` 管线 |
+| **M11** | ✅ | 安全基础组件 — 泄露检测、清洗、注入检测、策略、Guardrails、Hooks、权限确认与多后端沙箱；Studio 主链路已统一接入完整 `SafetyLayer` 管线（observe/enforce 双模，默认 observe） |
 | **M13** | ✅ | 知识与检索 — 知识库（文档处理、分块器、图构建器 GraphRAG、读取器）；检索（向量 / BM25 / 图 / 混合 / 自动）；嵌入（OpenAI / 百炼 / SiliconFlow / LiteLLM） |
 | **M14** | ✅ | 分身与协作 — 分身注册中心、群聊（用户指定 / 智能路由 / 轮流回复）、委派、角色扮演、会话模式、团队管理 |
 | **M15** | ✅ | 评估框架 — EvalSet、LLM 裁判、组合裁判、Span 评估器、轨迹匹配器、Trace 转换器 |

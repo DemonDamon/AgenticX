@@ -327,12 +327,14 @@ async def _external_harness_chat_stream(
 ) -> AsyncGenerator[str, None]:
     """SSE stream for one external-harness turn (harness-control-surface SP5b).
 
-    Desktop-compatible minimal protocol: ``harness_progress`` heartbeats
-    (any parsed SSE frame resets the client stall watchdog) → ``final``
-    (authoritative turn text) → ``done``. The blocking adapter turn runs
-    on a worker thread; on client disconnect it keeps running server-side
-    (its result lands in chat_history) and the run lock is released only
-    after it settles.
+    Desktop-compatible protocol: mid-turn ``token`` events (assistant
+    visible text from stream-json partials / assistant blocks), mid-turn
+    ``tool_call`` / ``tool_result`` rows (tool name + status only; no arg
+    dumps), ``harness_progress`` heartbeats (any parsed SSE frame resets
+    the client stall watchdog) → ``final`` (authoritative sanitized turn
+    text) → ``done``. The blocking adapter turn runs on a worker thread;
+    on client disconnect it keeps running server-side (its result lands
+    in chat_history) and the run lock is released only after it settles.
     """
     from agenticx.studio import harness_wiring
 
@@ -350,11 +352,12 @@ async def _external_harness_chat_stream(
         yield 'data: {"type":"done","data":{"reason":"session_busy_elsewhere"}}\n\n'
         return
 
-    # Direct-style Claude settings sync before spawn/turn (claude-code only).
+    # cc-switch style: sync Near provider+model into the active harness
+    # native config (Claude Code / Codex / CodeBuddy). Builtin never writes.
     try:
-        from agenticx.harness.claude_code_settings import maybe_sync_claude_code_settings
+        from agenticx.harness.harness_settings_sync import maybe_sync_harness_settings
 
-        maybe_sync_claude_code_settings(
+        maybe_sync_harness_settings(
             harness_id,
             getattr(payload, "provider", None),
             getattr(payload, "model", None),
@@ -369,6 +372,8 @@ async def _external_harness_chat_stream(
             sid,
             payload.user_input,
             chat_model=getattr(payload, "model", None),
+            chat_provider=getattr(payload, "provider", None),
+            skip_user_history=bool(getattr(payload, "skip_user_history", False)),
         )
     )
     owns_release = True
@@ -387,6 +392,8 @@ async def _external_harness_chat_stream(
                     pass
 
     started = time.time()
+    emitted_tool_ids: set[str] = set()
+    emitted_cc_subagent_ids: set[str] = set()
 
     def _progress_sse(phase: str) -> str:
         beat = SseEvent(
@@ -402,30 +409,619 @@ async def _external_harness_chat_stream(
     try:
         yield _progress_sse("turn_started")
         result = None
+        last_heartbeat = time.time()
+        surface_sid = ""
+        adapter = None
+        try:
+            binding = manager.get_session_harness(sid) or {}
+            surface_sid = str(binding.get("harness_session_id") or "").strip()
+            adapter = harness_wiring.harness_registry().require(harness_id)
+        except Exception:
+            adapter = None
+            surface_sid = ""
+
+        def _midturn_item_to_sse(item: dict) -> str | None:
+            """Map one drain item to a desktop-compatible SSE data line."""
+            kind = str(item.get("kind") or "")
+            if kind == "text":
+                text_delta = str(item.get("text") or "")
+                if not text_delta:
+                    return None
+                tok = SseEvent(
+                    type="token",
+                    data={"text": text_delta, "agent_id": "meta"},
+                )
+                return f"data: {json.dumps(tok.model_dump(), ensure_ascii=False)}\n\n"
+            if kind == "tool_start":
+                from agenticx.runtime.events import normalize_tool_sse_payload
+
+                name = str(item.get("name") or "tool").strip() or "tool"
+                tid = str(item.get("tool_call_id") or "").strip()
+                if not tid:
+                    return None
+                if tid in emitted_tool_ids:
+                    return None
+                emitted_tool_ids.add(tid)
+                payload = normalize_tool_sse_payload(
+                    {
+                        "name": name,
+                        # MVP: name + status only — do not dump CLI tool args.
+                        "arguments": {},
+                        "tool_call_id": tid,
+                        "agent_id": "meta",
+                    }
+                )
+                evt = SseEvent(type="tool_call", data=payload)
+                return f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+            if kind == "tool_end":
+                from agenticx.runtime.events import normalize_tool_sse_payload
+
+                name = str(item.get("name") or "tool").strip() or "tool"
+                tid = str(item.get("tool_call_id") or "").strip()
+                if not tid:
+                    return None
+                is_error = bool(item.get("is_error"))
+                payload = normalize_tool_sse_payload(
+                    {
+                        "name": name,
+                        "tool_call_id": tid,
+                        # Short status body — ChatPane updates toolStatus from
+                        # is_error; avoid pasting large tool_result content.
+                        "result": "error" if is_error else "ok",
+                        "is_error": is_error,
+                        "agent_id": "meta",
+                    }
+                )
+                evt = SseEvent(type="tool_result", data=payload)
+                return f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+            return None
+
+        async def _drain_midturn_sse_lines() -> list[str]:
+            """Poll adapter for mid-turn text/tool items; return SSE lines."""
+            if adapter is None or not surface_sid:
+                return []
+            items: list = []
+            try:
+                if hasattr(adapter, "drain_midturn_stream_items"):
+                    items = await asyncio.to_thread(
+                        adapter.drain_midturn_stream_items, surface_sid
+                    )
+                elif hasattr(adapter, "drain_visible_stream_text"):
+                    delta = await asyncio.to_thread(
+                        adapter.drain_visible_stream_text, surface_sid
+                    )
+                    text_delta = str(delta or "")
+                    if text_delta:
+                        items = [{"kind": "text", "text": text_delta}]
+                else:
+                    return []
+            except Exception:
+                return []
+            lines_out: list[str] = []
+            for item in items or []:
+                if not isinstance(item, dict):
+                    continue
+                line = _midturn_item_to_sse(item)
+                if line is not None:
+                    lines_out.append(line)
+            return lines_out
+
+        async def _drain_permission_sse_lines() -> list[str]:
+            """Surface CC can_use_tool prompts as confirm_required SSE."""
+            if adapter is None or not surface_sid:
+                return []
+            if not hasattr(adapter, "drain_pending_permissions"):
+                return []
+            try:
+                rows = await asyncio.to_thread(
+                    adapter.drain_pending_permissions, surface_sid
+                )
+            except Exception:
+                return []
+            if not rows:
+                return []
+            from agenticx.studio.harness_permissions import (
+                pending_permission_to_confirm_sse_data,
+            )
+            from agenticx.runtime.events import normalize_tool_sse_payload
+
+            lines_out: list[str] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                # Ensure a tool_call row exists even if stream-json tool_use
+                # was missed before the permission stall.
+                tid = str(row.get("tool_use_id") or "").strip()
+                name = (
+                    str(row.get("display_name") or "").strip()
+                    or str(row.get("tool_name") or "").strip()
+                    or "tool"
+                )
+                if tid and tid not in emitted_tool_ids:
+                    emitted_tool_ids.add(tid)
+                    tool_payload = normalize_tool_sse_payload(
+                        {
+                            "name": name,
+                            "arguments": {},
+                            "tool_call_id": tid,
+                            "agent_id": "meta",
+                        }
+                    )
+                    tool_evt = SseEvent(type="tool_call", data=tool_payload)
+                    lines_out.append(
+                        f"data: {json.dumps(tool_evt.model_dump(), ensure_ascii=False)}\n\n"
+                    )
+                confirm_data = pending_permission_to_confirm_sse_data(row)
+                conf_evt = SseEvent(type="confirm_required", data=confirm_data)
+                lines_out.append(
+                    f"data: {json.dumps(conf_evt.model_dump(), ensure_ascii=False)}\n\n"
+                )
+            return lines_out
+
+        def _sse_lines_include_token(lines: list[str]) -> bool:
+            return any(
+                '"type": "token"' in line or '"type":"token"' in line
+                for line in lines
+            )
+
+        async def _drain_cc_orchestration_sse_lines() -> list[str]:
+            """CB→CC / CC→CB: tokens, synthetic spawn tools, subagent_* while children await."""
+            items: list = []
+            try:
+                from agenticx.harness.codebuddy_cc_subagents import (
+                    drain_cc_orchestration_progress,
+                )
+
+                items.extend(
+                    await asyncio.to_thread(drain_cc_orchestration_progress, sid) or []
+                )
+            except Exception:
+                pass
+            try:
+                from agenticx.harness.claude_code_cb_subagents import (
+                    drain_cb_orchestration_progress,
+                )
+
+                items.extend(
+                    await asyncio.to_thread(drain_cb_orchestration_progress, sid) or []
+                )
+            except Exception:
+                pass
+            if not items:
+                return []
+            lines_out: list[str] = []
+            for item in items or []:
+                if not isinstance(item, dict):
+                    continue
+                kind = str(item.get("kind") or "")
+                # Synthetic spawn_subagent tool rows → live Agent 蜂群 card + tool group header.
+                if kind == "tool_start":
+                    from agenticx.runtime.events import normalize_tool_sse_payload
+
+                    name = str(item.get("name") or "tool").strip() or "tool"
+                    tid = str(item.get("tool_call_id") or "").strip()
+                    if not tid:
+                        continue
+                    if tid in emitted_tool_ids:
+                        continue
+                    emitted_tool_ids.add(tid)
+                    args = item.get("arguments")
+                    if not isinstance(args, dict):
+                        args = {}
+                    tool_payload = normalize_tool_sse_payload(
+                        {
+                            "name": name,
+                            "arguments": args,
+                            "tool_call_id": tid,
+                            "agent_id": "meta",
+                        }
+                    )
+                    gid = str(item.get("tool_group_id") or "").strip()
+                    if gid:
+                        tool_payload["tool_group_id"] = gid
+                    evt = SseEvent(type="tool_call", data=tool_payload)
+                    lines_out.append(
+                        f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+                    )
+                    continue
+                if kind == "tool_end":
+                    from agenticx.runtime.events import normalize_tool_sse_payload
+
+                    name = str(item.get("name") or "tool").strip() or "tool"
+                    tid = str(item.get("tool_call_id") or "").strip()
+                    if not tid:
+                        continue
+                    is_error = bool(item.get("is_error"))
+                    result = item.get("result")
+                    if result is None:
+                        result = "error" if is_error else "ok"
+                    tool_payload = normalize_tool_sse_payload(
+                        {
+                            "name": name,
+                            "tool_call_id": tid,
+                            "result": result,
+                            "is_error": is_error,
+                            "agent_id": "meta",
+                        }
+                    )
+                    evt = SseEvent(type="tool_result", data=tool_payload)
+                    lines_out.append(
+                        f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+                    )
+                    continue
+                if kind == "text":
+                    piece = str(item.get("text") or "")
+                    if not piece:
+                        continue
+                    agent_id = str(item.get("agent_id") or "meta").strip() or "meta"
+                    tok = SseEvent(
+                        type="token",
+                        data={"text": piece, "agent_id": agent_id},
+                    )
+                    lines_out.append(
+                        f"data: {json.dumps(tok.model_dump(), ensure_ascii=False)}\n\n"
+                    )
+                    continue
+                if kind == "subagent_started":
+                    rid = str(item.get("agent_id") or "").strip()
+                    if not rid or rid in emitted_cc_subagent_ids:
+                        continue
+                    emitted_cc_subagent_ids.add(rid)
+                    started_evt = SseEvent(
+                        type="subagent_started",
+                        data={
+                            "agent_id": rid,
+                            "name": str(item.get("name") or rid),
+                            "role": str(
+                                item.get("role") or "Claude Code CLI subagent"
+                            ),
+                            "task": str(item.get("task") or ""),
+                            "status": str(item.get("status") or "running"),
+                            "provider": str(item.get("provider") or "claude-code"),
+                            "model": str(item.get("model") or ""),
+                            "cluster_id": str(item.get("cluster_id") or ""),
+                            "cluster_title": str(item.get("cluster_title") or ""),
+                        },
+                    )
+                    lines_out.append(
+                        "data: "
+                        + json.dumps(started_evt.model_dump(), ensure_ascii=False)
+                        + "\n\n"
+                    )
+                    continue
+                if kind == "subagent_completed":
+                    rid = str(item.get("agent_id") or "").strip()
+                    if rid:
+                        emitted_cc_subagent_ids.add(rid)
+                    done_evt = SseEvent(
+                        type="subagent_completed",
+                        data={
+                            "agent_id": rid,
+                            "summary": str(item.get("summary") or "")[:2000],
+                            "result_file": str(item.get("result_file") or ""),
+                        },
+                    )
+                    lines_out.append(
+                        "data: "
+                        + json.dumps(done_evt.model_dump(), ensure_ascii=False)
+                        + "\n\n"
+                    )
+                    continue
+                if kind == "subagent_error":
+                    rid = str(item.get("agent_id") or "").strip()
+                    if rid:
+                        emitted_cc_subagent_ids.add(rid)
+                    err_evt = SseEvent(
+                        type="subagent_error",
+                        data={
+                            "agent_id": rid,
+                            "text": str(item.get("text") or "执行异常")[:500],
+                            "status": str(item.get("status") or "failed"),
+                        },
+                    )
+                    lines_out.append(
+                        "data: "
+                        + json.dumps(err_evt.model_dump(), ensure_ascii=False)
+                        + "\n\n"
+                    )
+                    continue
+            return lines_out
+
+        async def _collect_stream_json_tool_fallback_lines() -> list[str]:
+            """Replay tool_start/tool_end the live drain missed (late bind)."""
+            if adapter is None or not surface_sid or not hasattr(
+                adapter, "list_turn_tool_progress"
+            ):
+                return []
+            try:
+                snap_items = await asyncio.to_thread(
+                    adapter.list_turn_tool_progress, surface_sid
+                )
+            except Exception:
+                snap_items = []
+            lines_out: list[str] = []
+            for item in snap_items or []:
+                if not isinstance(item, dict):
+                    continue
+                line = _midturn_item_to_sse(item)
+                if line is not None:
+                    lines_out.append(line)
+            return lines_out
+
         while True:
             try:
                 result = await asyncio.wait_for(
-                    asyncio.shield(turn_task), timeout=15.0
+                    asyncio.shield(turn_task), timeout=0.2
                 )
                 break
             except asyncio.TimeoutError:
+                # Prefer binding refresh once the worker has ensure/spawned.
+                if adapter is not None and not surface_sid:
+                    try:
+                        binding = manager.get_session_harness(sid) or {}
+                        surface_sid = str(
+                            binding.get("harness_session_id") or ""
+                        ).strip()
+                    except Exception:
+                        pass
+                midturn_lines = await _drain_midturn_sse_lines()
+                if midturn_lines:
+                    # If no tool row has gone out yet, replay any already-
+                    # recorded tools before this text batch so the answer does
+                    # not paint above a late fallback.
+                    if _sse_lines_include_token(midturn_lines) and not emitted_tool_ids:
+                        for line in await _collect_stream_json_tool_fallback_lines():
+                            yield line
+                    for line in midturn_lines:
+                        yield line
+                    last_heartbeat = time.time()
+                cc_lines = await _drain_cc_orchestration_sse_lines()
+                if cc_lines:
+                    for line in cc_lines:
+                        yield line
+                    last_heartbeat = time.time()
+                perm_lines = await _drain_permission_sse_lines()
+                if perm_lines:
+                    for line in perm_lines:
+                        yield line
+                    last_heartbeat = time.time()
+                    # Hint so UI is not blank typing-dots only while waiting.
+                    yield _progress_sse("awaiting_permission")
+                    last_heartbeat = time.time()
+                    continue
+                if midturn_lines or cc_lines:
+                    continue
                 # Heartbeat: keeps the desktop stall watchdog quiet while
-                # the (non-streaming) adapter turn blocks on its CLI.
-                yield _progress_sse("running")
-        final_text = str(result.result_text or "").strip()
-        terminal_reason = "harness_turn" if result.ok else "harness_turn_error"
-        final = SseEvent(
-            type="final",
-            data={
-                "text": final_text,
-                "turn_terminal": True,
-                "terminal_reason": terminal_reason,
-                "harness": harness_id,
-                "harness_status": result.status,
-            },
+                # the adapter turn blocks on its CLI with no new tokens.
+                if time.time() - last_heartbeat >= 15.0:
+                    yield _progress_sse("running")
+                    last_heartbeat = time.time()
+
+        # End-of-turn tool fallback BEFORE leftover mid-turn text: the last
+        # drain often flushes the answer, and appending replayed tool_call
+        # rows after that made ChatPane render tools under the markdown.
+        for line in await _collect_stream_json_tool_fallback_lines():
+            yield line
+
+        # CodeBuddy may only expose observed_tools on the turn snapshot.
+        # Only use this when no stream-json tool rows were emitted at all.
+        try:
+            observed = (result.detail or {}).get("observed_tools")
+        except Exception:
+            observed = None
+        if isinstance(observed, list) and not emitted_tool_ids:
+            from agenticx.runtime.events import normalize_tool_sse_payload
+
+            for idx, name in enumerate(observed):
+                nm = str(name or "").strip() or "tool"
+                tid = f"observed-{idx}-{nm}"
+                if tid in emitted_tool_ids:
+                    continue
+                emitted_tool_ids.add(tid)
+                tool_payload = normalize_tool_sse_payload(
+                    {
+                        "name": nm,
+                        "arguments": {},
+                        "tool_call_id": tid,
+                        "agent_id": "meta",
+                    }
+                )
+                yield (
+                    "data: "
+                    + json.dumps(
+                        SseEvent(type="tool_call", data=tool_payload).model_dump(),
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                )
+                done_payload = normalize_tool_sse_payload(
+                    {
+                        "name": nm,
+                        "tool_call_id": tid,
+                        "result": "ok",
+                        "is_error": False,
+                        "agent_id": "meta",
+                    }
+                )
+                yield (
+                    "data: "
+                    + json.dumps(
+                        SseEvent(type="tool_result", data=done_payload).model_dump(),
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                )
+
+        # Flush any trailing deltas that arrived with the terminal result.
+        # Tool fallback above already ran so leftover token events follow
+        # replayed tool rows rather than precede them.
+        for line in await _drain_midturn_sse_lines():
+            yield line
+        for line in await _drain_cc_orchestration_sse_lines():
+            yield line
+
+        # Near-orchestrated CB→CC children: emit WorkPanel subagent SSE under
+        # the studio session stream (ChatPane addSubAgent), then include the
+        # swarm anchor on final so clients can show 「Agent 蜂群」.
+        cc_payload = None
+        result_detail_early = getattr(result, "detail", None)
+        if isinstance(result_detail_early, dict):
+            maybe_cc = result_detail_early.get("near_cc_subagents")
+            if isinstance(maybe_cc, dict):
+                cc_payload = maybe_cc
+            maybe_cb = result_detail_early.get("near_cb_subagents")
+            if isinstance(maybe_cb, dict):
+                # CC→CB uses the same WorkPanel/SSE shape as CB→CC.
+                cc_payload = maybe_cb
+        if isinstance(cc_payload, dict):
+            for row in list(cc_payload.get("results") or []):
+                if not isinstance(row, dict):
+                    continue
+                rid = str(row.get("run_id") or "").strip()
+                if not rid:
+                    continue
+                # Mid-turn drain already emitted started/completed for these runs.
+                if rid in emitted_cc_subagent_ids:
+                    continue
+                emitted_cc_subagent_ids.add(rid)
+                started = SseEvent(
+                    type="subagent_started",
+                    data={
+                        "agent_id": rid,
+                        "name": str(row.get("name") or rid),
+                        "role": str(row.get("role") or "Claude Code CLI subagent"),
+                        "task": "",
+                        "status": "running",
+                        "provider": str(row.get("provider") or "claude-code"),
+                        "model": str(row.get("model") or ""),
+                        "cluster_id": str(cc_payload.get("cluster_id") or row.get("cluster_id") or ""),
+                    },
+                )
+                yield (
+                    "data: "
+                    + json.dumps(started.model_dump(), ensure_ascii=False)
+                    + "\n\n"
+                )
+                if row.get("ok"):
+                    done_evt = SseEvent(
+                        type="subagent_completed",
+                        data={
+                            "agent_id": rid,
+                            "summary": str(row.get("result_text") or "")[:2000],
+                            "result_file": (
+                                str(row.get("output_path") or "")
+                                if row.get("wrote_output")
+                                else ""
+                            ),
+                        },
+                    )
+                else:
+                    done_evt = SseEvent(
+                        type="subagent_error",
+                        data={
+                            "agent_id": rid,
+                            "text": str(row.get("result_text") or "执行异常")[:500],
+                            "status": "failed",
+                        },
+                    )
+                yield (
+                    "data: "
+                    + json.dumps(done_evt.model_dump(), ensure_ascii=False)
+                    + "\n\n"
+                )
+
+        try:
+            from agenticx.harness.codebuddy_cc_subagents import (
+                clear_cc_orchestration_progress,
+            )
+
+            clear_cc_orchestration_progress(sid)
+        except Exception:
+            pass
+        try:
+            from agenticx.harness.claude_code_cb_subagents import (
+                clear_cb_orchestration_progress,
+            )
+
+            clear_cb_orchestration_progress(sid)
+        except Exception:
+            pass
+
+        final_text = harness_wiring.format_external_harness_assistant_content(
+            harness_id, result
         )
-        yield f"data: {json.dumps(final.model_dump(), ensure_ascii=False)}\n\n"
-        yield f'data: {json.dumps({"type": "done", "data": {"reason": terminal_reason}}, ensure_ascii=False)}\n\n'
+        terminal_reason = "harness_turn" if result.ok else "harness_turn_error"
+        final_data: dict = {
+            "text": final_text,
+            "turn_terminal": True,
+            "terminal_reason": terminal_reason,
+            "harness": harness_id,
+            "harness_status": result.status,
+        }
+        result_detail = getattr(result, "detail", None)
+        if (
+            isinstance(result_detail, dict)
+            and result_detail.get("codebuddy_login_required") is True
+        ):
+            final_data["codebuddy_login_required"] = True
+        if isinstance(cc_payload, dict):
+            cluster_id = str(cc_payload.get("cluster_id") or "").strip()
+            run_ids = [
+                str(item).strip()
+                for item in (cc_payload.get("run_ids") or [])
+                if str(item).strip()
+            ]
+            if not run_ids:
+                run_ids = [
+                    str(row.get("run_id") or "").strip()
+                    for row in (cc_payload.get("results") or [])
+                    if isinstance(row, dict) and str(row.get("run_id") or "").strip()
+                ]
+            if cluster_id and run_ids:
+                title = str(cc_payload.get("cluster_title") or "").strip()
+                if not title:
+                    title = f"Agent 蜂群 · {len(run_ids)} 个并行任务"
+                created_at = cc_payload.get("cluster_created_at")
+                try:
+                    created_at_f = float(created_at) if created_at is not None else None
+                except (TypeError, ValueError):
+                    created_at_f = None
+                final_data["subagent_cluster"] = {
+                    "cluster_id": cluster_id,
+                    "run_ids": run_ids,
+                    "title": title,
+                    **({"created_at": created_at_f} if created_at_f else {}),
+                }
+        final = SseEvent(type="final", data=final_data)
+        yield (
+            "data: "
+            + json.dumps(final.model_dump(), ensure_ascii=False)
+            + "\n\n"
+        )
+
+        # Map harness TurnResult.detail usage → token_usage (ChatPane).
+        try:
+            from agenticx.harness.usage import usage_metadata_from_harness_detail
+
+            usage_meta = usage_metadata_from_harness_detail(
+                getattr(result, "detail", None)
+            )
+        except Exception:
+            usage_meta = None
+        if usage_meta:
+            tu = SseEvent(type="token_usage", data=dict(usage_meta))
+            yield (
+                "data: "
+                + json.dumps(tu.model_dump(), ensure_ascii=False)
+                + "\n\n"
+            )
+
+        yield (
+            "data: "
+            + json.dumps({"type": "done", "data": {"reason": terminal_reason}}, ensure_ascii=False)
+            + "\n\n"
+        )
+
     except (GeneratorExit, asyncio.CancelledError):
         # Client went away mid-turn: the harness turn keeps running
         # server-side; hand lock release to a watcher task.
@@ -455,6 +1051,7 @@ async def _external_harness_chat_stream(
         try:
             _managed = manager.get(sid, touch=False)
             if _managed is not None:
+                _fail_session = _managed.studio_session
                 _managed.studio_session.chat_history.append(
                     {
                         "role": "assistant",
@@ -464,6 +1061,10 @@ async def _external_harness_chat_stream(
                             "harness_status": "error",
                             "source": "harness-turn-failed",
                         },
+                        **harness_wiring.turn_assistant_model_fields(
+                            _fail_session,
+                            getattr(payload, "model", None),
+                        ),
                     }
                 )
                 manager._persist_session_state(
@@ -2988,6 +3589,54 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(payload.session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+        # External harness (Claude Code) pending can_use_tool: forward to
+        # adapter.permission so the blocked turn can continue.
+        try:
+            binding = manager.get_session_harness(payload.session_id) or {}
+        except Exception:
+            binding = {}
+        harness_id = str(binding.get("harness_id") or "").strip()
+        surface_sid = str(binding.get("harness_session_id") or "").strip()
+        if harness_id and surface_sid and harness_id != "builtin":
+            try:
+                from agenticx.studio import harness_wiring
+                from agenticx.harness.types import PermissionDecision
+
+                adapter = harness_wiring.harness_registry().require(harness_id)
+                pending_rows: list = []
+                if hasattr(adapter, "list_pending_permissions"):
+                    pending_rows = adapter.list_pending_permissions(surface_sid) or []
+                match = next(
+                    (
+                        row
+                        for row in pending_rows
+                        if isinstance(row, dict)
+                        and str(row.get("request_id") or "") == str(payload.request_id)
+                    ),
+                    None,
+                )
+                if match is not None and hasattr(adapter, "permission"):
+                    tool_input = match.get("tool_input")
+                    if not isinstance(tool_input, dict):
+                        tool_input = None
+                    # Prefer full input from pending queue (list omits it);
+                    # respond_permission falls back to queued tool_input.
+                    adapter.permission(
+                        surface_sid,
+                        PermissionDecision(
+                            request_id=str(payload.request_id),
+                            allow=bool(payload.approved),
+                            tool_input=tool_input,
+                            tool_use_id=str(match.get("tool_use_id") or "") or None,
+                            deny_message="Denied by operator",
+                        ),
+                    )
+                    return {"ok": True, "remembered": False, "harness": harness_id}
+            except Exception:
+                logger.exception(
+                    "[confirm] harness permission forward failed session=%s",
+                    payload.session_id,
+                )
         gate = managed.get_confirm_gate(payload.agent_id)
         if payload.agent_id != "meta" and managed.team_manager is not None:
             team_gate = managed.team_manager.get_confirm_gate(payload.agent_id)
@@ -4512,6 +5161,7 @@ def create_studio_app() -> FastAPI:
                                     for key, value in {
                                         "client_turn_id": _ctid,
                                         "command_name": str(getattr(payload, "command_name", "") or "").strip(),
+                                        "harness": "python-agent",
                                     }.items()
                                     if value
                                 }
@@ -5256,6 +5906,52 @@ def create_studio_app() -> FastAPI:
         if managed is None:
             logger.warning("[cancel] session NOT FOUND sid=%s agent=%s", session_id, agent_id)
             raise HTTPException(status_code=404, detail="session not found")
+
+        def _cancel_cc_cli() -> dict | None:
+            """Interrupt Near-orchestrated Claude Code CLI WorkPanel runs."""
+            try:
+                from agenticx.harness.codebuddy_cc_subagents import (
+                    cancel_claude_code_subagent_run,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[cancel] cc import failed sid=%s agent=%s: %s", session_id, agent_id, exc)
+                return None
+            cc_result = cancel_claude_code_subagent_run(
+                owner_session_id=session_id,
+                run_id=agent_id,
+            )
+            if cc_result.get("ok"):
+                return cc_result
+            return None
+
+        def _cancel_cb_cli() -> dict | None:
+            """Interrupt Near-orchestrated CodeBuddy CLI WorkPanel runs."""
+            try:
+                from agenticx.harness.claude_code_cb_subagents import (
+                    cancel_codebuddy_subagent_run,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[cancel] cb import failed sid=%s agent=%s: %s", session_id, agent_id, exc)
+                return None
+            cb_result = cancel_codebuddy_subagent_run(
+                owner_session_id=session_id,
+                run_id=agent_id,
+            )
+            if cb_result.get("ok"):
+                return cb_result
+            return None
+
+        # Prefer the cross-harness CLI path when the WorkPanel card is clearly a
+        # cc-subagent-* / cb-subagent-* run — native AgentTeamManager has no handle.
+        if agent_id.startswith("cc-subagent-"):
+            cc_hit = _cancel_cc_cli()
+            if cc_hit is not None:
+                return cc_hit
+        if agent_id.startswith("cb-subagent-"):
+            cb_hit = _cancel_cb_cli()
+            if cb_hit is not None:
+                return cb_hit
+
         team_manager = managed.team_manager
         if team_manager is None:
             logger.warning("[cancel] sid=%s agent=%s tm=None, trying global lookup", session_id, agent_id)
@@ -5265,6 +5961,12 @@ def create_studio_app() -> FastAPI:
                 session_id=session_id,
             )
             if team_manager is None:
+                cc_hit = _cancel_cc_cli()
+                if cc_hit is not None:
+                    return cc_hit
+                cb_hit = _cancel_cb_cli()
+                if cb_hit is not None:
+                    return cb_hit
                 logger.warning("[cancel] sid=%s agent=%s global lookup also failed", session_id, agent_id)
                 raise HTTPException(status_code=404, detail="agent team not initialized")
         logger.info(
@@ -5281,6 +5983,9 @@ def create_studio_app() -> FastAPI:
             if fallback_manager is not None and fallback_manager is not team_manager:
                 result = await fallback_manager.cancel_subagent(agent_id)
             if not result.get("ok"):
+                cc_hit = _cancel_cc_cli()
+                if cc_hit is not None:
+                    return cc_hit
                 logger.warning("[cancel] FAILED sid=%s agent=%s result=%s", session_id, agent_id, result)
                 raise HTTPException(status_code=404, detail=result.get("message", "subagent not found"))
         return result
@@ -5387,6 +6092,8 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+
+        team_result: dict = {"ok": False, "message": "agent team not initialized"}
         team_manager = managed.team_manager
         if team_manager is None:
             team_manager = AgentTeamManager.find_manager_for_agent(
@@ -5394,28 +6101,70 @@ def create_studio_app() -> FastAPI:
                 include_archived=True,
                 session_id=session_id,
             )
-            if team_manager is None:
-                raise HTTPException(status_code=404, detail="agent team not initialized")
-        result = await team_manager.update_subagent_model(
-            agent_id,
-            provider=provider,
-            model=model,
-        )
-        if not result.get("ok"):
-            fallback_manager = AgentTeamManager.find_manager_for_agent(
+        if team_manager is not None:
+            team_result = await team_manager.update_subagent_model(
                 agent_id,
-                include_archived=True,
-                session_id=session_id,
+                provider=provider,
+                model=model,
             )
-            if fallback_manager is not None and fallback_manager is not team_manager:
-                result = await fallback_manager.update_subagent_model(
+            if not team_result.get("ok"):
+                fallback_manager = AgentTeamManager.find_manager_for_agent(
                     agent_id,
-                    provider=provider,
-                    model=model,
+                    include_archived=True,
+                    session_id=session_id,
                 )
-            if not result.get("ok"):
-                raise HTTPException(status_code=400, detail=result.get("message", "update model failed"))
-        return result
+                if fallback_manager is not None and fallback_manager is not team_manager:
+                    team_result = await fallback_manager.update_subagent_model(
+                        agent_id,
+                        provider=provider,
+                        model=model,
+                    )
+
+        # Always try the run ledger too: CC CLI children (cc-subagent-*) live only
+        # there, and native sa-* rows should stay aligned for poll/hydrate.
+        run_provider = provider or ""
+        run_model = model or ""
+        persisted_run = False
+        try:
+            store = SubAgentRunStore(session_id)
+            record = store.update_model(
+                agent_id,
+                provider=provider,
+                model=model,
+            )
+            if record is not None:
+                persisted_run = True
+                run_provider = str(record.provider or "") or run_provider
+                run_model = str(record.model or "") or run_model
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[subagent/model] run-store update failed sid=%s agent=%s: %s",
+                session_id,
+                agent_id,
+                exc,
+            )
+
+        if team_result.get("ok") or persisted_run:
+            return {
+                "ok": True,
+                "agent_id": agent_id,
+                "provider": (
+                    str(team_result.get("provider") or "").strip()
+                    or run_provider
+                    or (provider or "")
+                ),
+                "model": (
+                    str(team_result.get("model") or "").strip()
+                    or run_model
+                    or (model or "")
+                ),
+                "team_updated": bool(team_result.get("ok")),
+                "persisted_run": persisted_run,
+            }
+        raise HTTPException(
+            status_code=400,
+            detail=team_result.get("message", "update model failed"),
+        )
 
     @app.get("/api/session/subagent-clusters")
     async def session_subagent_clusters(
@@ -6640,6 +7389,36 @@ def create_studio_app() -> FastAPI:
             "models": extract_live_model_ids(doc),
         }
 
+    @app.post("/api/harness/settings/apply")
+    async def harness_settings_apply(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """cc-switch apply: sync Near provider+model into the active harness.
+
+        Supported: ``claude-code``, ``codex``, ``codebuddy``. Builtin callers
+        must not hit this. Desktop invokes on model pick for those harnesses.
+        """
+        _check_token(x_agx_desktop_token)
+        from agenticx.harness.claude_code_settings import ClaudeSettingsError
+        from agenticx.harness.codebuddy_settings import CodeBuddySettingsError
+        from agenticx.harness.codex_settings import CodexSettingsError
+        from agenticx.harness.harness_settings_sync import apply_harness_settings
+
+        body = payload or {}
+        harness_id = str(body.get("harness_id") or body.get("harness") or "").strip()
+        provider = str(body.get("provider") or "").strip()
+        model = str(body.get("model") or "").strip()
+        if not harness_id or not provider or not model:
+            raise HTTPException(
+                status_code=400,
+                detail="harness_id, provider and model are required",
+            )
+        try:
+            return apply_harness_settings(harness_id, provider, model)
+        except (ClaudeSettingsError, CodexSettingsError, CodeBuddySettingsError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/claude-code/settings/apply")
     async def claude_code_settings_apply(
         payload: dict,
@@ -6730,6 +7509,46 @@ def create_studio_app() -> FastAPI:
             )
         return {"ok": True, "harnesses": harnesses}
 
+    @app.get("/api/sessions/{session_id}/harness")
+    async def get_session_harness(
+        session_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Sticky harness for an existing session.
+
+        ``harness_id`` is the persisted binding (null = builtin). When that
+        field was never set, ``recovered_harness_id`` is the latest turn's
+        message stamp and is written back so the next open does not fall
+        through to the Settings default. An explicit builtin switch that is
+        still the tail stays null.
+        """
+        _check_token(x_agx_desktop_token)
+        try:
+            sid = require_safe_session_id(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        managed = manager.get(sid, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        from agenticx.studio import harness_wiring
+
+        binding = manager.get_session_harness(sid) or {}
+        bound = binding.get("harness_id")
+        history = list(getattr(managed.studio_session, "chat_history", None) or [])
+        derived = harness_wiring.derive_sticky_harness_id(history, bound)
+        recovered = derived if (not bound and derived) else None
+        if recovered:
+            try:
+                harness_wiring.persist_derived_harness(manager, sid, recovered)
+            except ValueError:
+                pass
+        return {
+            "ok": True,
+            "session_id": sid,
+            "harness_id": bound,
+            "recovered_harness_id": recovered,
+        }
+
     @app.post("/api/sessions/{session_id}/harness")
     async def set_session_harness(
         session_id: str,
@@ -6781,7 +7600,7 @@ def create_studio_app() -> FastAPI:
         Body: ``{harness_id, strategy?, manual_context?}``. Busy (a turn in
         flight, builtin or external) → 409; plan/handoff failures → 400 with
         the session keeping its current binding (fail closed). Switching to
-        ``python-agent`` returns to the builtin runtime: chat_history is its
+        ``python-agent`` / agenticx returns to the builtin runtime: chat_history is projected into agent_messages (run_turn context); chat_history is its
         context, so only the boundary marker + rebind happen.
         """
         _check_token(x_agx_desktop_token)
@@ -9079,6 +9898,95 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.warning("regenerate_cc_bridge_token error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/codebuddy/oauth/start")
+    async def start_codebuddy_oauth_login_route(
+        body: dict | None = None,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        cwd = ""
+        if isinstance(body, dict):
+            cwd = str(body.get("cwd") or "").strip()
+        try:
+            from agenticx.harness.codebuddy_oauth_login import (
+                codebuddy_oauth_job_snapshot,
+                start_codebuddy_oauth_login,
+            )
+
+            job = await start_codebuddy_oauth_login(cwd or "~")
+            return {"ok": job.status.value != "failed", **codebuddy_oauth_job_snapshot(job)}
+        except Exception as exc:
+            logger.warning("start_codebuddy_oauth_login error: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    @app.get("/api/codebuddy/oauth/status")
+    async def codebuddy_oauth_login_status_route(
+        job_id: str = "",
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.harness.codebuddy_oauth_login import (
+                codebuddy_oauth_job_snapshot,
+                get_codebuddy_oauth_job,
+            )
+
+            job = get_codebuddy_oauth_job(job_id)
+            if not job:
+                return {"ok": False, "error": "unknown job_id"}
+            return {"ok": True, **codebuddy_oauth_job_snapshot(job)}
+        except Exception as exc:
+            logger.warning("codebuddy_oauth_login_status error: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/codebuddy/oauth/refresh-harness")
+    async def codebuddy_oauth_refresh_harness_route(
+        body: dict | None = None,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """After Tencent OAuth, stop CodeBuddy harness children so the next turn respawns."""
+        _check_token(x_agx_desktop_token)
+        session_id = ""
+        if isinstance(body, dict):
+            session_id = str(body.get("session_id") or "").strip()
+        if not session_id:
+            return {"ok": False, "error": "session_id required"}
+        try:
+            require_safe_session_id(session_id)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        try:
+            from agenticx.studio import harness_wiring as hw
+
+            return hw.refresh_codebuddy_harness_after_oauth(manager, session_id)
+        except Exception as exc:
+            logger.warning("codebuddy_oauth_refresh_harness error: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    @app.get("/api/codebuddy/resolve-model")
+    async def resolve_codebuddy_model_route(
+        model: str = "",
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        raw = str(model or "").strip()
+        try:
+            from agenticx.wb_bridge.custom_model import (
+                CUSTOM_LOCAL_PREFIX,
+                resolve_codebuddy_cli_model,
+            )
+
+            resolved = resolve_codebuddy_cli_model(raw) or raw
+            return {
+                "ok": True,
+                "model": raw,
+                "resolved": resolved,
+                "uses_custom_local": resolved.startswith(CUSTOM_LOCAL_PREFIX),
+            }
+        except Exception as exc:
+            logger.warning("resolve_codebuddy_model error: %s", exc)
+            return {"ok": False, "model": raw, "error": str(exc)}
 
     # --- WB Bridge (local CodeBuddy HTTP) config ---
 

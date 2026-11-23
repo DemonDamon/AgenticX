@@ -56,6 +56,8 @@ services:
       DATABASE_DIALECT: ${DATABASE_DIALECT:-postgresql}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       NEXT_PUBLIC_GATEWAY_BASE: ${NEXT_PUBLIC_GATEWAY_BASE:-http://nginx}
+      # 容器内不能用 127.0.0.1：那指向 portal 容器自己。同一 compose 网络用服务名寻址。
+      GATEWAY_COMPLETIONS_URL: ${GATEWAY_COMPLETIONS_URL:-http://gateway-a:8088/v1/chat/completions}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?JWT_PUBLIC_KEY is required}
       AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?JWT_PRIVATE_KEY is required}

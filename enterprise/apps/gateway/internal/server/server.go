@@ -15,17 +15,20 @@ import (
 	"os"
 
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/adaptor"
+	"github.com/agenticx/enterprise/gateway/internal/alertdispatch"
 	"github.com/agenticx/enterprise/gateway/internal/audit"
 	gatewayauth "github.com/agenticx/enterprise/gateway/internal/auth"
 	"github.com/agenticx/enterprise/gateway/internal/billing"
 	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/config"
+	"github.com/agenticx/enterprise/gateway/internal/configstatus"
 	"github.com/agenticx/enterprise/gateway/internal/connectorstore"
 	"github.com/agenticx/enterprise/gateway/internal/database"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
@@ -34,6 +37,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/mcp"
 	"github.com/agenticx/enterprise/gateway/internal/mcphost"
 	"github.com/agenticx/enterprise/gateway/internal/metering"
+	"github.com/agenticx/enterprise/gateway/internal/moderation"
 	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/provider"
@@ -42,6 +46,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/residency"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 	"github.com/agenticx/enterprise/gateway/internal/runtimeconfig"
+	"github.com/agenticx/enterprise/gateway/internal/virtualmodel"
 	"github.com/agenticx/enterprise/gateway/internal/wasmhost"
 	policyengine "github.com/agenticx/enterprise/policy-engine"
 	"github.com/go-chi/chi/v5"
@@ -66,7 +71,10 @@ type Server struct {
 	metering              metering.Sink
 	traceReporter         *metering.TraceReporter
 	adminLoader           *runtimeconfig.Loader
+	virtualLoader         *virtualmodel.Loader
 	quotaTracker          *quota.Tracker
+	alertDispatcher       *alertdispatch.Dispatcher
+	moderation            *moderation.Service
 	policySnapBodyHash    string
 	policyRemoteCheckedAt time.Time
 	policySnapshotStatus  policySnapshotRuntimeStatus
@@ -80,6 +88,7 @@ type Server struct {
 	billingService        *billing.Service
 	patVerifier           *gatewayauth.PATVerifier
 	sessionGrants         *gatewayauth.SessionGrantStore
+	sessionRevocations    *gatewayauth.SessionRevocationStore
 	compliance            *residency.ComplianceStore
 	cacheService          *cache.Service
 	pricing               *metering.PricingTable
@@ -97,7 +106,11 @@ type Server struct {
 	wasmManager           *wasmhost.Manager
 	errorStore            *gwerrors.Store
 	channelProber         *channel.Prober
+	configStatus          *configstatus.Registry
+	startedAt             time.Time
 }
+
+var _ configstatus.Metrics = (*observability.Registry)(nil)
 
 var (
 	publicKeyOnce sync.Once
@@ -154,8 +167,15 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		}
 	}
 
+	metrics := observability.NewRegistryFromEnv()
+	cfgStatus := configstatus.NewRegistry(metrics)
+	startedAt := time.Now().UTC()
+
 	adminLoader := runtimeconfig.New(logger)
+	adminLoader.SetConfigStatus(cfgStatus)
 	adminLoader.Start(context.Background())
+	virtualLoader := virtualmodel.New(logger)
+	virtualLoader.Start(context.Background())
 
 	quotaCfgPath := strings.TrimSpace(os.Getenv("GATEWAY_QUOTA_CONFIG_FILE"))
 	if quotaCfgPath == "" {
@@ -179,8 +199,10 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 
 	engine, snapshotModTime, snapBodyHash, overrideModTime, snapshotStatus, err := buildPolicyEngine(cfg.PolicyManifest, policySnapshotPath, policyOverridePath)
 	if err != nil {
+		cfgStatus.ReportFailure(configstatus.DomainPolicy, policySnapshotPath, err)
 		return nil, err
 	}
+	cfgStatus.ReportSuccess(configstatus.DomainPolicy, policySnapshotPath, snapBodyHash, policyPublishVersion(snapshotStatus))
 
 	fileWriter := audit.NewFileWriter(cfg.AuditDir)
 	var auditWriter audit.EventWriter = fileWriter
@@ -219,14 +241,18 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		metering:             sink,
 		traceReporter:        traceReporter,
 		adminLoader:          adminLoader,
+		virtualLoader:        virtualLoader,
 		quotaTracker:         quota.NewTracker(quotaCfgPath, quotaUsagePath, dbHandle),
 		patVerifier:          patVerifier,
 		sessionGrants:        gatewayauth.NewSessionGrantStore(dbHandle),
+		sessionRevocations:   gatewayauth.NewSessionRevocationStore(),
 		compliance:           residency.NewComplianceStore(dbHandle),
 		cacheService:         nil,
 		pricingLoader:        initPricingLoader(logger),
-		metrics:              observability.NewRegistryFromEnv(),
+		metrics:              metrics,
 		database:             dbHandle,
+		configStatus:         cfgStatus,
+		startedAt:            startedAt,
 	}
 	cacheSvc, redisStore := initCacheService(logger)
 	srv.cacheService = cacheSvc
@@ -234,18 +260,31 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	srv.initMCPHost()
 	srv.initMCPProxy()
 	srv.initChannelRelay()
+	alertCfgLoader := alertdispatch.NewConfigLoader(logger)
+	srv.alertDispatcher = alertdispatch.NewDispatcher(alertCfgLoader, auditWriter, logger)
+	srv.alertDispatcher.Start(nil)
+	alertdispatch.StartChainCheck(nil, cfg.AuditDir, srv.alertDispatcher, logger, 0)
+	// SP3 compliance-moderation：第三方内容安全 provider 适配层（未配置租户 = 现状等价）。
+	moderationCfgLoader := moderation.NewConfigLoader(logger)
+	srv.moderation = moderation.NewService(moderationCfgLoader, logger)
+	moderationCfgLoader.Start(nil)
 	if dbHandle != nil {
 		srv.connectorStore = connectorstore.New(dbHandle, logger)
 		if budgetReporter, err := quota.NewBudgetAlertReporter(dbHandle, logger); err != nil {
 			logger.Warn("budget alert reporter unavailable", "error", err)
 		} else {
-			srv.quotaTracker.SetBudgetAlertSink(budgetReporter.Emit)
+			reporter := budgetReporter
+			srv.quotaTracker.SetBudgetAlertSink(func(rec quota.BudgetAlertRecord) {
+				reporter.Emit(rec)
+				srv.dispatchBudgetAlert(rec)
+			})
 		}
 	}
 	srv.errorStore = gwerrors.NewStore()
 	srv.channelProber = channel.NewProber()
 	srv.initWasmHost()
 	observability.InitPyroscopeFromEnv()
+	configstatus.StartHeartbeat(context.Background(), cfgStatus, startedAt, logger)
 	return srv, nil
 }
 
@@ -298,6 +337,11 @@ func snapshotManifestsFromRaw(raw []byte, mod time.Time) ([]policyengine.RulePac
 					Severity:  rule.Severity,
 					Message:   rule.Message,
 					AppliesTo: rule.AppliesTo,
+				}
+				// SP3 合规类别：console 侧规则把 category 存在 payload 数据通道里，
+				// 这里提升为引擎一等字段，随 HitEvent 回显到 90001/90002 与审计链。
+				if value, ok := rule.Payload["category"].(string); ok {
+					nextRule.Category = strings.TrimSpace(value)
 				}
 				switch rule.Kind {
 				case policyengine.RuleKindKeyword:
@@ -451,7 +495,10 @@ func loadPolicySnapshot(snapshotPath string) ([]policyengine.RulePackManifest, t
 	}
 	mod := info.ModTime()
 	manifests, mod, status, err := snapshotManifestsFromRaw(raw, mod)
-	return manifests, mod, "", status, err
+	if err != nil {
+		return nil, mod, "", policySnapshotRuntimeStatus{}, err
+	}
+	return manifests, mod, sha256Hex(raw), status, nil
 }
 
 func readDisabledPolicyPacks(path string) (map[string]bool, time.Time, error) {
@@ -568,6 +615,7 @@ func (s *Server) reloadPolicyIfNeeded() {
 		if err != nil {
 			if !os.IsNotExist(err) {
 				s.logger.Warn("policy override stat failed", "path", ov, "error", err)
+				s.reportPolicyFailure(err)
 				return
 			}
 		} else {
@@ -587,16 +635,28 @@ func (s *Server) reloadPolicyIfNeeded() {
 				s.markRemotePolicyChecked(now)
 				if err != nil {
 					s.logger.Warn("policy snapshot fetch failed", "url", snap, "error", err)
+					s.reportPolicyFailure(err)
 					return
 				}
 				var sum string
 				switch {
 				case code == http.StatusNotFound:
+					s.policyMu.RLock()
+					published := len(s.policySnapshotStatus.Tenants) > 0
+					s.policyMu.RUnlock()
+					if published {
+						if s.logger != nil {
+							s.logger.Warn("policy snapshot remote 404, keeping last known good", "url", snap)
+						}
+						s.reportPolicyFailure(configstatus.ErrRemote404Keep)
+						return
+					}
 					sum = ""
 				case code >= 200 && code < 300:
 					sum = sha256Hex(raw)
 				default:
 					s.logger.Warn("policy snapshot bad status", "url", snap, "code", code)
+					s.reportPolicyFailure(fmt.Errorf("policy snapshot bad status: http %d", code))
 					return
 				}
 				s.policyMu.RLock()
@@ -608,6 +668,7 @@ func (s *Server) reloadPolicyIfNeeded() {
 			if err != nil {
 				if !os.IsNotExist(err) {
 					s.logger.Warn("policy snapshot stat failed", "path", snap, "error", err)
+					s.reportPolicyFailure(err)
 					return
 				}
 			} else {
@@ -634,6 +695,7 @@ func (s *Server) reloadPolicyIfNeeded() {
 	engine, snapshotMod, snapHash, overrideMod, snapshotStatus, buildErr := buildPolicyEngine(s.policyManifest, s.policySnapshot, s.policyOverride)
 	if buildErr != nil {
 		s.logger.Warn("policy reload failed", "snapshot", s.policySnapshot, "override", s.policyOverride, "error", buildErr)
+		s.reportPolicyFailure(buildErr)
 		return
 	}
 	s.policyMu.Lock()
@@ -643,7 +705,38 @@ func (s *Server) reloadPolicyIfNeeded() {
 	s.policySnapBodyHash = snapHash
 	s.policySnapshotStatus = snapshotStatus
 	s.policyMu.Unlock()
+	s.reportPolicySuccess(snapHash, snapshotStatus)
 	s.logger.Info("policy engine reloaded", "snapshot", s.policySnapshot, "override_file", s.policyOverride)
+}
+
+func policyPublishVersion(status policySnapshotRuntimeStatus) string {
+	if len(status.Tenants) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(status.Tenants))
+	for id := range status.Tenants {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, status.Tenants[id].PublishID)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (s *Server) reportPolicySuccess(hash string, status policySnapshotRuntimeStatus) {
+	if s == nil || s.configStatus == nil {
+		return
+	}
+	s.configStatus.ReportSuccess(configstatus.DomainPolicy, s.policySnapshot, hash, policyPublishVersion(status))
+}
+
+func (s *Server) reportPolicyFailure(err error) {
+	if s == nil || s.configStatus == nil || err == nil {
+		return
+	}
+	s.configStatus.ReportFailure(configstatus.DomainPolicy, s.policySnapshot, err)
 }
 
 func (s *Server) Router() http.Handler {
@@ -663,6 +756,7 @@ func (s *Server) Router() http.Handler {
 	}
 	r.Get("/internal/channel-stats", s.handleChannelStats)
 	r.Get("/internal/policy-status", s.handleInternalPolicyStatus)
+	r.Get("/internal/config-status", s.handleInternalConfigStatus)
 	r.Get("/internal/keypool-stats", s.handleKeypoolStats)
 	r.Post("/internal/keypool/reset", s.handleKeypoolReset)
 	r.Post("/internal/cache/reload", s.handleCacheConfigReload)
@@ -673,6 +767,7 @@ func (s *Server) Router() http.Handler {
 	r.Get("/internal/errors", s.handleInternalErrors)
 	r.Get("/internal/perf", s.handleInternalPerf)
 	r.Post("/internal/channels/{id}/probe", s.handleInternalChannelProbe)
+	r.Post("/internal/security/incident-action", s.handleInternalIncidentAction)
 	r.Post("/v1/chat/completions", s.handleChatCompletions)
 	r.Post("/v1/embeddings", s.handleEmbeddings)
 	r.Post("/v1/desktop/action-audit", s.handleDesktopActionAudit)
@@ -773,7 +868,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	qctx := s.quotaContext(identity, req.Model)
+	requestedModel := req.Model
+	admission := s.admitVirtual(identity.TenantID, requestedModel)
+	qctx := s.quotaContext(identity, admission.quotaModel)
 	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
@@ -808,6 +905,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, openai.Internal("audit write failed"))
 			return
 		}
+		s.dispatchPolicyAlert(identity, "请求侧拦截", req.Model, reqPolicy.Hits)
 		writePolicyError(w, "90001", "请求触发合规拦截", reqPolicy.Hits)
 		return
 	}
@@ -818,6 +916,15 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if reqPolicy.RedactedText != latestUserText {
 		req.Messages = replaceLastUserMessageContent(req.Messages, reqPolicy.RedactedText)
 	}
+	// SP3 compliance-moderation：本地规则通过后再外呼第三方内容安全 provider。
+	if modRes := s.enforceModeration(r.Context(), identity, "request", latestUserText, req.Model, decision, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+		if modRes.AuditFailed {
+			writeAPIError(w, openai.Internal("audit write failed"))
+			return
+		}
+		writePolicyError(w, "90001", "请求触发合规拦截", []policyengine.HitEvent{modRes.Hit})
+		return
+	}
 	estimatedInputTokens := estimateTextTokens(joinMessages(req.Messages))
 	reserveTokens := estimateTokensWithMax(estimatedInputTokens, maxTokensFromRequest(req))
 	budgetCheck, quotaReservation, ok := s.runChatQuotaGate(w, r, qctx, identity, &req, &decision, estimatedInputTokens, reserveTokens)
@@ -825,6 +932,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = quotaReservation
+	r = s.withRelayContext(r, identity.TenantID, req.Model, admission)
 
 	cacheCtx := cacheServeContext{
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
@@ -848,7 +956,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.provider.Complete(r.Context(), req, decision)
 	if err != nil {
-		s.rollbackChatQuotaAndBudget(identity, req.Model, estimatedInputTokens, budgetCheck)
+		rollbackModel := req.Model
+		if admission.virtualName != "" {
+			rollbackModel = qctx.Model
+		}
+		s.rollbackChatQuotaAndBudget(identity, rollbackModel, estimatedInputTokens, budgetCheck)
 		s.reportUsageDetailed(identity, decision, openai.Usage{}, nil, spanMeta{
 			DurationMS:   durationMSSince(startedAt),
 			Status:       "error",
@@ -878,7 +990,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		PromptText:     joinMessages(req.Messages),
 		CompletionText: responseContent,
 	})
-	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, providerInputTokens+providerOutputTokens)
+	s.reconcileChatQuota(r.Context(), identity, qctx, estimatedInputTokens, providerInputTokens+providerOutputTokens, req.Model)
 
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
 		Stream:   false,
@@ -916,11 +1028,21 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 				writeAPIError(w, openai.Internal("audit write failed"))
 				return
 			}
+			s.dispatchPolicyAlert(identity, "响应侧拦截", req.Model, respPolicy.Hits)
 			writePolicyError(w, "90002", "响应触发合规拦截", respPolicy.Hits)
 			return
 		}
 		if respPolicy.RedactedText != openai.ContentText(resp.Choices[0].Message.Content) {
 			resp.Choices[0].Message.Content = openai.NewStringContent(respPolicy.RedactedText)
+		}
+		// SP3 compliance-moderation：非流式在终态外呼第三方内容安全 provider。
+		if modRes := s.enforceModeration(r.Context(), identity, "response", openai.ContentText(resp.Choices[0].Message.Content), req.Model, decision, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+			if modRes.AuditFailed {
+				writeAPIError(w, openai.Internal("audit write failed"))
+				return
+			}
+			writePolicyError(w, "90002", "响应触发合规拦截", []policyengine.HitEvent{modRes.Hit})
+			return
 		}
 	}
 
@@ -1194,7 +1316,7 @@ func (s *Server) handleStream(
 	var streamResult relay.StreamResult
 	if s.useChannelRelay() {
 		streamResult, streamErr = s.relayExecutor.Stream(r.Context(), req, req.Model, channelIdentity(identity), push)
-		decision = routingDecisionFromStream(streamResult, req.Model, decision)
+		decision = routingDecisionFromStream(streamResult, relayModel(req.Model, streamResult.ResolvedModel), decision)
 	} else {
 		streamErr = s.provider.Stream(r.Context(), req, decision, push)
 	}
@@ -1238,6 +1360,7 @@ func (s *Server) handleStream(
 			}
 			enrichAuditFromAttempts(&ev, streamResult.Attempts)
 			enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
+			annotateVirtualModelAudit(&ev, streamResult.VirtualName, streamResult.ResolvedModel)
 			_ = s.writeAuditEvent(ev)
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			partialOutputTokens := estimateTextTokens(responseBuilder.String())
@@ -1302,6 +1425,32 @@ func (s *Server) handleStream(
 		}
 		_ = push(tailChunk)
 	}
+	// SP3 compliance-moderation：流式在流尾外呼第三方内容安全 provider。
+	if modRes := s.enforceModeration(r.Context(), identity, "response", responseText, req.Model, decision, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+		partialOutputTokens := estimateTextTokens(responseText)
+		s.settleInterruptedStreamUsage(
+			identity,
+			decision,
+			estimatedInputTokens,
+			partialOutputTokens,
+			reservedTokens,
+			&budgetCheck,
+			qctx,
+			spanMeta{
+				DurationMS:     durationMSSince(startedAt),
+				Status:         "error",
+				ErrorMessage:   sanitizeTraceError("moderation blocked stream tail"),
+				PromptText:     inputText,
+				CompletionText: responseText,
+			},
+		)
+		if modRes.AuditFailed {
+			writeStreamError(w, flusher, "audit write failed")
+			return
+		}
+		writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", []policyengine.HitEvent{modRes.Hit})
+		return
+	}
 	inputTokens := estimatedInputTokens
 	outputTokens := estimateTextTokens(responseText)
 	streamUsage := openai.Usage{
@@ -1320,14 +1469,14 @@ func (s *Server) handleStream(
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.BuildStreamEntry(streamChunks, streamUsage, req.Model))
 	var settleDelta int64
 	if s.useChannelRelay() {
-		settle := s.billingService.SettleContext(
-			qctx,
-			reservedTokens,
-			int64(inputTokens+outputTokens),
-		)
+		actualModel := streamResult.ResolvedModel
+		if strings.TrimSpace(actualModel) == "" {
+			actualModel = req.Model
+		}
+		settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, int64(inputTokens+outputTokens), actualModel)
 		settleDelta = settle.Delta
 	} else {
-		s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, inputTokens+outputTokens)
+		s.reconcileChatQuota(r.Context(), identity, qctx, estimatedInputTokens, inputTokens+outputTokens, req.Model)
 	}
 
 	ev := audit.Event{
@@ -1364,6 +1513,7 @@ func (s *Server) handleStream(
 	}
 	enrichAuditFromAttempts(&ev, streamResult.Attempts)
 	enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
+	annotateVirtualModelAudit(&ev, streamResult.VirtualName, streamResult.ResolvedModel)
 	applyPluginsInvoked(&ev, pluginCtx)
 	if err := s.writeAuditEvent(ev); err != nil {
 		writeStreamError(w, flusher, "audit write failed")
@@ -1561,6 +1711,10 @@ func (s *Server) identityFromRequest(r *http.Request) (requestIdentity, error) {
 	if err != nil {
 		return requestIdentity{}, err
 	}
+	// SP5 incident response: 处置终止的会话即时失效（未配置+无本地吊销 = 零行为变化）。
+	if s.sessionRevocations != nil && s.sessionRevocations.IsRevoked(fromJWT.SessionID) {
+		return requestIdentity{}, errors.New("auth:session_revoked")
+	}
 	return enrichTraceFromRequest(fromJWT, r), nil
 }
 
@@ -1676,6 +1830,7 @@ func toAuditPolicyHits(hits []policyengine.HitEvent) []audit.PolicyHit {
 			Severity:    hit.Severity,
 			Action:      string(hit.Action),
 			MatchedRule: hit.RuleID,
+			Category:    hit.Category,
 		})
 	}
 	return out
@@ -1683,6 +1838,57 @@ func toAuditPolicyHits(hits []policyengine.HitEvent) []audit.PolicyHit {
 
 func makeID(prefix string) string {
 	return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
+}
+
+// dispatchPolicyAlert 在 policy_hit 审计落链成功后分发告警（alert-dispatch SP4）。
+// 同步段仅查表+判重，发送在后台；无通道配置的租户零行为变化。
+func (s *Server) dispatchPolicyAlert(identity requestIdentity, side string, model string, hits []policyengine.HitEvent) {
+	if s.alertDispatcher == nil || len(hits) == 0 {
+		return
+	}
+	sevs := make([]string, 0, len(hits))
+	rules := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		sevs = append(sevs, hit.Severity)
+		rules = append(rules, hit.RuleID)
+	}
+	s.alertDispatcher.Dispatch(alertdispatch.Alert{
+		TenantID:  identity.TenantID,
+		Source:    "policy_hit",
+		Severity:  alertdispatch.MaxSeverity(sevs),
+		Title:     "策略命中：" + side,
+		Summary:   "规则: " + strings.Join(rules, ", "),
+		TraceID:   identity.TraceID,
+		SessionID: identity.SessionID,
+		UserID:    identity.UserID,
+		Model:     model,
+		DedupKey: fmt.Sprintf("policy_hit|%s|%s|%s", side, strings.Join(rules, ","),
+			identity.TraceID),
+		EventTime: time.Now().UTC(),
+	})
+}
+
+// dispatchBudgetAlert 把预算告警同时送入分发管线（warn→HIGH / block→CRITICAL）。
+func (s *Server) dispatchBudgetAlert(rec quota.BudgetAlertRecord) {
+	if s.alertDispatcher == nil {
+		return
+	}
+	sev := "HIGH"
+	if rec.AlertType == "block" {
+		sev = "CRITICAL"
+	}
+	s.alertDispatcher.Dispatch(alertdispatch.Alert{
+		TenantID: rec.TenantID,
+		Source:   "budget_alert",
+		Severity: sev,
+		Title:    "预算告警：" + rec.AlertType,
+		Summary: fmt.Sprintf("tenant=%s dimension=%s(%s) period=%s used=%.2f/%.2f %s",
+			rec.TenantID, rec.Dimension, rec.DimensionKey, rec.Period, rec.Used, rec.Limit, rec.Unit),
+		UserID:    rec.UserID,
+		DedupKey: fmt.Sprintf("budget|%s|%s|%s|%s|%s", rec.TenantID, rec.Dimension,
+			rec.DimensionKey, rec.Period, rec.AlertType),
+		EventTime: rec.CreatedAt,
+	})
 }
 
 func (s *Server) writeAuditEvent(event audit.Event) error {

@@ -828,4 +828,57 @@ describe("mergeSessionMessagesTail", () => {
     );
     expect(out.map((m) => m.id)).toEqual([`${sid}-i0`, "uid-live", `${sid}-i1`, "uid-a"]);
   });
+
+  it("collapses a streamed error fragment and the harness error banner into one bubble", () => {
+    const existing = [
+      uidMsg("user", "q", "uid-u"),
+      uidMsg("assistant", "401 Unauthorized", "uid-stream"),
+    ];
+    const out = mergeSessionMessagesTail(
+      existing,
+      [
+        diskRow("user", "q"),
+        diskRow("assistant", "[harness codebuddy turn error]"),
+      ],
+      sid,
+    );
+    const assistants = out.filter((m) => m.role === "assistant");
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0].content).toBe("[harness codebuddy turn error] 401 Unauthorized");
+  });
+
+  it("drops a streamed fragment already contained in the harness error banner", () => {
+    const existing = [
+      uidMsg("user", "q", "uid-u"),
+      uidMsg("assistant", "401 Unauthorized", "uid-stream"),
+    ];
+    const out = mergeSessionMessagesTail(
+      existing,
+      [
+        diskRow("user", "q"),
+        diskRow("assistant", "[harness codebuddy turn error] 401 Unauthorized"),
+      ],
+      sid,
+    );
+    const assistants = out.filter((m) => m.role === "assistant");
+    expect(assistants).toHaveLength(1);
+    expect(String(assistants[0].content).match(/401 Unauthorized/g)).toHaveLength(1);
+  });
+
+  it("does not fold a later assistant into a successful harness reply", () => {
+    const existing = [
+      uidMsg("user", "q", "uid-u"),
+      uidMsg("assistant", "draft", "uid-a"),
+      uidMsg("assistant", "final answer", "uid-b"),
+    ];
+    const out = mergeSessionMessagesTail(
+      existing,
+      [diskRow("user", "q"), diskRow("assistant", "final answer")],
+      sid,
+    );
+    expect(out.filter((m) => m.role === "assistant").map((m) => m.content)).toEqual([
+      "final answer",
+      "draft",
+    ]);
+  });
 });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../../lib/admin-auth";
 import { addProviderModel, type ProviderModel } from "../../../../../../lib/model-providers-store";
+import { runAdmissionGate } from "../../../../../../lib/model-admission-gate";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireAdminScope(["provider:update"]);
@@ -17,6 +18,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           : ["text"],
       enabled: typeof body.enabled === "boolean" ? body.enabled : true,
     };
+    // SP2 model admission gate: adding an enabled model must pass the
+    // security-eval threshold (or carry a recorded override).
+    if (model.enabled === true && model.name) {
+      const gate = await runAdmissionGate(auth.session, model.name, body.override);
+      if (!gate.ok) return gate.response;
+    }
     const updated = await addProviderModel(id, model);
     return NextResponse.json({ code: "00000", message: "ok", data: { provider: updated } });
   } catch (error) {

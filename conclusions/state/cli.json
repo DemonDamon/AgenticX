@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "cli",
-  "generation": "b54301ea3b734417b40ef536b71db8f1",
+  "generation": "e99c0fc1fd564c15a8e2f21c2eb375c0",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:1bfb8781588892fc0aa87354cbde5235db88e83069a16647dd30d84ad50fc59d",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:8c2fd478d21ff8b237f7d70d8ba7475c0b6a7c4301bbe7475b489434e5cdcc4d",
   "summary_path": "conclusions/cli_conclusion.md",
-  "summary_sha256": "sha256:b453f7cbf595bcf4da829b3b5637fa41a27b85ccb3f65ee15d5526000d294229",
-  "updated_at": "2026-10-25T03:42:11.589850+00:00"
+  "summary_sha256": "sha256:43d457848ac0d57fac76940bcde75afc0d227e9226e3974fedc676903fb3ce5d",
+  "updated_at": "2026-11-14T12:24:33.934096+00:00"
 }
