@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": [
+    "features/chat/src/utils/usable-viewport.ts",
+    "features/chat/src/utils/fold-segment-layout.test.ts",
+    "features/chat/src/hooks/useUsableViewport.ts",
+    "features/chat/src/hooks/useUsableViewport.test.ts",
+    "features/chat/src/hooks/usePreviewPanelLayout.ts",
+    "features/chat/src/__tests__/viewport-test-utils.tsx",
+    "scripts/ci/portal-viewport-browser.mts",
+    "vitest.portal-viewport.config.mts"
+  ]
+}

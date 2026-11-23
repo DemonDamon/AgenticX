@@ -7,6 +7,10 @@ import {
   type DeepResearchPanelLane,
   DeepResearchRecoverBanner,
   AttachmentContentPanel,
+  EmptyChatPane,
+  intersectViewportRects,
+  placeMenuAboveTrigger,
+  resolveUsableViewport,
   DOCUMENT_ACCEPT,
   InputArea,
   MessageList,
@@ -629,20 +633,32 @@ export function MachiChatView({
 
   React.useEffect(() => {
     if (!modelMenuOpen) return;
+    let pendingFrame: number | null = null;
     const updatePosition = () => {
+      pendingFrame = null;
       const trigger = modelTriggerRef.current;
       if (!trigger) return;
-      const margin = 8;
-      const minMaxHeight = 120;
-      const rect = trigger.getBoundingClientRect();
-      const width = Math.min(360, Math.max(280, rect.width + 88));
-      const left = Math.min(window.innerWidth - width - margin, Math.max(margin, rect.right - width));
-      // 菜单向上展开（translateY(-100%)），CSS top 即视觉底边；上方可用高度 = top - margin
-      const top = Math.max(margin, rect.top - margin);
-      const maxHeight = Math.max(minMaxHeight, top - margin);
-      setModelMenuPosition({ top, left, width, maxHeight });
+      const viewport = window.visualViewport;
+      const visible = resolveUsableViewport({ width: window.innerWidth, height: window.innerHeight,
+        visual: viewport ? { left: viewport.offsetLeft, top: viewport.offsetTop, width: viewport.width, height: viewport.height, scale: viewport.scale } : null,
+      });
+      if (!visible) return;
+      const frame = trigger.closest("main")?.getBoundingClientRect();
+      const bounds = frame ? intersectViewportRects(frame, visible) : visible;
+      if (!bounds) return;
+      const position = placeMenuAboveTrigger(trigger.getBoundingClientRect(), bounds);
+      if (position) setModelMenuPosition(position);
+    };
+    const queuePosition = () => {
+      if (pendingFrame === null) pendingFrame = window.requestAnimationFrame(updatePosition);
     };
     updatePosition();
+    const frame = modelTriggerRef.current?.closest("main");
+    const geometryObserver = new MutationObserver(queuePosition);
+    if (frame) geometryObserver.observe(frame, { attributes: true, attributeFilter: ["style", "data-compact"] });
+    const sizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(queuePosition);
+    if (frame) sizeObserver?.observe(frame);
+    if (modelTriggerRef.current) sizeObserver?.observe(modelTriggerRef.current);
 
     const onClickOutside = (event: MouseEvent) => {
       const el = modelMenuRef.current;
@@ -650,17 +666,24 @@ export function MachiChatView({
       if (!el.contains(event.target as Node)) setModelMenuOpen(false);
     };
     const onEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setModelMenuOpen(false);
+      if (event.key === "Escape" && !event.isComposing) setModelMenuOpen(false);
     };
     document.addEventListener("mousedown", onClickOutside);
     document.addEventListener("keydown", onEscape);
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", queuePosition);
+    window.addEventListener("scroll", queuePosition, true);
+    window.visualViewport?.addEventListener("resize", queuePosition);
+    window.visualViewport?.addEventListener("scroll", queuePosition);
     return () => {
       document.removeEventListener("mousedown", onClickOutside);
       document.removeEventListener("keydown", onEscape);
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", queuePosition);
+      window.removeEventListener("scroll", queuePosition, true);
+      window.visualViewport?.removeEventListener("resize", queuePosition);
+      window.visualViewport?.removeEventListener("scroll", queuePosition);
+      geometryObserver.disconnect();
+      sizeObserver?.disconnect();
+      if (pendingFrame !== null) window.cancelAnimationFrame(pendingFrame);
     };
   }, [modelMenuOpen]);
 
@@ -1270,8 +1293,8 @@ export function MachiChatView({
       <div className="flex h-full min-h-0 flex-1 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* 顶部 - 对话标题 */}
-        <div className="flex shrink-0 items-center justify-between px-6 py-4 pl-14 lg:pl-6">
-          <div className="flex items-center gap-2">
+        <div data-chat-header className="flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-y-2 px-6 py-4 pl-14 lg:pl-6">
+          <div className="flex min-w-0 basis-40 flex-1 items-center gap-2">
             {isEditingTitle ? (
               <input
                 ref={titleInputRef}
@@ -1291,21 +1314,21 @@ export function MachiChatView({
                     setIsEditingTitle(false);
                   }
                 }}
-                className="rounded-md border border-border bg-background px-2 py-1 text-sm font-medium outline-none focus:border-ring"
+                className="min-w-0 max-w-full rounded-md border border-border bg-background px-2 py-1 text-sm font-medium outline-none focus:border-ring"
                 autoFocus
               />
             ) : (
               <button
                 type="button"
                 onClick={() => setIsEditingTitle(true)}
-                className="group flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted"
+                className="group flex min-w-0 items-center gap-2 rounded-md px-2 py-1 hover:bg-muted"
               >
-                <span className="text-base font-semibold tracking-tight">{sessionTitle}</span>
-                <Pencil className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100" />
+                <span className="truncate text-base font-semibold tracking-tight">{sessionTitle}</span>
+                <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
               </button>
             )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
             {activeSessionId ? (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1385,13 +1408,9 @@ export function MachiChatView({
              * 侧栏：h-14 品牌行 + p-3 + h-9 新对话 + gap-1.5 → ≈110px
              * 主区顶栏：py-4 + h-8 操作行 → ≈64px
              * 故空态 pt ≈ 110-64 = 46px（pt-11） */
-            <div className="relative flex h-full flex-col items-center justify-start gap-8 overflow-y-auto px-4 pt-11 pb-10 md:gap-10 md:pb-16">
-              <NearEmptyWordmark
-                caption={deepResearchMode ? tw("deepResearchEmptySubtitle") : undefined}
-              />
-
-              <div className="w-full max-w-[46rem]">{composer}</div>
-            </div>
+            <EmptyChatPane hero={
+              <NearEmptyWordmark caption={deepResearchMode ? tw("deepResearchEmptySubtitle") : undefined} />
+            }>{composer}</EmptyChatPane>
           ) : (
             <div className="relative h-full min-h-0">
               {sessionMessagesLoading && (
@@ -1457,7 +1476,7 @@ export function MachiChatView({
         </div>
 
         {!isEmpty && (
-          <div className="relative z-10 min-w-0 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-6 lg:pb-8 lg:pt-4">
+          <div data-chat-composer className="relative z-10 min-w-0 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-6 lg:pb-8 lg:pt-4">
             {composer}
           </div>
         )}
