@@ -242,6 +242,11 @@ def test_harness_api_routes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["harness_id"] == "claude-code"
     assert body["harness_options"] == {"mode": "headless"}
 
+    # read-back of the sticky binding
+    r = client.get(f"/api/sessions/{sid}/harness", headers=_headers())
+    assert r.status_code == 200, r.text
+    assert r.json()["harness_id"] == "claude-code"
+
     # unknown harness -> 400 with available ids
     r = client.post(
         f"/api/sessions/{sid}/harness",
@@ -259,6 +264,46 @@ def test_harness_api_routes(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert r.status_code == 200
     assert r.json()["harness_id"] is None
+
+    # No session-level harness_id: backfill from the latest message stamp
+    # and persist it so the next open does not fall through to Settings.
+    managed = app.state.session_manager.get(sid)
+    assert managed is not None
+    managed.studio_session.harness_id = None
+    managed.studio_session.chat_history = [
+        {"role": "user", "content": "hi", "metadata": {"harness": "claude-code"}},
+        {
+            "role": "assistant",
+            "content": "done",
+            "metadata": {"harness": "claude-code"},
+        },
+    ]
+    r = client.get(f"/api/sessions/{sid}/harness", headers=_headers())
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["harness_id"] is None
+    assert body["recovered_harness_id"] == "claude-code"
+    assert app.state.session_manager.get_session_harness(sid)["harness_id"] == "claude-code"
+
+    # An explicit builtin switch that is still the tail must not be undone.
+    managed.studio_session.harness_id = None
+    managed.studio_session.chat_history = [
+        {"role": "user", "content": "hi", "metadata": {"harness": "claude-code"}},
+        {
+            "role": "system",
+            "content": "switched",
+            "metadata": {
+                "kind": "harness_switch",
+                "from_harness": "claude-code",
+                "to_harness": None,
+                "strategy": "builtin",
+            },
+        },
+    ]
+    r = client.get(f"/api/sessions/{sid}/harness", headers=_headers())
+    assert r.status_code == 200, r.text
+    assert r.json()["recovered_harness_id"] is None
+    assert app.state.session_manager.get_session_harness(sid)["harness_id"] is None
 
     # missing session -> 404
     r = client.post(

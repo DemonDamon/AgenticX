@@ -4,8 +4,9 @@
 
 import { DEFAULT_ECP_TENANT_DISTRIBUTION_POLICY, normalizeEcpTenantDistributionPolicy } from "@agenticx/config";
 import { ecpTenantSettings } from "@agenticx/db-schema/mysql";
-import { createMysqlDb, resolveDatabaseConfig } from "@agenticx/iam-core";
 import { eq } from "drizzle-orm";
+
+import { getAdminMysqlDb } from "./database";
 
 export type EcpTenantDistributionPolicyRecord = {
   tenantId: string;
@@ -15,8 +16,7 @@ export type EcpTenantDistributionPolicyRecord = {
 export async function getEcpTenantDistributionPolicy(
   tenantId: string,
 ): Promise<EcpTenantDistributionPolicyRecord> {
-  const database = resolveDatabaseConfig();
-  const { raw: db } = await createMysqlDb(database);
+  const db = getAdminMysqlDb();
   const rows = await db
     .select()
     .from(ecpTenantSettings)

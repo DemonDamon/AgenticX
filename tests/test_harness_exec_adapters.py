@@ -94,6 +94,29 @@ def emit(msg):
 if scenario == "slow":
     time.sleep(60)
     sys.exit(0)
+if scenario == "skip_git_denied":
+    print("Reading additional input from stdin...", flush=True)
+    print("Not inside a trusted directory and --skip-git-repo-check was not specified.", flush=True)
+    sys.exit(1)
+if scenario == "flat_v0167":
+    # Codex 0.167+ emits flat events (no msg envelope).
+    def emit_flat(obj):
+        print(json.dumps(obj), flush=True)
+    emit_flat({"type": "thread.started", "thread_id": "thr_flat167"})
+    emit_flat({"type": "item.completed", "item": {
+        "id": "item_0", "type": "error",
+        "message": "Model metadata for `glm-5.3-flash` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+    }})
+    emit_flat({"type": "turn.started"})
+    emit_flat({"type": "item.completed", "item": {
+        "id": "item_1", "type": "agent_message", "text": "ok"
+    }})
+    emit_flat({"type": "turn.completed", "usage": {
+        "input_tokens": 11611, "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0, "output_tokens": 3,
+        "reasoning_output_tokens": 1
+    }})
+    sys.exit(0)
 
 emit({"type": "thread.started", "thread_id": "thr_fake222"})
 emit({"type": "task_started"})
@@ -141,6 +164,9 @@ def fake_codex(tmp_path, monkeypatch):
     log = str(tmp_path / "cx-log.jsonl")
     monkeypatch.setenv("AGX_CODEX_EXECUTABLE", exe)
     monkeypatch.setenv("FAKE_CLI_LOG", log)
+    # Keep the recorded exec --json fallback coverage intact. App-server
+    # streaming is tested in test_codex_app_server.py.
+    monkeypatch.setenv("AGX_CODEX_TRANSPORT", "exec")
     if os.path.exists(log):
         os.remove(log)
     return {"exe": exe, "log": log, "adapter": CodexAdapter()}
@@ -350,6 +376,31 @@ def test_codex_spawn_rejects_unknown_options(fake_codex):
         adapter.spawn(os.getcwd(), options={"mode": "whatever"})
 
 
+def test_codex_spawn_ignores_internal_model_provider(fake_codex):
+    """#334 model_provider stamp must not fail spawn or leak into argv."""
+    adapter = fake_codex["adapter"]
+    view = adapter.spawn(
+        os.getcwd(),
+        options={
+            "model": "mimo-v2.6-flash",
+            "model_provider": "agenticx-mimo",
+        },
+    )
+    assert view["session_id"]
+    # argv is recorded when the fake CLI runs on turn(), not on spawn().
+    adapter.turn(view["session_id"], _turn())
+    argv = _read_log(fake_codex["log"])[0]["argv"]
+    assert argv[argv.index("-m") + 1] == "mimo-v2.6-flash"
+    assert "model_provider" not in argv
+    assert "agenticx-mimo" not in argv
+    # Truly unknown flags still fail, even when a stamp is also present.
+    with pytest.raises(ValueError, match=r"unknown spawn options for codex: \['mode'\]"):
+        adapter.spawn(
+            os.getcwd(),
+            options={"mode": "whatever", "model_provider": "agenticx-mimo"},
+        )
+
+
 def test_codex_resume_args(fake_codex):
     adapter = fake_codex["adapter"]
     sid = adapter.spawn(os.getcwd())["session_id"]
@@ -357,8 +408,15 @@ def test_codex_resume_args(fake_codex):
     adapter.turn(sid, _turn("again"))
     argvs = _read_log(fake_codex["log"])
     second = argvs[1]["argv"]
-    assert second[:3] == ["exec", "resume", "thr_fake222"]
+    assert second[:2] == ["exec", "resume"]
     assert "--json" in second
+    assert "--skip-git-repo-check" in second
+    # Codex 0.167: options must come before SESSION_ID; resume rejects -C.
+    assert "-C" not in second
+    rid = second.index("thr_fake222")
+    assert second.index("--json") < rid
+    assert second.index("--skip-git-repo-check") < rid
+    assert second[rid + 1] == "again"
 
 
 def test_codex_sandbox_and_model_args(fake_codex):
@@ -370,10 +428,73 @@ def test_codex_sandbox_and_model_args(fake_codex):
     adapter.turn(sid, _turn())
     argv = _read_log(fake_codex["log"])[0]["argv"]
     assert argv[0] == "exec"
+    assert "--skip-git-repo-check" in argv
     assert argv[argv.index("--sandbox") + 1] == "workspace-write"
     assert argv[argv.index("-m") + 1] == "gpt-5.2-codex"
     i = argv.index("-C")
     assert argv[i + 1] == os.getcwd()
+    # workspace-write without network_access must explicitly disable it
+    # so a user config cannot silently grant outbound access.
+    assert argv[argv.index("-c") + 1] == (
+        "sandbox_workspace_write.network_access=false"
+    )
+
+
+def test_codex_auto_run_mode_enables_workspace_write_network(fake_codex):
+    adapter = fake_codex["adapter"]
+    sid = adapter.spawn(
+        os.getcwd(),
+        options={
+            "model": "glm-5.3-flash",
+            "sandbox": "workspace-write",
+            "network_access": True,
+            "full_auto": False,
+        },
+    )["session_id"]
+    adapter.turn(sid, _turn())
+    argv = _read_log(fake_codex["log"])[0]["argv"]
+    assert argv[argv.index("--sandbox") + 1] == "workspace-write"
+    assert argv[argv.index("-c") + 1] == (
+        "sandbox_workspace_write.network_access=true"
+    )
+    assert "--full-auto" not in argv
+    assert "danger-full-access" not in argv
+
+
+def test_codex_spawn_rejects_invalid_network_access(fake_codex):
+    adapter = fake_codex["adapter"]
+    with pytest.raises(ValueError, match="network_access"):
+        adapter.spawn(os.getcwd(), options={"network_access": "yes"})
+
+
+def test_codex_resume_omits_cd_and_puts_options_before_session_id(fake_codex):
+    adapter = fake_codex["adapter"]
+    sid = adapter.spawn(
+        os.getcwd(),
+        options={"model": "glm-5.3-flash", "sandbox": "workspace-write"},
+    )["session_id"]
+    adapter.turn(sid, _turn())
+    adapter.turn(sid, _turn("follow up"))
+    first, second = (_read_log(fake_codex["log"])[i]["argv"] for i in (0, 1))
+    assert first[0] == "exec" and first[1] != "resume"
+    assert first[first.index("-C") + 1] == os.getcwd()
+    assert first[first.index("--sandbox") + 1] == "workspace-write"
+    assert first[first.index("-m") + 1] == "glm-5.3-flash"
+    assert second[:2] == ["exec", "resume"]
+    assert "-C" not in second
+    assert "--sandbox" not in second
+    assert second[second.index("-m") + 1] == "glm-5.3-flash"
+    # first turn had workspace-write without network_access → explicit false
+    assert first[first.index("-c") + 1] == (
+        "sandbox_workspace_write.network_access=false"
+    )
+    assert second[second.index("-c") + 1] == (
+        "sandbox_workspace_write.network_access=false"
+    )
+    rid = second.index("thr_fake222")
+    assert second.index("--json") < rid
+    assert second.index("-m") < rid
+    assert second[rid + 1] == "follow up"
 
 
 def test_codex_error_event_maps_to_error(fake_codex):
@@ -386,6 +507,39 @@ def test_codex_error_event_maps_to_error(fake_codex):
         os.environ.pop("FAKE_SCENARIO", None)
     assert result.status == "error"
     assert "model unavailable" in result.detail["error"]
+
+
+def test_codex_parses_flat_v0167_events_and_ignores_metadata_warning(fake_codex):
+    adapter = fake_codex["adapter"]
+    sid = adapter.spawn(os.getcwd())["session_id"]
+    os.environ["FAKE_SCENARIO"] = "flat_v0167"
+    try:
+        result = adapter.turn(sid, _turn())
+    finally:
+        os.environ.pop("FAKE_SCENARIO", None)
+    assert result.ok
+    assert result.result_text == "ok"
+    assert result.detail["native_thread_id"] == "thr_flat167"
+    assert result.detail["task_complete"] is True
+    assert result.detail["tokens"]["input"] == 11611
+    assert result.detail["tokens"]["output"] == 3
+    warnings = result.detail.get("warnings") or []
+    assert any("Model metadata" in w for w in warnings)
+
+
+def test_codex_plain_stderr_surfaces_in_terminal_detail(fake_codex):
+    adapter = fake_codex["adapter"]
+    sid = adapter.spawn(os.getcwd())["session_id"]
+    os.environ["FAKE_SCENARIO"] = "skip_git_denied"
+    try:
+        result = adapter.turn(sid, _turn())
+    finally:
+        os.environ.pop("FAKE_SCENARIO", None)
+    assert result.status == "error"
+    assert "trusted directory" in str(result.detail.get("terminal_detail") or "")
+    # The stdin boilerplate must not be the only visible text, and NDJSON
+    # is not required here because this path is plain stderr.
+    assert "Reading additional input" not in str(result.detail.get("terminal_detail") or "")
 
 
 def test_codex_capabilities_declared(fake_codex):

@@ -54,6 +54,7 @@ type SSETransport struct {
 }
 
 func NewSSETransport() *SSETransport {
+	warnIfMCPSessionSecretUnset()
 	return &SSETransport{sessions: newSSESessionStore()}
 }
 

@@ -154,11 +154,18 @@ func TestConnectorBackendExecuteActionOK(t *testing.T) {
 }
 
 func TestConnectorBackendExecuteActionMissingConnection(t *testing.T) {
-	b := keyedBackend(httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	})))
+	}))
+	defer up.Close()
+	// 未传 connectionId 时会自动选用该连接器已有的连接，所以这里不放任何连接。
+	store := &fakeConnectorStore{
+		defs:  []*connectorapi.Connector{keyedConnector(up.URL)},
+		conns: &fakeAPIConnections{},
+	}
+	b := NewConnectorBackend(store, nil, true)
 	res, err := b.CallTool(context.Background(), connectorRecord(), "execute_action", map[string]any{
-		"actionId": "keyed.fetch", // api_key 连接器缺 connectionId
+		"actionId": "keyed.fetch", // api_key 连接器没有任何连接
 	})
 	if err != nil {
 		t.Fatal(err)

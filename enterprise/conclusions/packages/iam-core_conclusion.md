@@ -1,14 +1,14 @@
 # @agenticx/iam-core 模块总结
 
-> 结论生成时间：2026-07-21（重新生成，覆盖当前代码 v0.1.0）
+> 结论生成时间：2026-11-14（基线 `cebdabd5`，覆盖当前代码 v0.1.0）
 
-> 说明：本文档描述 **企业 IAM 数据访问层包**（`@agenticx/iam-core`）。它是 web-portal + admin-console 共用的数据访问层，**同时支持 PostgreSQL 与 MySQL 两种方言**（基于 `@agenticx/db-schema` 的 Drizzle 双 schema）。本次重新生成相对旧版的主要订正：旧版仅描述 PostgreSQL，当前代码已全面引入方言派发（`database/` 子目录 + 各 service/repo 的 dialect 分支）。
+> 说明：本文档描述 **企业 IAM 与 Managed Agent 数据访问层包**（`@agenticx/iam-core`）。它是 web-portal + admin-console 共用的数据访问层，**同时支持 PostgreSQL 与 MySQL 两种方言**（基于 `@agenticx/db-schema` 的 Drizzle 双 schema）。
 
 ## 模块概述
 
-`@agenticx/iam-core`（v0.1.0，workspace 包路径 `enterprise/packages/iam-core`，`package.json#description` 现为 "Enterprise IAM repositories (Drizzle, PostgreSQL / MySQL)"）是 AgenticX Enterprise IAM（Identity & Access Management）的**数据访问层**。它包装 `@agenticx/db-schema` 表（通过 Drizzle ORM），暴露**类型化的仓库函数**和少量**高层服务**（PAT、session grants、合规、配额、运行时配置迁移、信封加密），并产出**供 gateway 推理时使用的 "snapshot" payloads**。
+`@agenticx/iam-core`（v0.1.0，workspace 包路径 `enterprise/packages/iam-core`，`package.json#description` 现为 "Enterprise IAM repositories (Drizzle, PostgreSQL / MySQL)"）是 AgenticX Enterprise IAM（Identity & Access Management）及 Managed Agent 控制面的**数据访问层**。它包装 `@agenticx/db-schema` 表（通过 Drizzle ORM），暴露**类型化的仓库函数**和少量**高层服务**（PAT、session grants、合规、配额、运行时配置迁移、Agent 版本、环境、凭据、记忆、调度、渠道与评测），并产出**供 gateway 推理时使用的 "snapshot" payloads**。
 
-依赖：`@agenticx/auth`（认证契约）+ `@agenticx/db-schema`（Drizzle 双 schema）+ `drizzle-orm` + `pg` + `mysql2` + `ulid`。测试用 `vitest`。
+依赖：`@agenticx/auth`（认证契约）+ `@agenticx/core-api`（Agent manifest / managed eval 契约）+ `@agenticx/db-schema`（Drizzle 双 schema）+ `drizzle-orm` + `pg` + `mysql2` + `ulid`。测试用 `vitest`。
 
 ## 目录结构
 
@@ -32,17 +32,33 @@ packages/iam-core/
     ├── refresh-token-pg-store.ts          # 现为 facade：按方言委托给 MysqlRefreshTokenStore 或 PostgresqlRefreshTokenStore
     ├── pat-service.ts                     # Personal Access Token 生命周期（按方言分支）
     ├── pat-revocation-store.ts            # PAT 吊销 snapshot for gateway（按方言分支）
+    ├── session-revocation-store.ts        # 用户会话撤销水位与 gateway snapshot
+    ├── incident-response-primitives.ts    # PAT/用户/refresh session 事件响应原语
+    ├── ma-vault-crypto.ts                 # Managed Agent 凭据的 DEK/KEK 信封加密
     ├── session-grant-service.ts           # 管理员签发的临时 session grants（按方言分支）
     ├── compliance-service.ts              # 跨境/审计保留合规配置（ComplianceStore 抽象，按方言分支）
     ├── quota-remaining.ts                 # 租户/部门/用户/PAT 配额剩余汇总（按方言分支）
     ├── repos/
-    │   ├── contracts.ts                   # ⚡ 方言中立接口：AuditRepository / UsersRepository / DepartmentsRepository / RolesRepository / SsoProvidersRepository
+    │   ├── contracts.ts                   # 方言中立接口，含 SecurityIncidentRepository
     │   ├── users.ts                       # PG 实现 + 委托 mysqlUsersRepository（MySQL）
     │   ├── departments.ts                # PG 实现 + 委托 mysqlDeptsRepo（MySQL）
     │   ├── roles.ts                      # PG 实现 + 委托 mysqlRolesRepo（MySQL）
     │   ├── sso-providers.ts              # PG 实现 + 委托 mysqlSsoRepository（MySQL）
     │   ├── audit.ts                      # 通过 AuditRepository 抽象委托 mysqlAuditRepository / postgresqlAuditRepository
-    │   ├── agents.ts                     # 企业 Agent 注册表（PG + MySQL 方言分支；MySQL CRUD 委托 repos/mysql/agents.ts）
+    │   ├── agents.ts                     # 企业 Agent 注册表 + Managed Agent 路由/环境设置
+    │   ├── agent-versions.ts             # 不可变 Agent manifest 版本、回填、预览与分页
+    │   ├── agent-manifest-legacy.ts      # legacy 列 ↔ manifest 投影兼容
+    │   ├── ma-environments.ts            # cloud / desktop_worker 执行环境
+    │   ├── ma-vaults.ts                  # 凭据库、凭据解析与 OAuth refresh
+    │   ├── ma-memory.ts                  # 记忆库、CAS 写入、版本、脱敏与 dream review
+    │   ├── ma-schedules.ts               # cron 调度定义、手动触发与运行摘要
+    │   ├── ma-webhooks.ts                # webhook、签名凭据与投递查询
+    │   ├── ma-channels.ts                # 飞书渠道配置、连接态与会话查询
+    │   ├── ma-agent-quotas.ts            # Agent 默认/用户级配额
+    │   ├── ma-evals.ts                   # 评测集、用例与 rubric
+    │   ├── ma-evals-read.ts              # eval run/result/candidate 只读查询
+    │   ├── ma-sessions-read.ts           # session/event/work item 只读查询
+    │   ├── incidents.ts                  # 安全事件三态状态机与动作明细
     │   ├── cases.ts                      # 企业案例库（enterprise_cases；状态机用 db-schema 的 canTransitionCase）
     │   ├── projects.ts                   # 管理台只读项目/协作房间视图（enterprise_projects + collab 表；可见性 SQL）
     │   ├── mysql/
@@ -94,7 +110,7 @@ packages/iam-core/
 - `__resetIamDbForTests` 仅重置 PG（MySQL 走 factory 的 `__resetDatabaseForTests`）
 
 ### `repos/contracts.ts` — 方言中立仓库接口
-定义 `DialectRepository`（带 `readonly dialect`）及五个仓库接口：`AuditRepository`、`UsersRepository`、`DepartmentsRepository`、`RolesRepository`、`SsoProvidersRepository`，PG 与 MySQL 实现都遵守这些接口。`DepartmentsRepository` 含 `listDepartmentAncestorIds` 与 `listDepartmentSubtreeIds`。
+定义 `DialectRepository`（带 `readonly dialect`）及 `AuditRepository`、`UsersRepository`、`DepartmentsRepository`、`RolesRepository`、`SsoProvidersRepository`、`SecurityIncidentRepository`。PG 与 MySQL 实现都遵守这些接口；安全事件契约覆盖事件 CRUD、状态迁移与处置动作明细。
 
 ## Repos —— 职责与关键导出
 
@@ -142,15 +158,15 @@ packages/iam-core/
 - `insertAuditEvent` —— 接受可选 `IamDb`（支持事务复用）
 
 ### `repos/agents.ts`
-**职责**：租户级企业 Agent 注册表，读写 `@agenticx/db-schema` 的 `enterprise_agents`（MySQL 走 `repos/mysql/agents.ts` + `getMysqlRepositoryDb`）
+**职责**：租户级企业 Agent 注册表及 Managed Agent 运行设置，读写 `enterprise_agents`，并把 legacy 字段与不可变 manifest 版本链保持兼容。
 
-**类型**：`EnterpriseAgent`、`AgentInput`；枚举 `AgentRuntime` / `AgentStatus` / `AgentLifecycle` / `AgentOrigin`
+**类型**：`EnterpriseAgent`、`AgentInput`、`EnterpriseAgentWithMa`、`AgentMaSettingsPatch`；枚举 `AgentRuntime` / `AgentStatus` / `AgentLifecycle` / `AgentOrigin` / `AgentVersionRouting`
 
-**校验**：`validateAgentInput`（slug、模型、runtime/status/lifecycle/origin、能力 id `mcp|skill:` ULID/Base32、`assignmentKeys` 非空、`metadata.knowledgeSearchUrl` 仅 http/https）；能力 id 是否已登记 Skill/MCP **不在本包**校验
+**校验**：`validateAgentInput`（slug、模型、最长 65536 字符 system prompt、runtime/status/lifecycle/origin、能力 id `mcp|skill:` ULID/Base32、`assignmentKeys` 非空、`metadata.knowledgeSearchUrl` 仅 http/https）；能力 id 是否已登记 Skill/MCP **不在本包**校验
 
-**错误类**：`AgentValidationError`、`AgentNotFoundError`、`AgentSlugConflictError`（PG 23505 / MySQL 1062 唯一约束）
+**错误类**：`AgentValidationError`、`AgentNotFoundError`、`AgentSlugConflictError`、`AgentHasSessionsError`
 
-**函数**：`listAgents`、`getAgent`、`getAgentBySlug`、`createAgent`、`updateAgent`、`deleteAgent`、`registerEmployeeAgent`（桌面员工分身登记/更新，不复活已 recalled）、`listAgentsVisibleToKeys`（已发布且未停用 + `assignmentKeys` 交集）、`isVisibleToEmployees`
+**函数**：原 CRUD 外新增 `listAgentsWithMa` / `getAgentWithMa`、`updateAgentMaSettings`（`follow_latest` / `pinned` + 默认环境校验）、`createAgentWithInitialVersion`；已有 `registerEmployeeAgent`、`listAgentsVisibleToKeys`、`isVisibleToEmployees` 保持。
 
 ### `repos/cases.ts`
 **职责**：企业案例库，读写 `enterprise_cases`（PG / MySQL 双方言，`resolveDatabaseConfig` + `getIamDb` / `createMysqlDb`）
@@ -165,6 +181,18 @@ packages/iam-core/
 **可见性**：`ProjectVisibility` — `all` / `dept`（按 `dept_id`）/ `self`（主房间 human 成员 EXISTS 子查询）；列表在 SQL 与结果层双重过滤；`dept`/`self` 模式可读 direct 房间元数据但 **`listAdminProjectMessages` 对 direct 抛 `ProjectForbiddenError`**，`all` 可读
 
 **导出**：`listAdminProjects`、`getAdminProject`、`listAdminProjectMessages`；`adminProjectScopeSql` 供测试编译 SQL；`__setAdminProjectsFixtureForTests` 内存 fixture 供单测
+
+## Managed Agent 控制面仓库
+
+以下模块均从根 barrel 导出；除纯校验/规划器外，公开仓库按 `resolveDatabaseConfig()` 派发 PostgreSQL / MySQL：
+
+- **Agent manifest 版本**：`agent-versions.ts` 提供 `ensureAgentVersionOne`、`createAgentVersion`、`previewAgentManifest`、`getAgentVersion`、`listAgentVersions`、`backfillAgentVersions`。版本只追加、不暴露更新/删除接口；`expectedLatestVersion` 做乐观并发控制，内容 hash 未变化时不重复写入。`agent-manifest-legacy.ts` 负责 legacy 列投影、租户 skill 版本固定及 multiagent 成员版本固定。
+- **执行环境与只读运行视图**：`ma-environments.ts` 管理 `cloud` / `desktop_worker` 环境，删除前检查 Agent、活跃 session 和开放 work item 引用；`ma-sessions-read.ts` 仅提供 session、event、work item 查询，不提供写接口。
+- **凭据与渠道**：`ma-vaults.ts` 管理 vault/credential 生命周期、引用检查、运行时 bundle 解析与 MCP OAuth refresh；`ma-vault-validate.ts` 对 `static_bearer`、`mcp_oauth`、`bearer`、`environment_variable` 四类凭据执行 URL/host/secret/networking 严格校验。`ma-channels.ts` 管理飞书渠道、版本路由、连接态和渠道会话，并经 vault 解析 app secret；审计详情不包含明文 secret。
+- **记忆**：`ma-memory-path.ts` 定义绝对 NFC 路径、单项 100 KiB、单库 2000 项 / 20 MiB 上限和 `planMemoryWrite` CAS 规划；`ma-memory.ts` 管理 store、分页/折叠读取、版本历史、非 head 版本脱敏、审计及 dream 输出审核门禁；`ma-memory-dreams-read.ts` 只读 dream 运行记录。
+- **调度与 webhook**：`ma-cron.ts` 校验五段 cron（每小时最多触发 12 次）和 IANA 时区；`ma-schedules.ts` 管理版本策略、环境、vault、memory 资源、手动触发及 run 摘要；`ma-webhooks.ts` 管理事件订阅、签名凭据轮换/撤销和投递查询。
+- **配额与评测**：`ma-agent-quotas.ts` 提供 Agent 默认/用户级 token、费用、并发限制的 upsert 与有效配额解析；`ma-evals.ts` 管理最多 500 条用例的评测集及版本化 rubric（通过 `@agenticx/core-api/managed-evals` 校验）；`ma-evals-read.ts` 只读 run、result、candidate。
+- **安全事件**：`incidents.ts` 提供 `open → handling → resolved` 三态事件状态机和处置动作明细，`getSecurityIncidentRepository` 按方言返回实现；`SecurityIncidentRepository` 是其方言中立契约。
 
 ## 特殊服务
 
@@ -194,6 +222,13 @@ packages/iam-core/
 
 **吊销**：`recordPatRevocation` / `recordPatRevocationByPlaintext` / `buildPatRevocationSnapshotForGateway`（gateway 5-10s 轮询拉哈希列表）
 
+### `session-revocation-store.ts` + `incident-response-primitives.ts`
+- `recordSessionRevocation` / `buildSessionRevocationSnapshotForGateway` 按用户记录会话撤销水位并生成 gateway snapshot；MySQL 实现位于 `repos/mysql/session-revocation.ts`。
+- `getPatHash`、`listUserSessionIds`、`setUserStatusDisabled`、`deleteRefreshSessionBySessionId` 是事件响应编排使用的低层原语。
+
+### `ma-vault-crypto.ts`
+Managed Agent secret 使用随机 DEK + AES-256-GCM 加密 payload，再用 `MA_VAULT_MASTER_KEY` 派生 KEK 包装 DEK；`MA_VAULT_MASTER_KEY_PREVIOUS` 支持主密钥轮换后的解密回退。缺失/弱密钥抛 `VaultCryptoUnavailableError`，认证失败抛 `VaultDecryptError`。
+
 ### `session-grant-service.ts`
 **管理员签发的影子/扮演授权**（按方言分支）：
 - `createSessionGrant` / `listSessionGrants` / `revokeSessionGrant`
@@ -216,7 +251,7 @@ packages/iam-core/
 
 ## 公共 API 表面（消费方）
 
-根 barrel `@agenticx/iam-core` re-export 上述所有 repo/service 模块及 `db.ts` 的方言派发入口。`package.json#exports` 还显式暴露 3 个深路径：
+根 barrel `@agenticx/iam-core` re-export 上述 repo/service 模块、Managed Agent 控制面仓库及 `db.ts` 的方言派发入口。`package.json#exports` 还显式暴露 3 个深路径：
 
 | Entry point | 用途 |
 |---|---|
@@ -242,33 +277,21 @@ vitest，运行 `pnpm --filter @agenticx/iam-core test`：
 | `src/repos/__tests__/sso-providers.test.ts` | SSO provider repo CRUD |
 | `src/repos/__tests__/agents-validate.test.ts` | `validateAgentInput` / `isVisibleToEmployees`（无 DB） |
 | `src/repos/__tests__/projects.test.ts` | 项目可见性 fixture + PG/MySQL `adminProjectScopeSql` 编译 |
+| `src/repos/__tests__/agent-versions.test.ts`、`agent-manifest-legacy.test.ts` | manifest 回填/追加、并发冲突、skill/member 固定、legacy 投影 |
+| `src/repos/__tests__/ma-memory-*.test.ts` | 路径/容量限制、CAS、版本脱敏、删除前置条件、dream review |
+| `src/repos/__tests__/ma-vault-*.test.ts`、`src/__tests__/ma-vault-crypto.test.ts` | 凭据校验、信封加密/轮换、OAuth refresh、运行时 bundle |
+| `src/repos/__tests__/ma-*.test.ts` | 环境、cron/调度、渠道、webhook、Agent 配额、eval、session 只读映射 |
+| `src/repos/__tests__/incidents.test.ts` | 安全事件状态机、方言派发与行映射 |
 
-包根没有 mock DB 层；测试通过 `getRepositoryRegistry()` / `getIamDb()` 单例真打 Drizzle（`__resetDatabaseForTests` / `__resetIamDbForTests` 用于隔离）。
+包根没有统一 mock DB 层；部分单测使用模块内存适配器（如 Agent 版本与 eval），其余通过方言仓库或纯校验器隔离。
 
 ## 与 Enterprise 其他模块的关系
 
 | 关联 | 形态 | 说明 |
 |---|---|---|
 | `packages/auth` | 实现其接口 | `pg-auth-user-repository` + `refresh-token-pg-store` 两个 facade 按 `DATABASE_DIALECT` 接 PG 或 MySQL，是 `@agenticx/auth` 接后端的方式 |
+| `packages/core-api` | 复用契约 | Agent manifest 规范化/hash 与 managed eval rubric 校验 |
 | `packages/db-schema` | 直接依赖 | repo 包 schema 表；PG 走 `@agenticx/db-schema` 主 schema，MySQL 走 `@agenticx/db-schema/mysql` |
 | `apps/web-portal` | 主消费者 | session 加载、chat 数据访问 |
 | `apps/admin-console` | 主消费者 | 所有 admin/* 数据 store；snapshot 生成 |
-| `apps/gateway`（Go） | snapshot 消费者 | 通过 admin-console `/api/internal/*` 拉 PAT 吊销 / session grants / compliance snapshot；本包是 snapshot 的源头 |
-
-
-## 增量（8ebec3b5 → 30e57496）
-
-- `desktop-device-auth-service.ts`：桌面设备码登录（init / poll / approve / cancel）+ `desktop-device-auth-service.test.ts`。
-- `repos/user-groups.ts` + MySQL 镜像：用户组 CRUD/成员。
-- `repos/user-opt-outs.ts` + MySQL：能力 opt-out 持久化。
-- `repos/assignment-keys.ts`：分配键规范化。
-- users / refresh-token store：补 `mustChangePassword` 等列读写。
-- barrel 导出上述服务与 repo。
-
-## 增量（30e57496 → 22d051f5）
-
-- `repos/agents.ts` + `repos/mysql/agents.ts`：`enterprise_agents` CRUD、输入校验、员工分身 `registerEmployeeAgent`、`listAgentsVisibleToKeys`；barrel 导出。
-- `repos/cases.ts`：`enterprise_cases` 列表/创建/状态迁移（`canTransitionCase`）。
-- `repos/projects.ts`：管理台只读项目列表/详情/房间消息，三档可见性与 direct 消息权限；测试 fixture API。
-- `quota-remaining.ts`：`getQuotaWindowUsagesForUsers` 等，读 PG/MySQL `usage_records` 批量聚合 token 与 cost。
-- `index.ts` 导出 `agents` / `cases` / `projects`；单测 `agents-validate.test.ts`、`projects.test.ts`，配额测试补多用户窗口用例。
+| `apps/gateway`（Go） | snapshot 消费者 | 通过 admin-console `/api/internal/*` 拉 PAT / session 吊销、session grants、compliance snapshot；本包是 snapshot 的源头 |

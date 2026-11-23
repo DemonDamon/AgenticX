@@ -1,6 +1,6 @@
 # Safety Module Conclusion
 
-> 结论更新时间：2026-05-29（覆盖 2026-03-07 之后的变更）（无重大变更）
+> 结论更新时间：2026-11-14（target cebdabd5）
 
 ## Overview
 
@@ -156,7 +156,7 @@ tool input (args)                          tool output (string)
 - `InputValidator`：核心校验器
 
 **InputValidator 实现要点**：
-- 6 条内置规则：`shell_injection`（CRITICAL/blocking）、`path_traversal`（CRITICAL/blocking）、`system_file_ref`（CRITICAL/blocking）、`command_substitution`（HIGH/blocking）、`sql_injection`（MEDIUM/non-blocking）、`ssrf_private_ip`（HIGH/blocking）
+- 6 条内置规则：`shell_injection`（CRITICAL/blocking）、`path_traversal`（CRITICAL/blocking）、`system_file_ref`（CRITICAL/blocking）、`command_substitution`（HIGH/blocking）、`sql_injection`（MEDIUM/non-blocking）、`ssrf_private_ip`（HIGH/blocking；`DEFAULT_RULES` 中匹配私网/回环/链路本地 `169.254.*` 与字面量 `0.0.0.0`）
 - `_flatten_args()` 递归展开嵌套 dict/list，保证深层参数也被扫描
 - 支持 `extra_rules` 追加自定义规则和 `tool_policies` per-tool 策略覆盖
 

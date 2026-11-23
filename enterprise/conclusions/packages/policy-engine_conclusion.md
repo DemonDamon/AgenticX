@@ -1,6 +1,6 @@
 # @agenticx/policy-engine 模块总结
 
-> 结论生成时间：2026-07-21（基于源码核验重写）
+> 结论生成时间：2026-11-14（target cebdabd5，基于源码核验重写）
 
 ## 模块概述
 
@@ -35,7 +35,7 @@ packages/policy-engine/
 - `Engine.EvaluateJSONFields(raw, ctx)`——字段类规则评估（field kind）
 - `LoadRulePacks(glob)` / `LoadRulePacksWithDisabled(glob, disabledPacks)`
 
-**类型**：`Rule`、`RulePackManifest`、`AppliesTo`、`EvalContext`（含 `PublicRetrieval`，仅可信调用方写入，不从用户元数据带入）、`HitEvent`、`EvaluateResult`、`compiledRule`（私有）
+**类型**：`Rule`（可选 `Category`，YAML/JSON `category`）、`RulePackManifest`、`AppliesTo`、`EvalContext`（含 `PublicRetrieval`，仅可信调用方写入，不从用户元数据带入）、`HitEvent`（含 `Category`）、`EvaluateResult`、`compiledRule`（私有）
 
 **枚举**：
 - `RuleKind` = `keyword | regex | pii | field`
@@ -48,7 +48,7 @@ packages/policy-engine/
 - **规则一次编译**：`compileRule` 按 `Kind` 编译成 `compiledRule`——keyword → `keywordTrie`；regex → `regexp.Compile`；pii → `baselinePIIRegex`（mobile / email / id-card / bank-card / api-key 五类基线正则）；field → 校验 `JSONPath` 非空
 - **keyword_trie 是基础前缀树，不是 Aho-Corasick**：`findAll` 用双层循环（外层每个起点、内层沿 trie 下行），大小写不敏感，**没有 failure 链**，复杂度 O(n·m)；不要误认为 Aho 自动机
 - **EvaluateWithContext 流程**：先按 `tenant_id` 过滤（任一端空则跳过该过滤）→ `matchesAppliesTo`（依次：`UserExcludeIDs` 命中则弃 → `Stages` 必匹配 → `ClientTypes` 必匹配 → `UserIDs` 非空则必须包含 → `deptMatch || roleMatch` 并集）→ switch 仅处理 `keyword/regex/pii`（**field kind 在此路径不处理，需走 `EvaluateJSONFields`**）→ 命中送 `applyHit`；**PII 分支**：当 `EvalContext.PublicRetrieval == true` 且 `Stage` 为 `request`（大小写不敏感）且 `pii_type` 去空白后不等于 `api-key` 时，对该次命中在局部 `Rule` 副本上将 `Action` 降为 `warn`（不修改 `compiledRule` 内持久规则），`api-key` 与 keyword/regex/field 动作不变；`response` 阶段或未设 `PublicRetrieval` 时 PII 仍按 manifest 原 `action`
-- **applyHit 动作语义**：`block` 置 `Blocked=true`；`redact` 把命中片段替换为 `[REDACTED]`；`warn` 仅记录 `HitEvent`，不改文本
+- **applyHit 动作语义**：组装 `HitEvent` 时将 `Rule.Category` 原样写入 `HitEvent.Category`（引擎不校验类别取值，供网关/审计侧 SP3 合规分类）；`block` 置 `Blocked=true`；`redact` 把命中片段替换为 `[REDACTED]`；`warn` 仅记录 `HitEvent`，不改文本
 - **字段规则（fields.go）**：`EvaluateJSONFields` 只处理 `field kind`，按 `target`（request/response，默认 response）与 stage 匹配，`splitJSONPath` 支持 `[*]` 数组通配，`collectFieldMatches` 递归定位；`deny` 置 `Blocked`，`redact` 直接改写 `parent[key] = "[REDACTED]"`，`allow` 仅记录命中不改值
 - **Go 引擎能力边界**：只识别 `keyword/regex/pii/field`（不含 `keyword-list`）；17 种密钥检测仍留在主仓 AgenticX Python 框架，**未进** Go 网关
 

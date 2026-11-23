@@ -1,6 +1,6 @@
 # AgenticX Tools 模块完整结构分析
 
-> 结论更新时间：2026-10-25（覆盖至 `22d051f5d18ad83a4c6083683342ab41d7850149`）
+> 结论更新时间：2026-11-14（覆盖至 `cebdabd5883de1d5a62c96ae4084de6ad036b32f`）
 
 ## 目录路径
 `/Users/damon/myWork/AgenticX/agenticx/tools`
@@ -180,8 +180,8 @@ agenticx/tools/
 
 #### agenticx/tools/skill_bundle.py
 **文件功能**：兼容 Anthropic Agent Skills 规范的技能包加载器。
-**技术实现**：扫描 `.agent/skills` 和 `.claude/skills` 目录，解析 `SKILL.md` 的 YAML Frontmatter 提取元数据，支持多路径优先级扫描和同名技能去重。通过 `process_llm_request` 实现渐进式 Prompt 注入。**新增 `execution_backend` 参数支持（P2-1），允许指定技能执行后端（本地或沙箱）**。解析 `name`/`description` 时经 `_strip_matched_quotes` 去掉 YAML 成对引号，避免 clawhub 等上游包导致按名匹配（已装判定 / preferred_sources）失效。
-**关键组件**：`SkillMetadata` (技能元数据 dataclass), `SkillBundleLoader` (扫描与解析器), `SkillTool` (list/read 操作封装)。
+**技术实现**：扫描 `.agent/skills` 和 `.claude/skills` 目录，解析 `SKILL.md` 的 YAML Frontmatter 提取元数据，支持多路径优先级扫描和同名技能去重。通过 `process_llm_request` 实现渐进式 Prompt 注入。**新增 `execution_backend` 参数支持（P2-1），允许指定技能执行后端（本地或沙箱）**。解析 `name`/`description` 时经 `_strip_matched_quotes` 去掉 YAML 成对引号，避免 clawhub 等上游包导致按名匹配（已装判定 / preferred_sources）失效。`infer_skill_source()` 经 `_SKILL_SOURCE_FRAGMENTS` 识别 `~/.agenticx/skills/enterprise` 为 `enterprise` 来源；`_VALID_EXPLICIT_SKILL_SOURCES` 接受显式 `source=enterprise`。
+**关键组件**：`SkillMetadata` (技能元数据 dataclass), `SkillBundleLoader` (扫描与解析器), `SkillTool` (list/read 操作封装), `_SKILL_SOURCE_FRAGMENTS`, `_VALID_EXPLICIT_SKILL_SOURCES`。
 **业务逻辑**：
 - 实现 Anthropic 的"渐进式披露"设计：技能指令只在 Agent 决定使用时才加载到上下文，节省 Token 开销。
 - 支持 `DiscoveryBus` 集成：扫描时自动发布 `DiscoveryType.CAPABILITY` 事件，允许 Planner 动态感知新技能。
@@ -304,3 +304,10 @@ AgenticX Tools 模块在保留原有强类型校验和 MCP 灵活性的基础上
 - **`document_text.read_document_text(..., cancel_event=)`**：把取消事件传给 `LiteParseAdapter.parse_to_text`；`LiteParseCancelled` 映射为 `DocumentTextError("cancelled", "解析已取消")`。`read_document_text_sync` 同步透传。供 KB/Brain job `request_cancel`。
 - **`adapters/liteparse.py`**：解析过程可协作取消（与 document_text 的 `cancel_event` 对齐）。
 - **`policy.PlanModeLayer.read_only_tools`**：去掉 `skill_list`/`skill_use`（Plan mode 禁止靠 skill 绕过写工具）；加入 `knowledge_search`/`code_search`/`plan_create`/`plan_update`，与 `runtime.plan_mode.TURN_INTENT_ALLOWED_TOOLS` 对齐。
+
+### 2026-11 增量（MCP 写闸 / 企业技能路径）
+
+- **`MCPHubConfig.write_tools_enabled`** / **`MCPHub.write_tools_enabled`**：Hub 级写类 MCP 工具总开关；`MCPHub.from_config` 从配置注入（缺省 `False`）。
+- **`MCPHub.call_tool`**：转发前经 `tool_requires_write_enable`（原始名与路由名双判，含 description）与 `decide_mcp_write_gate`（`agenticx.managed.templates.data_suite.write_guards`）；未放行抛 `ToolError`，`details` 含 `code`/`reason`。
+- **`MCPToolSnapshot.requires_write_enable`**：`list_tool_snapshots` 为各路由工具标注是否需写开关，供设置/UI 展示。
+- **`skill_bundle`**：`~/.agenticx/skills/enterprise` 映射 `enterprise` 来源；显式 `source=enterprise` 合法。

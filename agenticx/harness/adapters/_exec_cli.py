@@ -21,7 +21,8 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
+from collections import deque
 
 import ujson
 
@@ -40,6 +41,22 @@ _READ_LINE_JOIN_SECONDS = 2.0
 _TAIL_MAX_CHARS = 2000
 
 
+def _plain_cli_tail(tail: str) -> str:
+    """Human-readable CLI lines, skipping NDJSON event envelopes."""
+    lines: List[str] = []
+    for raw in (tail or "").splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("{") and stripped.endswith("}"):
+            continue
+        if stripped.startswith("Reading additional input from stdin"):
+            continue
+        lines.append(stripped)
+    return "\n".join(lines).strip()
+
+
+
 @dataclass
 class ExecCliSession:
     """Bookkeeping for one logical harness session."""
@@ -53,8 +70,17 @@ class ExecCliSession:
     turn_count: int = 0
     last_result_text: str = ""
     last_tail: str = ""
-    # Populated while a turn runs.
+    # Populated while a turn runs (exec --json) or for a long-lived
+    # Codex app-server process that stays up across turns.
     proc: Optional[subprocess.Popen] = None
+    # Mid-turn stream items drained by Near's 200ms SSE pump.
+    midturn_items: Deque[Dict[str, Any]] = field(default_factory=deque)
+    midturn_lock: threading.Lock = field(default_factory=threading.Lock)
+    # Codex app-server bookkeeping (unused by OpenCode).
+    app_server_ready: bool = False
+    app_server_thread_loaded: bool = False
+    app_server_provider: Optional[str] = None
+    app_server_rpc: Any = None
 
 
 class ExecCliHarnessAdapter(HarnessAdapter):
@@ -260,32 +286,46 @@ class ExecCliHarnessAdapter(HarnessAdapter):
             session.state = "idle"
 
         tail = "\n".join(tail_lines[-20:])
+        visible_tail = _plain_cli_tail(tail)
         if timed_out:
+            timeout_detail = dict(detail, wait_seconds=request.wait_seconds)
+            if visible_tail and not timeout_detail.get("terminal_detail"):
+                timeout_detail["terminal_detail"] = visible_tail[:500]
             return TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_TIMEOUT,
                 result_text="",
                 tail=tail,
-                detail=dict(detail, wait_seconds=request.wait_seconds),
+                detail=timeout_detail,
             )
         if error_text:
+            err_detail = dict(detail, error=error_text[:500])
+            if not err_detail.get("terminal_detail") and not err_detail.get(
+                "error_visible_text"
+            ):
+                err_detail["terminal_detail"] = error_text[:500]
             return TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_ERROR,
                 result_text="",
                 tail=tail,
-                detail=dict(detail, error=error_text[:500]),
+                detail=err_detail,
             )
         if exit_code not in (0, None):
+            fail_detail = dict(detail)
+            if visible_tail and not fail_detail.get("terminal_detail") and not fail_detail.get(
+                "error_visible_text"
+            ):
+                fail_detail["terminal_detail"] = visible_tail[:500]
             return TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_ERROR,
                 result_text="",
                 tail=tail,
-                detail=detail,
+                detail=fail_detail,
             )
         return TurnResult(
             harness=self.harness_id,
@@ -299,6 +339,20 @@ class ExecCliHarnessAdapter(HarnessAdapter):
     # ------------------------------------------------------------------
     # native thread adoption (SP4 resume tier)
     # ------------------------------------------------------------------
+    def refresh_session_options(
+        self, session_id: str, options: Optional[Dict[str, Any]]
+    ) -> None:
+        """Replace spawn options on a live session without respawning.
+
+        Used when Near run_mode changes mid-session. Codex applies the
+        new sandbox via turn/start ``sandboxPolicy``; exec --json still
+        cannot change ``--sandbox`` on resume (#332).
+        """
+        opts = dict(options or {})
+        self._validate_options(opts)
+        session = self._get(session_id)
+        session.options = opts
+
     def adopt_thread(self, session_id: str, native_thread_id: str) -> None:
         if not (native_thread_id or "").strip():
             raise ValueError("native_thread_id must be non-empty")

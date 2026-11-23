@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "safety",
-  "generation": "acb1481127524e9faee79dfebaffae44",
+  "generation": "6e437ef94d06448095b1c79fabe03dc1",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:7304bae3988be197cd7105b340a40d670450492e12fc9595063a9c5f88cc149a",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:df8ebd94f5dc1b6279f7c38e78e5535bf6cf4ecced0bd946b6f78975e29df6cf",
   "summary_path": "conclusions/safety_module_conclusion.md",
-  "summary_sha256": "sha256:d9757cf2011b779a1e67c86672900b56fb2c1b762920e26204d247bc87a95c17",
-  "updated_at": "2026-10-24T13:53:17.312052+00:00"
+  "summary_sha256": "sha256:94d83a7eda774fc0fc317e5fee3528c39b716c3e76b3dec6f0a0f85eb8a08689",
+  "updated_at": "2026-11-14T12:24:34.762396+00:00"
 }
