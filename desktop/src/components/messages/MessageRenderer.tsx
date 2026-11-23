@@ -91,6 +91,8 @@ type Props = {
   onOpenSubAgentRun?: (runId: string) => void;
   assistantName?: string;
   assistantAvatarUrl?: string;
+  /** Harness that answered this user turn (corner badge on user bubble). */
+  turnHarnessId?: string | null;
   /** IM assistant: align with ReAct block tool column (no duplicate avatar). */
   imAssistantVisual?: "default" | "compact-inline" | "compact-inline-with-actions";
   /** Pass-through to ImBubble: remove inner bubble border when inside unified ReAct container. */
@@ -177,6 +179,12 @@ type Props = {
   onBuildPlan?: (plan: PlanArtifactPayload) => void;
   onOpenBranchSource?: (lineage: BranchLineage) => void;
   onContinueFromMessage?: (message: Message) => void;
+  activeHarnessId?: string | null;
+  onCodebuddyLogin?: () => void;
+  codebuddyLoginAwaitingRetry?: boolean;
+  codebuddyLoginAuthorizing?: boolean;
+  codebuddyLoginOAuthFailed?: boolean;
+  codebuddyLoginOAuthError?: string | null;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -405,6 +413,7 @@ export function MessageRenderer({
   onOpenSubAgentRun,
   assistantName,
   assistantAvatarUrl,
+  turnHarnessId,
   userName,
   userAvatarUrl,
   onCopyMessage,
@@ -456,6 +465,12 @@ export function MessageRenderer({
   onBuildPlan,
   onOpenBranchSource,
   onContinueFromMessage,
+  activeHarnessId,
+  onCodebuddyLogin,
+  codebuddyLoginAwaitingRetry,
+  codebuddyLoginAuthorizing,
+  codebuddyLoginOAuthFailed,
+  codebuddyLoginOAuthError,
 }: Props) {
   const { t } = useTranslation("chat");
   const chatStyle = useAppStore((s) => s.chatStyle);
@@ -634,6 +649,7 @@ export function MessageRenderer({
       onRevealPath,
       <ImBubble
         message={displayMessage}
+        turnHarnessId={turnHarnessId}
         resolvedReferences={resolvedReferences}
         highlightTerms={highlightTerms}
         badge={assistantBadge}
@@ -687,6 +703,13 @@ export function MessageRenderer({
         }
         onOpenWorkspaceRefs={onOpenAllRefs}
         sessionWebRefs={sessionWebRefs}
+        activeHarnessId={activeHarnessId}
+        conversationMessages={allMessages}
+        onCodebuddyLogin={onCodebuddyLogin}
+        codebuddyLoginAwaitingRetry={codebuddyLoginAwaitingRetry}
+        codebuddyLoginAuthorizing={codebuddyLoginAuthorizing}
+        codebuddyLoginOAuthFailed={codebuddyLoginOAuthFailed}
+        codebuddyLoginOAuthError={codebuddyLoginOAuthError}
       />,
     );
   }

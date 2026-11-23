@@ -1,16 +1,16 @@
 # Enterprise plugins/ 模块总结
 
-> 结论生成时间：2026-07-21（基于当前 `enterprise/plugins/` 全量重生成，覆盖 10 个 plugin）
+> 结论生成时间：2026-11-14（target `cebdabd5`，基于当前 `enterprise/plugins/` 全量重生成，覆盖 11 个 plugin）
 
-> 说明：本文档是 **Enterprise 运行时插件目录**（10 个 plugin）的目录级合订结论。如实区分「已落地可演示 / 仅 manifest 占位 / TODO 空壳」三态，不夸大未实现能力。具体插件协议规范见 `enterprise/docs/plugin-protocol/`（本文档不展开协议本身）。
+> 说明：本文档是 **Enterprise 运行时插件目录**（11 个 plugin）的目录级合订结论。如实区分「已落地可演示 / 仅 manifest 占位 / TODO 空壳」三态，不夸大未实现能力。具体插件协议规范见 `enterprise/docs/plugin-protocol/`（本文档不展开协议本身）。
 
 ## 模块概述
 
-`plugins/` 是 Enterprise 的**运行时插件目录**。10 个 plugin 按"用途 + 运行时"分为四类：
+`plugins/` 是 Enterprise 的**运行时插件目录**。11 个 plugin 按"用途 + 运行时"分为四类：
 
 | 类别 | 数量 | type | 装载方 |
 |---|---|---|---|
-| **合规规则包**（`moderation-*`） | 3 | `rule-pack` | gateway 通过 `policy_manifest: /app/plugins/moderation-*/manifest.yaml` 通配扫描；admin 发布后进 PG 快照 |
+| **合规规则包**（`moderation-*`） | 4 | `rule-pack` | gateway 通过 `policy_manifest: /app/plugins/moderation-*/manifest.yaml` 通配扫描；admin 发布后进 PG 快照 |
 | **Wasm 网关插件**（`wasm-*`） | 4 | `plugin` + `runtime: wasm` | gateway wasmhost 按 `priority` 串行调用（依赖内嵌 builtin） |
 | **工具包**（`tool-*`） | 2 | `tool-pack` | 独立 Python CLI（验收 / 测试用） |
 | **主题包**（`theme-*`） | 1 | `theme-pack` | UI brand / theme 注入（预期与 `@agenticx/ui` + `@agenticx/config` 配合） |
@@ -28,6 +28,8 @@ plugins/
 ├── moderation-medical/             # ✅ 医疗行业包（extends 基线 + 1 条关键词规则）
 │   ├── manifest.yaml
 │   └── README.md
+├── moderation-compliance/          # ✅ 内容合规基线（涉政/暴恐/色情/广告，4 条规则，无 extends）
+│   └── manifest.yaml
 ├── wasm-keyword-rewrite/           # ⚙ manifest 已落，enabled=true，priority=100
 │   └── manifest.yaml               # binary: builtin:keyword-rewrite（无 .wasm 文件）
 ├── wasm-bearer-extractor/          # ⚙ manifest 已落，enabled=false，priority=20
@@ -57,7 +59,7 @@ plugins/
 
 ## 各类别详解
 
-### 1. 合规规则包（`moderation-*`，3 个，全部已落地）
+### 1. 合规规则包（`moderation-*`，4 个，全部已落地）
 
 协议字段：`name / version / type=rule-pack / description / extends? / rules[]`；每条规则 `id / kind(keyword|regex|pii) / action(block|redact|warn) / severity / message`。
 
@@ -78,7 +80,16 @@ plugins/
 **`moderation-medical`**（`extends: moderation-pii-baseline`）—— 再加 1 条：
 - `medical-keyword-phi`（warn, high）—— 关键词：病历全文 / 基因检测原始数据 / 住院号 / 处方原件
 
-> 诚实说明：三个 rule-pack 的 manifest 均为完整 YAML，规则可被 gateway Go 引擎识别（`keyword` / `regex` / `pii` 三种 kind 均在引擎支持范围内）。但本目录内**没有任何运行时校验脚本**——规则的真正生效依赖 gateway 侧 `policy-engine` 与 admin 发布快照链路，不在 plugins/ 目录内体现。
+**`moderation-compliance`**（v0.1.0，无 extends，独立内容合规基线）—— 4 条规则（manifest `description` 标明基线示例、生产宜以客户词表替换/增补）：
+
+| id | kind | category | action | severity |
+|---|---|---|---|---|
+| `compliance-politics-1` | keyword | politics | block | critical |
+| `compliance-terrorism-1` | keyword | terrorism | block | critical |
+| `compliance-porn-1` | keyword | porn | block | high |
+| `compliance-ad-1` | regex | ad | warn | medium |
+
+> 诚实说明：四个 rule-pack 的 manifest 均为完整 YAML，规则可被 gateway Go 引擎识别（`keyword` / `regex` / `pii` 三种 kind 均在引擎支持范围内）。但本目录内**没有任何运行时校验脚本**——规则的真正生效依赖 gateway 侧 `policy-engine` 与 admin 发布快照链路，不在 plugins/ 目录内体现。
 
 ### 2. Wasm 网关插件（`wasm-*`，4 个，manifest 已落但 binary 依赖宿主）
 
@@ -113,7 +124,7 @@ plugins/
 
 `eval_metrics.py`：独立 CLI，对比 `--expected` 标签与 `--report` 工具产出，按类别算 `missed / false_alarm / miss_rate / false_alarm_rate`。
 
-`tests/`：`conftest.py` 提供 `clean_docx` / `flawed_docx` / `flawed_labels` 三个 fixture；`test_format_checks.py` 3 个用例（flawed 命中全部 4 个 checker、clean 误报率 ≤ 0.15、单 checker 返回非空）；`test_eval_metrics.py` 2 个用例（score 计算正确性 + CLI roundtrip）。`requirements.txt`：`python-docx==1.1.2` / `pdfplumber==0.11.4` / `pytest==8.3.3`。
+`tests/`：`conftest.py` 提供 `clean_docx` / `flawed_docx` / `flawed_labels` 三个 fixture；`test_format_checks.py` 3 个用例（flawed 命中全部 4 个 checker、clean 误报率 ≤ 0.15、单 checker 返回非空）；`test_eval_metrics.py` 2 个用例（score 计算正确性 + CLI roundtrip）。`requirements.txt`：`python-docx==1.1.2` / `pdfplumber==0.11.4` / `pytest==9.0.3`。
 
 > 诚实说明：这是 plugins/ 内**唯一可端到端演示**的插件，`pytest tests/ -q` 可直接跑。但当前是独立 Python CLI 形态，**尚未挂到 MCP host** 作为 agent 工具暴露。
 
@@ -133,7 +144,7 @@ plugins/
 
 | 类别 | 状态 | 可否现场演示 |
 |---|---|---|
-| PII 基线 + 金融 / 医疗行业规则 | ✅ manifest 完整 | 规则本身可展示；运行时拦截需配合 gateway + admin 发布链路 |
+| PII 基线 + 金融 / 医疗行业规则 + `moderation-compliance` 内容合规包 | ✅ manifest 完整 | 规则本身可展示；运行时拦截需配合 gateway + admin 发布链路 |
 | Wasm 插件 manifest | ✅ 4 个 manifest 已落 | ⚠ 仅 manifest 可展示；binary 依赖 gateway 内嵌 builtin，本目录无 `.wasm` |
 | Wasm 默认启用项 | 仅 `wasm-keyword-rewrite`（enabled=true） | 同上，依赖宿主 |
 | `tool-doc-review` CLI + 测试 | ✅ 完整实现，pytest 可跑 | ✅ 可现场 `pytest tests/ -q` 演示 |

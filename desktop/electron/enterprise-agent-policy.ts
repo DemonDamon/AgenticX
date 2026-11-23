@@ -11,6 +11,7 @@ export type NormalizedAgentActionPolicy = {
   denied_tools: string[];
   always_ask_tools: string[];
   disable_session_allow: boolean;
+  trace_content: boolean;
 };
 
 function readList(source: Record<string, unknown>, camel: string, snake: string): unknown {
@@ -22,6 +23,12 @@ function readList(source: Record<string, unknown>, camel: string, snake: string)
 function readFlag(source: Record<string, unknown>): boolean {
   if ("disableSessionAllow" in source) return source.disableSessionAllow === true;
   if ("disable_session_allow" in source) return source.disable_session_allow === true;
+  return false;
+}
+
+function readBool(source: Record<string, unknown>, camel: string, snake: string): boolean {
+  if (camel in source) return source[camel] === true;
+  if (snake in source) return source[snake] === true;
   return false;
 }
 
@@ -43,12 +50,13 @@ function normalizePatterns(raw: unknown): string[] {
 
 export function normalizeAgentActionPolicy(raw: unknown): NormalizedAgentActionPolicy {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { denied_tools: [], always_ask_tools: [], disable_session_allow: false };
+    return { denied_tools: [], always_ask_tools: [], disable_session_allow: false, trace_content: false };
   }
   const source = raw as Record<string, unknown>;
   return {
     denied_tools: normalizePatterns(readList(source, "deniedTools", "denied_tools")),
     always_ask_tools: normalizePatterns(readList(source, "alwaysAskTools", "always_ask_tools")),
     disable_session_allow: readFlag(source),
+    trace_content: readBool(source, "traceContent", "trace_content"),
   };
 }

@@ -130,7 +130,7 @@ export function mergeSessionMessagesTail(
   diskRows: LoadedSessionMessage[],
   sessionId: string
 ): Message[] {
-  if (!diskRows.length) return existing;
+  if (!diskRows.length) return collapseHarnessTurnErrorBubbles(existing);
   const mapped = diskRows.map((row, idx) => mapLoadedSessionMessage(row, sessionId, idx));
   if (!existing.length) return mapped;
 
@@ -335,7 +335,83 @@ export function mergeSessionMessagesTail(
     else out.splice(insertAt, 0, transient);
   }
 
-  return retainUnpersistedLiveUserTurns(existing, out);
+  return collapseHarnessTurnErrorBubbles(retainUnpersistedLiveUserTurns(existing, out));
+}
+
+const HARNESS_TURN_ERROR_RE =
+  /^(\[harness\s+\S+\s+turn\s+(?:error|exited|timeout|blocked|failed)\])(?:\s+([\s\S]*))?$/;
+
+function harnessTurnErrorParts(content: unknown): { prefix: string; detail: string } | null {
+  const text = String(content ?? "").trim();
+  const match = HARNESS_TURN_ERROR_RE.exec(text);
+  if (!match) return null;
+  return { prefix: match[1], detail: String(match[2] ?? "").trim() };
+}
+
+function mergedHarnessErrorContent(prefix: string, detail: string, extras: string[]): string {
+  const pieces = [detail, ...extras.map((item) => item.trim())].filter(Boolean);
+  const unique: string[] = [];
+  for (const piece of pieces) {
+    if (unique.some((have) => have === piece || have.includes(piece))) continue;
+    unique.push(piece);
+  }
+  const body = unique.join("\n");
+  return body ? `${prefix} ${body}` : prefix;
+}
+
+/**
+ * A failed harness turn can commit the streamed assistant fragment and also
+ * reconcile a `[harness … turn error]` row. Keep one banner. An empty banner
+ * absorbs the single fragment; a banner that already contains the fragment
+ * drops the duplicate.
+ */
+function collapseHarnessErrorSegment(segment: Message[]): Message[] {
+  const banners = segment.filter(
+    (message) => message.role === "assistant" && harnessTurnErrorParts(message.content),
+  );
+  if (banners.length !== 1) return segment;
+  const banner = banners[0];
+  const parts = harnessTurnErrorParts(banner.content);
+  if (!parts) return segment;
+  const extras = segment.filter(
+    (message) =>
+      message !== banner &&
+      message.role === "assistant" &&
+      assistantBodyKey(message.content) &&
+      !harnessTurnErrorParts(message.content),
+  );
+  if (!extras.length) return segment;
+  const contained = extras.filter((message) => {
+    const body = assistantBodyKey(message.content);
+    if (!body || !parts.detail) return false;
+    return parts.detail === body || (body.length >= 12 && parts.detail.includes(body));
+  });
+  const absorb = parts.detail ? contained : extras.length === 1 ? extras : [];
+  if (!absorb.length) return segment;
+  const content = mergedHarnessErrorContent(
+    parts.prefix,
+    parts.detail,
+    absorb.map((message) => assistantBodyKey(message.content)),
+  );
+  const drop = new Set(absorb);
+  return segment
+    .filter((message) => !drop.has(message))
+    .map((message) => (message === banner ? { ...message, content } : message));
+}
+
+function collapseHarnessTurnErrorBubbles(messages: Message[]): Message[] {
+  const out: Message[] = [];
+  let segment: Message[] = [];
+  const flush = () => {
+    out.push(...collapseHarnessErrorSegment(segment));
+    segment = [];
+  };
+  for (const message of messages) {
+    if (message.role === "user" && segment.length > 0) flush();
+    segment.push(message);
+  }
+  flush();
+  return out;
 }
 
 /**

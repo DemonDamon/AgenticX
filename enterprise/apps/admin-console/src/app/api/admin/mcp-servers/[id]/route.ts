@@ -42,6 +42,7 @@ export async function PUT(request: Request, { params }: Params) {
       requiredScopes: body.requiredScopes as string[] | undefined,
       status: body.status as "active" | "disabled" | undefined,
       rateLimit: body.rateLimit as Record<string, unknown> | undefined,
+      createdBy: auth.session.userId,
     });
     return NextResponse.json({ code: "00000", message: "ok", data: { server } });
   } catch (error) {

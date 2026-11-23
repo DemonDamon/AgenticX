@@ -1,4 +1,5 @@
 import type { Message } from "../../store";
+import { assistantVisibleBodyForUi } from "../../utils/assistant-output";
 import { isContinuationNoticeMessage } from "../../utils/continuation-notice";
 import { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
 import { isShowWidgetToolMessage, parseWidgetPayload } from "./widget-preview";
@@ -74,7 +75,59 @@ export function groupConsecutiveToolMessages(messages: Message[]): GroupedChatRo
     const gid = group[0].toolGroupId ?? `legacy-group:${group[0].id}`;
     out.push({ kind: "tool_group", groupId: gid, messages: group });
   }
-  return out;
+  return hoistTrailingToolGroupsByTurn(out);
+}
+
+function visibleAssistantBody(message: Message): string {
+  return assistantVisibleBodyForUi(String(message.content ?? "")).trim();
+}
+
+function isVisibleBodyAssistantRow(row: GroupedChatRow): boolean {
+  if (row.kind !== "message" || row.message.role !== "assistant") return false;
+  return Boolean(visibleAssistantBody(row.message));
+}
+
+/**
+ * Move tool groups that landed after the turn's committed answer back above
+ * that answer. End-of-turn SSE fallback (#272) can append missed tool_call
+ * rows after already-streamed markdown; mid-turn interleaving is preserved
+ * when more assistant body (including a live `__stream__` overlay) follows
+ * the tools.
+ */
+export function hoistTrailingToolGroups(rows: GroupedChatRow[]): GroupedChatRow[] {
+  let term = -1;
+  rows.forEach((row, index) => {
+    if (row.kind !== "message" || row.message.role !== "assistant") return;
+    if (row.message.id === "__stream__") return;
+    if (!visibleAssistantBody(row.message)) return;
+    term = index;
+  });
+  if (term < 0) return rows;
+  const after = rows.slice(term + 1);
+  if (after.some((row) => isVisibleBodyAssistantRow(row))) return rows;
+  const tools = after.filter((row) => row.kind === "tool_group");
+  if (tools.length === 0) return rows;
+  const rest = after.filter((row) => row.kind !== "tool_group");
+  return [...rows.slice(0, term), ...tools, rows[term], ...rest];
+}
+
+function hoistTrailingToolGroupsByTurn(rows: GroupedChatRow[]): GroupedChatRow[] {
+  const result: GroupedChatRow[] = [];
+  let segment: GroupedChatRow[] = [];
+  const flush = () => {
+    if (segment.length > 0) result.push(...hoistTrailingToolGroups(segment));
+    segment = [];
+  };
+  for (const row of rows) {
+    if (row.kind === "message" && row.message.role === "user") {
+      flush();
+      result.push(row);
+    } else {
+      segment.push(row);
+    }
+  }
+  flush();
+  return result;
 }
 
 export function isToolGroupInProgress(messages: Message[]): boolean {

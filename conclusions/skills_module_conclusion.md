@@ -1,6 +1,6 @@
 # AgenticX Skills 模块总结
 
-> 结论更新时间：2026-10-25（覆盖基线 ca9d92bec056 至 22d051f5d18a 的变更；首次创建于 2026-05-29）
+> 结论更新时间：2026-11-14（覆盖基线 22d051f5d18a 至 cebdabd5 的变更；首次创建于 2026-05-29）
 
 ## 模块概述
 
@@ -104,9 +104,10 @@ agenticx/skills/
 
 - `bundled/`：工作流类技能（`code-dev-workflow`、`feature-loop`、`project-initializer`）；新增 `security-audit`——默认仅作安全问答/聚焦审查的**指导模式**，仅在用户明确要求完整审计/渗透测试或报告产物时走六阶段**全量审计模式**（沙箱内只读源码 + 受控本地验证、写隔离与 findings 校验脚本，配套 reference 与 JSON schema，不在此展开清单）
 - `agenticx-agent-obs`：Near/多框架可观测性接入与 trace 诊断（`config.yaml` enterprise、ingest 指南、`diagnose_traces.py`）
-- `agenticx-custom-project`：定制项目初始化与「留本仓 vs 上游 Issue/PR」判定（`scripts/custom_project.py`：doctor/plan、depend/fork/vendor 等模式，默认不上传用户数据）
+- `agenticx-custom-project`：定制项目初始化与「留本仓 vs 上游 Issue/PR」判定（`scripts/custom_project.py`：doctor/plan、depend/fork/vendor 等模式，默认不上传用户数据）；Demo 门户换皮默认栈为 shadcn + Bits（React/Vue/Svelte 各一套，禁跨框架混装），细则见 `references/frontend-ui.md`；可与独立设计类技能并列，禁止把第三方技能全文并入本技能
+- `agenticx-enterprise-agent-builder`：企业托管智能体自然语言起草（`agx.agent/v1`），经 `enterprise_agent_builder` 的 `list`/`get`/`preview`/`submit` 落草稿；提交前须展示 diff 并获用户确认，禁止代称「已发布」；内置工具 14 项白名单、凭证不进 manifest；与本机分身技能 `agenticx-agent-builder` 分流
 - `connector-assistant`：对话内新建/更新**连接器**（非分身），严格 `connector_manage` 流程（模板去重、结构化澄清、掩码收凭证、verify）
-- 其余 `agenticx-*`（quickstart、agent-builder、tool-creator、workflow-designer、memory-architect、deployer、a2a-connector、skill-manager 等）：本区间仅 metadata `version` 0.6.0→0.6.5，行为契约未改
+- 其余 `agenticx-*`（quickstart、agent-builder、tool-creator、workflow-designer、memory-architect、deployer、a2a-connector、skill-manager 等）：本区间无行为契约变更
 - `BUILTIN_SKILLS_DIR` 指向本包目录，供运行时发现内置技能
 
 ## 设计模式

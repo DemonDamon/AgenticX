@@ -640,6 +640,32 @@ async def test_skip_user_history_dedupes_existing_tail_user() -> None:
     assert user_rows[0]["content"] == "能不能听到？"
 
 
+async def test_skip_user_history_restamps_tail_user_harness() -> None:
+    runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
+    session = StudioSession()
+    session.chat_history = [
+        {
+            "role": "user",
+            "content": "能不能听到？",
+            "metadata": {"harness": "codebuddy", "client_turn_id": "turn-9"},
+        }
+    ]
+
+    async for _ in runtime.run_turn(
+        "能不能听到？",
+        session,
+        persist_user_message=False,
+        history_user_metadata={"harness": "python-agent", "client_turn_id": "turn-9"},
+    ):
+        pass
+
+    user_rows = [m for m in session.chat_history if m.get("role") == "user"]
+    assert len(user_rows) == 1
+    assert user_rows[0]["metadata"]["harness"] == "python-agent"
+    assert user_rows[0]["metadata"]["harness_id"] == "python-agent"
+    assert user_rows[0]["metadata"]["client_turn_id"] == "turn-9"
+
+
 async def test_skip_user_history_skips_forward_card_follow_up_echo() -> None:
     """Auto-reply after merge-forward must not create a second identical user bubble."""
     runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
@@ -1181,3 +1207,46 @@ def test_delegation_reasoning_only_stall_pauses_early() -> None:
     assert paused.data["detector"] == "reasoning_only_stall"
     assert paused.data["retryable"] is True
     assert int(paused.data["round"]) < 20
+
+
+@pytest.mark.parametrize("raw_arguments,expected_dispatches", [
+    ('{"message":', 0), ('null', 0), ('[1, 2]', 0), ('', 0), ('{}', 1),
+])
+def test_optional_tool_dispatch_requires_valid_streamed_object(monkeypatch, raw_arguments, expected_dispatches):
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    dispatched = []
+
+    async def dispatch(*args, **kwargs):
+        dispatched.append((args, kwargs))
+        return "ok"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", dispatch)
+
+    class OptionalToolThenAnswer:
+        def __init__(self):
+            self.calls = 0
+
+        def stream_with_tools(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                yield {"type": "tool_call_delta", "tool_name": "list_items",
+                       "tool_call_id": "call-optional", "arguments_delta": raw_arguments}
+            else:
+                yield {"type": "content", "text": "Completed."}
+
+    tools = [{"type": "function", "function": {
+        "name": "list_items", "description": "List optional items",
+        "parameters": {"type": "object", "properties": {"message": {"type": "string"}}},
+    }}]
+    async def collect():
+        runtime = AgentRuntime(OptionalToolThenAnswer(), _ApproveGate())
+        return [
+            {"type": event.type, "data": event.data}
+            async for event in runtime.run_turn("hello", StudioSession(), tools=tools)
+        ]
+
+    events = __import__("asyncio").run(collect())
+    assert len(dispatched) == expected_dispatches
+    if not expected_dispatches:
+        assert any(event["type"] == EventType.ROUND_END.value and event["data"].get("auto_retry") for event in events)

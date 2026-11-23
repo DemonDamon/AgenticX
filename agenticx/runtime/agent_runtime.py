@@ -1346,7 +1346,7 @@ def _build_streamed_tool_truncation_hint(names: Sequence[str]) -> str:
     return hint
 
 
-def _repair_streamed_tool_arguments(raw: str) -> Dict[str, Any]:
+def _repair_streamed_tool_arguments(raw: str) -> Optional[Dict[str, Any]]:
     def _sanitize_parsed_args(parsed: Dict[str, Any]) -> Dict[str, Any]:
         # Drop leaked streamed metadata keys/values such as call_xxx / sa-xxxx
         # before tool dispatch.
@@ -1363,10 +1363,10 @@ def _repair_streamed_tool_arguments(raw: str) -> Dict[str, Any]:
 
     text = (raw or "").strip()
     if not text:
-        return {}
+        return None
     try:
         parsed = json.loads(text)
-        return _sanitize_parsed_args(parsed) if isinstance(parsed, dict) else {}
+        return _sanitize_parsed_args(parsed) if isinstance(parsed, dict) else None
     except Exception:
         pass
     lpos = text.find("{")
@@ -1374,10 +1374,10 @@ def _repair_streamed_tool_arguments(raw: str) -> Dict[str, Any]:
     if lpos >= 0 and rpos > lpos:
         try:
             parsed = json.loads(text[lpos : rpos + 1])
-            return _sanitize_parsed_args(parsed) if isinstance(parsed, dict) else {}
+            return _sanitize_parsed_args(parsed) if isinstance(parsed, dict) else None
         except Exception:
             pass
-    return {}
+    return None
 
 
 def _serialize_artifacts(session: StudioSession) -> str:
@@ -3804,7 +3804,7 @@ class AgentRuntime:
         return True, ""
 
     def _persist_final_checkpoint(self) -> None:
-        """Persist the completed turn before exposing its FINAL event."""
+        """Persist terminal turn state before exposing its final/error event."""
         if self._mid_turn_persist is None:
             return
         try:
@@ -3897,11 +3897,16 @@ class AgentRuntime:
         *,
         agent_id: str,
         is_system_trigger: bool,
+        stream_interrupted: bool = False,
     ) -> bool:
-        """Commit the prefix the user already saw into model-facing history."""
+        """Commit a safe interrupted prefix into model-facing history.
+
+        The compatibility flag applies to user cancellation only. A failed
+        stream cannot discard output already exposed to the caller.
+        """
         from agenticx.runtime.harden_flags import cancelled_prefix_finalize_enabled
 
-        if not cancelled_prefix_finalize_enabled():
+        if not stream_interrupted and not cancelled_prefix_finalize_enabled():
             return False
         parsed = parse_assistant_output(str(raw_prefix or ""))
         body = parsed.visible_body.strip()
@@ -3980,11 +3985,17 @@ class AgentRuntime:
             persisted_metadata: Dict[str, Any] = {
                 "turn_terminal": True,
                 "terminal_reason": terminal_reason,
+                # Builtin AgenticX runtime — so UI can badge the turn even
+                # when the session later switches to an external harness.
+                "harness": "python-agent",
             }
             if terminal_metadata:
                 for key, value in terminal_metadata.items():
                     if key not in {"turn_terminal", "terminal_reason"}:
                         persisted_metadata[str(key)] = value
+            # External / override metadata may already set harness; keep it.
+            if not str(persisted_metadata.get("harness") or "").strip():
+                persisted_metadata["harness"] = "python-agent"
             hist: Dict[str, Any] = {
                 "role": "assistant",
                 "content": body,
@@ -4049,11 +4060,14 @@ class AgentRuntime:
             "text": body,
             "turn_terminal": True,
             "terminal_reason": terminal_reason,
+            "harness": "python-agent",
         }
         if terminal_metadata:
             for key, value in terminal_metadata.items():
                 if key not in {"turn_terminal", "terminal_reason"}:
                     final_data[str(key)] = value
+        if not str(final_data.get("harness") or "").strip():
+            final_data["harness"] = "python-agent"
         if sug_list:
             final_data["suggested_questions"] = list(sug_list)
         if safe_reasoning.strip():
@@ -4126,6 +4140,7 @@ class AgentRuntime:
         saw_final = False
         saw_error = False
         saw_stop = False
+        saw_stream_interruption = False
         normal_end = False
         current_round: int | None = None
         inner = self._run_turn_inner(
@@ -4154,9 +4169,12 @@ class AgentRuntime:
                     saw_final = True
                 if getattr(event, "type", None) == EventType.ERROR.value:
                     saw_error = True
-                    event_text = str((getattr(event, "data", None) or {}).get("text", "") or "")
+                    error_data = getattr(event, "data", None) or {}
+                    event_text = str(error_data.get("text", "") or "")
                     if event_text == STOP_MESSAGE:
                         saw_stop = True
+                    if error_data.get("detector") == "stream_interrupted":
+                        saw_stream_interruption = True
                 if recorder is not None:
                     try:
                         recorder.observe(event, session=session, round_idx=current_round)
@@ -4173,7 +4191,7 @@ class AgentRuntime:
                 try:
                     if saw_final:
                         recorder.finish("completed")
-                    elif normal_end and saw_stop:
+                    elif saw_stream_interruption or (normal_end and saw_stop):
                         recorder.finish("interrupted")
                     elif normal_end and saw_error:
                         recorder.finish("failed")
@@ -4184,7 +4202,7 @@ class AgentRuntime:
                         "replay recorder finish failed; preserving agent result",
                         exc_info=True,
                     )
-            if store is not None and session_id and (normal_end or saw_final):
+            if store is not None and session_id and (normal_end or saw_final or saw_stream_interruption):
                 store.clear(session_id)
             try:
                 await inner.aclose()
@@ -4605,6 +4623,29 @@ class AgentRuntime:
                     _chat_history_append_deduped(session.chat_history, hist_user)
                     session.current_user_intent = _history_text or user_input
                     _should_mid_turn_persist = True
+                else:
+                    # Regenerate keeps this user row. Restamp its harness when
+                    # the caller names one, so the bubble follows the new turn.
+                    # Deferred import: harness_wiring loads session_manager,
+                    # which imports this module.
+                    harness_stamp = ""
+                    if isinstance(history_user_metadata, dict):
+                        harness_stamp = str(
+                            history_user_metadata.get("harness")
+                            or history_user_metadata.get("harness_id")
+                            or ""
+                        ).strip()
+                    if harness_stamp:
+                        from agenticx.studio.harness_wiring import (
+                            restamp_tail_user_harness,
+                        )
+
+                        if restamp_tail_user_harness(
+                            session.chat_history,
+                            harness_stamp,
+                            expected_text=ui_text,
+                        ):
+                            _should_mid_turn_persist = True
         # FR-1: append visible compaction notice after the user chat_history row
         # so reload order is [user] → [compaction notice] → [assistant].
         if pending_compaction_notice_count is not None:
@@ -5144,6 +5185,7 @@ class AgentRuntime:
                 _stream_body_start_ts: Optional[float] = None
                 stream_with_tools = getattr(self.llm, "stream_with_tools", None)
                 used_stream_path = False
+                stream_had_output = False
                 if callable(stream_with_tools):
                     try:
                         loop = asyncio.get_running_loop()
@@ -5254,6 +5296,9 @@ class AgentRuntime:
                             if chunk_type == "content":
                                 tok = str(stream_chunk.get("text", ""))
                                 if tok:
+                                    # Reasoning is encoded in content too. Even
+                                    # a buffered prefix makes replay unsafe.
+                                    stream_had_output = True
                                     # Capture reasoning phase timing for
                                     # reasoning_seconds persistence. The first
                                     #  Mattis marks reasoning start; the first
@@ -5298,6 +5343,8 @@ class AgentRuntime:
                                 if tool_name.lower() == "none":
                                     tool_name = ""
                                 args_delta = str(stream_chunk.get("arguments_delta", ""))
+                                if tool_call_id or tool_name or args_delta:
+                                    stream_had_output = True
                                 if tool_call_id:
                                     acc["id"] = tool_call_id
                                 if tool_name:
@@ -5372,7 +5419,7 @@ class AgentRuntime:
                                 )
                                 continue
                             args_obj = _repair_streamed_tool_arguments(item.get("arguments", ""))
-                            if _streamed_tool_call_truncated(accumulated_name, args_obj):
+                            if args_obj is None or _streamed_tool_call_truncated(accumulated_name, args_obj):
                                 logger.warning(
                                     "Dropping streamed tool_call '%s' (idx=%d) due to truncated/empty arguments; "
                                     "will surface retry hint to model",
@@ -5441,25 +5488,48 @@ class AgentRuntime:
                         return
                     except Exception as stream_exc:
                         logger.warning(
-                            "stream_with_tools failed, fallback to invoke path",
+                            "stream_with_tools interrupted after output"
+                            if stream_had_output
+                            else "stream_with_tools failed, fallback to invoke path",
                             exc_info=True,
                         )
+                        fault_kind = classify_provider_fault(stream_exc)
                         record_session_provider_hard_failure(
                             session,
                             provider_name,
-                            fault=classify_provider_fault(stream_exc),
+                            fault=fault_kind,
                         )
                         _log_model_fault(
                             session,
                             provider=provider_name,
                             model=model_name,
-                            kind=classify_provider_fault(stream_exc),
+                            kind=fault_kind,
                             phase="stream",
                             message=str(stream_exc)[:300],
-                            retryable=True,
+                            retryable=not stream_had_output,
                             usage_session_id=str(usage_session_id or ""),
                             usage_avatar_id=str(usage_avatar_id or ""),
                         )
+                        if stream_had_output:
+                            self._finalize_cancelled_prefix(
+                                session,
+                                str(followup_emitter.raw or response_text or ""),
+                                agent_id=agent_id,
+                                is_system_trigger=_is_system_trigger,
+                                stream_interrupted=True,
+                            )
+                            self._persist_final_checkpoint()
+                            yield RuntimeEvent(
+                                type=EventType.ERROR.value,
+                                data={
+                                    "text": "模型响应中断，已保留收到的内容。请检查后继续。",
+                                    "detector": "stream_interrupted",
+                                    "partial": True,
+                                    "retryable": False,
+                                },
+                                agent_id=agent_id,
+                            )
+                            return
                         used_stream_path = False
                 if not used_stream_path:
                     def _invoke_once_with_fallback() -> Any:

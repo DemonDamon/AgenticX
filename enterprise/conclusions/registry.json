@@ -52,7 +52,11 @@
     "plans",
     "results",
     "SECURITY.md",
-    "wiki"
+    "wiki",
+    ".gitleaks.toml",
+    "extension",
+    "reports",
+    "requirements-docs.txt"
   ],
   "modules": [
     {
@@ -356,6 +360,16 @@
       "mapping_revision": 1
     },
     {
+      "id": "agent-runtime",
+      "name": "agent-runtime",
+      "roots": [
+        "enterprise/apps/agent-runtime"
+      ],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/apps/agent-runtime_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
       "id": "enterprise-root",
       "name": "enterprise-root",
       "roots": [
@@ -363,7 +377,7 @@
       ],
       "shared_paths": [],
       "summary_path": "enterprise/conclusions/enterprise_root_conclusion.md",
-      "mapping_revision": 2
+      "mapping_revision": 3
     }
   ],
   "retired_modules": []

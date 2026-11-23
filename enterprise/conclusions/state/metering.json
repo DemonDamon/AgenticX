@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "metering",
-  "generation": "47874e1fe2ae4c22a64ce10d8942b9e7",
+  "generation": "5423dc3046104cbc8102a2cb682860c5",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:86712fd9559ee5f9b39c994d6718e64686c1526f6e29cb2aaa7a9151a13167c6",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:51709e536e3530d9dfbe64ea4d43c80d32e9059206db659789272c90bd6823b6",
   "summary_path": "enterprise/conclusions/features/metering_conclusion.md",
-  "summary_sha256": "sha256:c2fedc1ad20c5c38f1d6243ffc7effb4719719015d92f11a812e229deb911bc6",
-  "updated_at": "2026-10-25T03:42:35.155773+00:00"
+  "summary_sha256": "sha256:67927544009bb325af4ba66ce89252aa3bde819fbab60ee7a0da264617a0e1ce",
+  "updated_at": "2026-11-14T12:24:38.207916+00:00"
 }

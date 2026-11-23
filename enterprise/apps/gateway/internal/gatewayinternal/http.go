@@ -2,6 +2,7 @@
 package gatewayinternal
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -51,4 +52,32 @@ func HTTPGetWithHeaders(url string, headers map[string]string) ([]byte, int, err
 		return nil, resp.StatusCode, err
 	}
 	return body, resp.StatusCode, nil
+}
+
+// HTTPPost 使用与 HTTPGet 相同的客户端：默认 Transport（环境变量代理）、25 秒超时、内部 Bearer。
+// 不替换 Transport，避免空 Transport 绕过代理。状态码原样返回，由调用方判断是否成功。
+func HTTPPost(url string, body []byte) (int, error) {
+	if !IsHTTPURL(url) {
+		return 0, fmt.Errorf("gatewayinternal: URL must start with http:// or https://")
+	}
+	token := SecretFromEnv("GATEWAY_INTERNAL_TOKEN")
+	client := &http.Client{Timeout: 25 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, strings.TrimSpace(url), bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, err = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBodyBytes))
+	if err != nil {
+		return resp.StatusCode, err
+	}
+	return resp.StatusCode, nil
 }

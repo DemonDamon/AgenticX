@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "policy",
-  "generation": "b9ad125ff9d74cca931c64440cc2dd86",
+  "generation": "c8d9285c2ca44700b8577cde6fcd0812",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:3630998bf15d03a8892449daeb74900ee4edef9b8da84cde40dbd23d04b3015c",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:5f8ffb7b34f9d6afd507a746f01fe8cd5aa30d436411d2ae05c06db561eceeab",
   "summary_path": "enterprise/conclusions/features/policy_conclusion.md",
-  "summary_sha256": "sha256:5173ab0e77be1959e0ac8aa90b70204cd4ef4d1c60fbcae3da42d5b054340d5d",
-  "updated_at": "2026-10-24T13:52:53.942456+00:00"
+  "summary_sha256": "sha256:66063a8c20d2f30c3acd3d92edc3d1768f15c9e028ebef9c9b82e1c650d731ed",
+  "updated_at": "2026-11-14T12:26:53.840887+00:00"
 }

@@ -36,3 +36,19 @@ export const getMcpServerHealth: typeof postgresql.getMcpServerHealth = (...args
 
 export const importOpenAPITools: typeof postgresql.importOpenAPITools = (...args: Parameters<typeof postgresql.importOpenAPITools>) =>
   implementation().importOpenAPITools(...args);
+
+export const listMcpServerVersions: typeof postgresql.listMcpServerVersions = (
+  ...args: Parameters<typeof postgresql.listMcpServerVersions>
+) => implementation().listMcpServerVersions(...args);
+
+export const publishCurrentMcpSurface: typeof postgresql.publishCurrentMcpSurface = (
+  ...args: Parameters<typeof postgresql.publishCurrentMcpSurface>
+) => implementation().publishCurrentMcpSurface(...args);
+
+export const publishMcpServerVersion: typeof postgresql.publishMcpServerVersion = (
+  ...args: Parameters<typeof postgresql.publishMcpServerVersion>
+) => implementation().publishMcpServerVersion(...args);
+
+export const rollbackMcpServerVersion: typeof postgresql.rollbackMcpServerVersion = (
+  ...args: Parameters<typeof postgresql.rollbackMcpServerVersion>
+) => implementation().rollbackMcpServerVersion(...args);

@@ -218,3 +218,38 @@ def group_open_floor_max_speakers() -> int:
     if raw is None:
         raw = 2
     return max(1, min(3, int(raw)))
+
+
+STUDIO_SAFETY_MODES = ("observe", "enforce")
+
+
+def studio_safety_layer_enabled() -> bool:
+    """``AGX_STUDIO_SAFETY_LAYER`` / ``runtime.studio_safety_layer``. Default True.
+
+    On 时 Studio 主链路工具调用统一经过 SafetyLayer 四级管线
+    （截断→泄露检测→策略→注入清洗）与 InputValidator 前置校验；
+    Off 等价现状（零开销直通，回归保障开关）。
+    """
+    return _resolve_bool("AGX_STUDIO_SAFETY_LAYER", "runtime.studio_safety_layer", True)
+
+
+def studio_safety_mode() -> str:
+    """``AGX_STUDIO_SAFETY_MODE`` / ``runtime.studio_safety_mode``. Default ``"observe"``.
+
+    ``observe``  — 管线全跑、事件全记、审计全桥接，但不修改任何结果（WARN-only 上线模式）
+    ``enforce``  — 输入 blocked 拒绝执行 + 输出 redact/sanitize/block 生效
+
+    未识别值回退 ``observe``：观察模式是安全默认，配置笔误不得静默放行拦截。
+    """
+    raw = os.environ.get("AGX_STUDIO_SAFETY_MODE", "").strip().lower()
+    if raw not in STUDIO_SAFETY_MODES:
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            cfg = ConfigManager.get_value("runtime.studio_safety_mode")
+            if isinstance(cfg, str) and cfg.strip().lower() in STUDIO_SAFETY_MODES:
+                return cfg.strip().lower()
+        except Exception:
+            pass
+        return "observe"
+    return raw

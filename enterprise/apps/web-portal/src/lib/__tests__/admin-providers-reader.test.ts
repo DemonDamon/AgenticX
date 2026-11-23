@@ -68,7 +68,7 @@ describe("listAvailableModelsForUser", () => {
       { assignmentKey: "email:admin@agenticx.local", modelId: "openai/gpt-4" },
     ]);
 
-    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead);
+    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead).mockReturnValueOnce(chain([]));
 
     const { listAvailableModelsForUser } = await import("../admin-providers-reader");
     const models = await listAvailableModelsForUser("01J00000000000000000000004", "admin@agenticx.local");
@@ -89,7 +89,7 @@ describe("listAvailableModelsForUser", () => {
       { assignmentKey: "dept:dept-rd", modelId: "openai/gpt-3.5" },
     ]);
 
-    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead);
+    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead).mockReturnValueOnce(chain([]));
 
     const { listAvailableModelsForUser } = await import("../admin-providers-reader");
     const models = await listAvailableModelsForUser("u_001", undefined, "dept-rd");
@@ -105,7 +105,7 @@ describe("listAvailableModelsForUser", () => {
       { assignmentKey: "dept:dept-frontend", modelId: "openai/gpt-3.5" },
     ]);
 
-    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead);
+    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead).mockReturnValueOnce(chain([]));
 
     const { listAvailableModelsForUser } = await import("../admin-providers-reader");
     const models = await listAvailableModelsForUser("u_001", undefined, "dept-frontend");
@@ -123,7 +123,7 @@ describe("listAvailableModelsForUser", () => {
       { assignmentKey: "u_001", modelId: "openai/gpt-3.5" },
     ]);
 
-    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead);
+    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead).mockReturnValueOnce(chain([]));
 
     const { listAvailableModelsForUser } = await import("../admin-providers-reader");
     const models = await listAvailableModelsForUser("u_001", undefined, "dept-frontend");
@@ -140,7 +140,7 @@ describe("listAvailableModelsForUser", () => {
       { assignmentKey: "u_001", modelId: "openai/gpt-3.5" },
     ]);
 
-    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead);
+    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead).mockReturnValueOnce(chain([]));
 
     const { listAvailableModelsForUser } = await import("../admin-providers-reader");
     const models = await listAvailableModelsForUser("u_001", undefined, "dept-frontend");
@@ -152,11 +152,67 @@ describe("listAvailableModelsForUser", () => {
     const providersRead = chain([OPENAI_PROVIDER]);
     const userModelsRead = chain([]);
 
-    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead);
+    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead).mockReturnValueOnce(chain([]));
 
     const { listAvailableModelsForUser } = await import("../admin-providers-reader");
     const models = await listAvailableModelsForUser("u_new");
 
     expect(models.map((m) => m.id).sort()).toEqual(["openai/gpt-3.5", "openai/gpt-4"]);
+  });
+
+  it("shows a virtual model only when every target is visible", async () => {
+    const providersRead = chain([OPENAI_PROVIDER]);
+    const userModelsRead = chain([]);
+    const virtualRead = chain([
+      {
+        name: "team-default",
+        displayName: "团队默认",
+        enabled: true,
+        targets: [{ model: "gpt-4" }, { model: "openai/gpt-3.5" }],
+      },
+      {
+        name: "partial",
+        displayName: "缺目标",
+        enabled: true,
+        targets: [{ model: "gpt-4" }, { model: "missing-model" }],
+      },
+      { name: "retired", displayName: "已停用", enabled: false, targets: [{ model: "gpt-4" }] },
+    ]);
+    mockSelect
+      .mockReturnValueOnce(providersRead)
+      .mockReturnValueOnce(userModelsRead)
+      .mockReturnValueOnce(virtualRead);
+
+    const { listAvailableModelsForUser } = await import("../admin-providers-reader");
+    const models = await listAvailableModelsForUser("u_new");
+    const ids = models.map((m) => m.id);
+
+    expect(ids).toContain("team-default");
+    expect(ids).not.toContain("partial");
+    expect(ids).not.toContain("retired");
+    expect(models.find((m) => m.id === "team-default")).toEqual(
+      expect.objectContaining({ model: "team-default", label: "团队默认", provider: "virtual" }),
+    );
+  });
+
+  it("hides a virtual model when a prefixed target is outside the visible set", async () => {
+    const providersRead = chain([OPENAI_PROVIDER]);
+    const userModelsRead = chain([
+      { assignmentKey: "u_001", modelId: "openai/gpt-4" },
+    ]);
+    const virtualRead = chain([
+      { name: "only-gpt4", displayName: "只用四", enabled: true, targets: [{ model: "openai/gpt-4" }] },
+      { name: "needs-3-5", displayName: "还要三点五", enabled: true, targets: [{ model: "gpt-3.5" }] },
+    ]);
+    mockSelect
+      .mockReturnValueOnce(providersRead)
+      .mockReturnValueOnce(userModelsRead)
+      .mockReturnValueOnce(virtualRead);
+
+    const { listAvailableModelsForUser } = await import("../admin-providers-reader");
+    const ids = (await listAvailableModelsForUser("u_001")).map((m) => m.id);
+
+    expect(ids).toContain("only-gpt4");
+    expect(ids).not.toContain("needs-3-5");
   });
 });
