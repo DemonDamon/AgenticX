@@ -190,7 +190,7 @@ monitoring = [
 database = [
     "psycopg2-binary>=2.9.0,<3",
     "SQLAlchemy>=2.0.0,<3",
-    "cryptography>=41.0.0,<49",
+    "cryptography>=41.0.0,<51",
 ]
 # ── 代码语义索引（Semble）──
 code_index = [
