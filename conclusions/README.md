@@ -3,6 +3,8 @@
 > **用途**：新 session 的第一入口。先读本文件获取全局视图，按需再查阅具体模块的 conclusion。
 >
 > **原则**：只覆盖到一级目录 / 一级子模块，不下钻到文件级。需要文件级细节时，查阅对应 `conclusions/<module>_conclusion.md`。
+>
+> **最近增量刷新**：2026-11-14（target `cebdabd5`，相对基线 `22d051f5`）。映射新增 `data_suite`、`harness`、`managed`、`rules`、`security_eval`；`package_root` 不再拥有这些目录。
 
 ---
 
@@ -57,7 +59,7 @@ AgenticX/
 | **core** | 核心抽象层：Agent、Task、Tool、Workflow、事件系统、编排引擎、上下文编译器 | [core_module_conclusion.md](core_module_conclusion.md) |
 | **llms** | LLM 统一接入层：多 provider 适配（OpenAI / 百炼 / Kimi / Ollama / Ark）、failover、流式、缓存 | [llms_module_conclusion.md](llms_module_conclusion.md) |
 | **configs** | 静态 GraphRAG / knowledge graphers YAML 样例（无运行时加载逻辑） | [configs_module_conclusion.md](configs_module_conclusion.md) |
-| **package_root** | 包门面：版本 / 品牌 / 预设与 `__init__` 条件导出；`pyproject.toml` / `requirements.txt` 契约 | [package_root_conclusion.md](package_root_conclusion.md) |
+| **package_root** | 包门面：版本 / 品牌 / 预设与 `__init__` 条件导出；不覆盖已独立成模块的 data_suite / harness / managed / rules / security_eval | [package_root_conclusion.md](package_root_conclusion.md) |
 | **ops** | 只读运维查询：TelemetryQuery / OPS_TOOLS / ChangePlane / UModel | [ops_module_conclusion.md](ops_module_conclusion.md) |
 | **reliability** | 工具调用身份、CallLedger、RunState、崩溃重放 veto（无 Studio 依赖） | [reliability_module_conclusion.md](reliability_module_conclusion.md) |
 | **utils** | 跨模块原子写盘与受限 / 签名 pickle 工具 | [utils_module_conclusion.md](utils_module_conclusion.md) |
@@ -72,6 +74,7 @@ AgenticX/
 | **memory** | 记忆系统：短期 / 语义 / 情景 / 层次化记忆、mem0 集成、MCP 记忆、衰减策略 | [memory_module_conclusion.md](memory_module_conclusion.md) |
 | **knowledge** | 框架层文档读入、分块、多后端处理、GraphRAG 建图与向量知识库门面 | [knowledge_module_conclusion.md](knowledge_module_conclusion.md) |
 | **data_sources** | Studio 统一外部数据源网关：registry 路由插件与 `query_data_source` 工具 | [data_sources_module_conclusion.md](data_sources_module_conclusion.md) |
+| **data_suite** | 企业数据处理内核：数据通道、DataFlow 作业、ID 归并、治理、查询 ACL 与字段脱敏 | [data_suite_module_conclusion.md](data_suite_module_conclusion.md) |
 | **brain** | 多脑知识库：可隔离/可挂载的「文档脑 + 代码脑」架构、多脑聚合检索 | [brain_module_conclusion.md](brain_module_conclusion.md) |
 | **code_index** | 代码语义索引：多代码库 hybrid（向量 + BM25）检索、与「代码脑」衔接 | [code_index_module_conclusion.md](code_index_module_conclusion.md) |
 | **embeddings** | 向量嵌入：多 provider 适配、本地 / 远程向量化 | [embeddings_module_conclusion.md](embeddings_module_conclusion.md) |
@@ -94,6 +97,7 @@ AgenticX/
 | 子模块 | 一句话定位 | 结论文档 |
 |--------|-----------|---------|
 | **runtime** | 智能体运行时：meta_agent / meta_tools、团队调度、上下文清洗、子智能体委派、token SSE | [runtime_module_conclusion.md](runtime_module_conclusion.md) |
+| **managed** | Managed Agents 协议与托管运行时：会话 Host、桌面 Worker、工具确认与受管资源 | [managed_module_conclusion.md](managed_module_conclusion.md) |
 | **connectors** | 连接器执行面：REST gateway 客户端、database MCP、OAuth；`mcp.json` 契约在 runtime | [connectors_module_conclusion.md](connectors_module_conclusion.md) |
 | **sessions** | 会话管理：持久化、恢复、分布式会话状态、多租户隔离 | [sessions_module_conclusion.md](sessions_module_conclusion.md) |
 | **longrun** | 长任务运行/续跑编排：多任务源轮询、工作区隔离、停滞自愈、续跑/失败退避 | [longrun_module_conclusion.md](longrun_module_conclusion.md) |
@@ -109,6 +113,7 @@ AgenticX/
 |--------|-----------|---------|
 | **observability** | 可观测性：回调系统、Prometheus 指标、OTel 集成、span tree、轨迹分析 | [observability_module_conclusion.md](observability_module_conclusion.md) |
 | **evaluation** | 评估框架：自动化评估管线、多维指标 | [evaluation_module_conclusion.md](evaluation_module_conclusion.md) |
+| **security_eval** | 模型安全红队计分：攻击语料、四态裁判与售前计分卡 | [security_eval_module_conclusion.md](security_eval_module_conclusion.md) |
 
 ### 部署与服务化
 
@@ -127,6 +132,8 @@ AgenticX/
 | **embodiment** | GUI Agent / 具身智能：动作反思、卡住检测、动作缓存、Device-Cloud 路由、DAG 验证 | [embodiment_conclusion.md](embodiment_conclusion.md) |
 | **extensions** | AGX Bundle 扩展生态：bundle 定义、本地安装卸载、多源注册表聚合搜索 | [extensions_module_conclusion.md](extensions_module_conclusion.md) |
 | **cc_bridge** | 本机 Claude Code 桥接：受 Token 保护的本地 HTTP/NDJSON 控制面、headless / TUI 双模 | [cc_bridge_module_conclusion.md](cc_bridge_module_conclusion.md) |
+| **harness** | 外部 coding-agent 统一控制面：Claude Code / CodeBuddy / Codex / OpenCode 与跨 harness 交接 | [harness_module_conclusion.md](harness_module_conclusion.md) |
+| **rules** | 规则资产：声明式 DSL、JSON 持久化、编译计划与无 LLM 的自然语言草稿 | [rules_module_conclusion.md](rules_module_conclusion.md) |
 | **wb_bridge** | 本机 CodeBuddy CLI 桥：Bearer HTTP + stream-json，无 permission-prompt 通道 | [wb_bridge_module_conclusion.md](wb_bridge_module_conclusion.md) |
 | **desktop** | Near 桌面应用（Electron + React）：多窗格、群聊、工作区、焦点语音、远程后端 | [desktop_conclusion.md](../desktop/conclusions/desktop_conclusion.md) |
 | **integrations** | 第三方适配层：Volcengine AgentKit 桥接与 vendored mem0 记忆引擎 | [integrations_module_conclusion.md](integrations_module_conclusion.md) |

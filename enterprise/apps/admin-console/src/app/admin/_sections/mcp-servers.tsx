@@ -63,6 +63,22 @@ type Health = {
   p50LatencyMs: number;
 };
 
+type McpVersion = {
+  id: string;
+  version: number;
+  shelfStatus: "draft" | "published";
+  createdAt: string;
+  publishedAt: string | null;
+  toolCount: number;
+};
+
+function formatVersionTime(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
 type PatRow = {
   id: number;
   name: string;
@@ -105,6 +121,9 @@ export default function AdminMcpServersPage() {
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [versions, setVersions] = useState<McpVersion[]>([]);
+  const [publishedVersionId, setPublishedVersionId] = useState<string | null>(null);
+  const [rollbackTarget, setRollbackTarget] = useState<McpVersion | null>(null);
   const [name, setName] = useState("");
   const [backendType, setBackendType] = useState("openapi");
   const [openApiSpec, setOpenApiSpec] = useState("");
@@ -305,6 +324,22 @@ export default function AdminMcpServersPage() {
     }
   }
 
+  const loadVersions = useCallback(async (id: string) => {
+    try {
+      const res = await adminFetch(`/api/admin/mcp-servers/${id}/versions`);
+      const json = (await res.json()) as {
+        data?: { versions?: McpVersion[]; publishedVersionId?: string | null };
+      };
+      if (!res.ok) throw new Error("load failed");
+      setVersions(json.data?.versions ?? []);
+      setPublishedVersionId(json.data?.publishedVersionId ?? null);
+    } catch {
+      setVersions([]);
+      setPublishedVersionId(null);
+      toast.error(t("toast.versionsLoadFailed"));
+    }
+  }, [t]);
+
   async function loadHealth(id: string) {
     setSelectedId(id);
     try {
@@ -315,6 +350,7 @@ export default function AdminMcpServersPage() {
       setHealth(null);
       toast.error(t("toast.healthLoadFailed"));
     }
+    await loadVersions(id);
   }
 
   async function importOpenAPI() {
@@ -332,11 +368,53 @@ export default function AdminMcpServersPage() {
           baseUrl,
         }),
       });
-      if (!res.ok) throw new Error(await res.text());
-      toast.success(t("toast.importSuccess"));
+      const json = (await res.json()) as { data?: { draft?: { id: string } | null } };
+      if (!res.ok) throw new Error("import failed");
+      toast.success(json.data?.draft ? t("toast.importDraftSuccess") : t("toast.importSuccess"));
       await load();
+      await loadVersions(selectedId);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("toast.importFailed"));
+    }
+  }
+
+  async function postVersion(action: "publish_current" | "publish" | "rollback", versionId?: string) {
+    if (!selectedId) return;
+    const res = await adminFetch(`/api/admin/mcp-servers/${selectedId}/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, versionId }),
+    });
+    if (!res.ok) throw new Error("version action failed");
+    await loadVersions(selectedId);
+  }
+
+  async function publishCurrentSurface() {
+    try {
+      await postVersion("publish_current");
+      toast.success(t("toast.publishSuccess"));
+    } catch {
+      toast.error(t("toast.publishFailed"));
+    }
+  }
+
+  async function publishDraft(versionId: string) {
+    try {
+      await postVersion("publish", versionId);
+      toast.success(t("toast.publishSuccess"));
+    } catch {
+      toast.error(t("toast.publishFailed"));
+    }
+  }
+
+  async function confirmRollback() {
+    if (!rollbackTarget) return;
+    try {
+      await postVersion("rollback", rollbackTarget.id);
+      setRollbackTarget(null);
+      toast.success(t("toast.rollbackSuccess"));
+    } catch {
+      toast.error(t("toast.rollbackFailed"));
     }
   }
 
@@ -403,6 +481,8 @@ export default function AdminMcpServersPage() {
       if (selectedId === id) {
         setSelectedId(null);
         setHealth(null);
+        setVersions([]);
+        setPublishedVersionId(null);
       }
       await load();
     } catch (err) {
@@ -650,6 +730,21 @@ export default function AdminMcpServersPage() {
         </CardContent>
       </Card>
 
+      <Dialog open={rollbackTarget !== null} onOpenChange={(open) => { if (!open) setRollbackTarget(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("rollbackTitle")}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">{t("rollbackDescription")}</p>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setRollbackTarget(null)}>
+              {tc("actions.cancel")}
+            </Button>
+            <Button onClick={() => void confirmRollback()}>{tc("actions.confirm")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={patDialogOpen} onOpenChange={setPatDialogOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
@@ -790,6 +885,73 @@ export default function AdminMcpServersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {selectedId && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("versionsTitle")}</CardTitle>
+            <CardDescription>{t("versionsDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {versions.length === 0 ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-muted-foreground">{t("versionsEmpty")}</p>
+                <Button size="sm" onClick={() => void publishCurrentSurface()}>
+                  {t("publishCurrent")}
+                </Button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-muted-foreground">
+                      <th className="py-2 pr-3 font-medium">{t("versionColumn")}</th>
+                      <th className="py-2 pr-3 font-medium">{t("statusColumn")}</th>
+                      <th className="py-2 pr-3 font-medium">{t("createdColumn")}</th>
+                      <th className="py-2 pr-3 font-medium">{t("publishedColumn")}</th>
+                      <th className="py-2 pr-3 font-medium">{t("toolCountColumn")}</th>
+                      <th className="py-2 font-medium" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {versions.map((version) => {
+                      const current = version.id === publishedVersionId;
+                      return (
+                        <tr key={version.id} className="border-b last:border-0">
+                          <td className="py-2 pr-3">{version.version}</td>
+                          <td className="py-2 pr-3">
+                            <span className="inline-flex items-center gap-2">
+                              <Badge variant={version.shelfStatus === "published" ? "default" : "secondary"}>
+                                {version.shelfStatus === "draft" ? t("statusDraft") : t("statusPublished")}
+                              </Badge>
+                              {current ? <Badge variant="outline">{t("statusCurrent")}</Badge> : null}
+                            </span>
+                          </td>
+                          <td className="py-2 pr-3">{formatVersionTime(version.createdAt)}</td>
+                          <td className="py-2 pr-3">{formatVersionTime(version.publishedAt)}</td>
+                          <td className="py-2 pr-3">{version.toolCount}</td>
+                          <td className="py-2 text-right">
+                            {version.shelfStatus === "draft" ? (
+                              <Button size="sm" variant="outline" onClick={() => void publishDraft(version.id)}>
+                                {t("publishVersion")}
+                              </Button>
+                            ) : null}
+                            {version.shelfStatus === "published" && !current ? (
+                              <Button size="sm" variant="outline" onClick={() => setRollbackTarget(version)}>
+                                {t("rollbackVersion")}
+                              </Button>
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

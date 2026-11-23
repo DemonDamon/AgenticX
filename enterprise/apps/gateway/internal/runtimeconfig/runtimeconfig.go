@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/agenticx/enterprise/gateway/internal/configstatus"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 )
 
@@ -67,6 +68,16 @@ type Loader struct {
 	logger  *slog.Logger
 	remote  bool
 	current atomic.Pointer[snapshot]
+	status  *configstatus.Registry
+	hasGood atomic.Bool
+}
+
+// SetConfigStatus 在 Start 之前注入生效状态登记点。
+func (l *Loader) SetConfigStatus(status *configstatus.Registry) {
+	if l == nil {
+		return
+	}
+	l.status = status
 }
 
 // New 创建一个 Loader 但不启动；调用方需 Start。
@@ -122,42 +133,94 @@ func (l *Loader) snapshot() *snapshot {
 }
 
 func (l *Loader) reload() error {
-	var bytes []byte
-	var err error
-	if l.remote {
-		var code int
-		bytes, code, err = gatewayinternal.HTTPGet(l.path)
-		if err != nil {
-			return err
-		}
-		if code == http.StatusNotFound {
-			l.current.Store(&snapshot{})
-			return nil
-		}
-		if code < 200 || code >= 300 {
-			return fmt.Errorf("remote providers: http %d", code)
-		}
-	} else {
-		bytes, err = os.ReadFile(l.path)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				l.current.Store(&snapshot{})
-				return nil
-			}
-			return err
-		}
+	raw, applied, err := l.readPayload()
+	if err != nil {
+		l.reportFailure(err)
+		return err
+	}
+	if !applied {
+		// 文件不存在，或远端 404 且从未成功加载：保持原有的空快照。
+		l.current.Store(&snapshot{})
+		return nil
 	}
 	var parsed struct {
 		Providers []ProviderRecord `json:"providers"`
 	}
-	if err := json.Unmarshal(bytes, &parsed); err != nil {
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		l.reportFailure(err)
 		return err
 	}
 	if parsed.Providers == nil {
 		parsed.Providers = []ProviderRecord{}
 	}
 	l.current.Store(&snapshot{providers: parsed.Providers})
+	l.hasGood.Store(true)
+	l.reportSuccess(raw)
 	return nil
+}
+
+func (l *Loader) readPayload() (raw []byte, applied bool, err error) {
+	if l.remote {
+		body, code, getErr := gatewayinternal.HTTPGet(l.path)
+		if getErr != nil {
+			return nil, false, getErr
+		}
+		if code == http.StatusNotFound {
+			if l.hasGood.Load() {
+				return nil, false, configstatus.ErrRemote404Keep
+			}
+			return nil, false, nil
+		}
+		if code < 200 || code >= 300 {
+			return nil, false, fmt.Errorf("remote providers: http %d", code)
+		}
+		return body, true, nil
+	}
+	body, readErr := os.ReadFile(l.path)
+	if readErr != nil {
+		if errors.Is(readErr, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, readErr
+	}
+	return body, true, nil
+}
+
+func (l *Loader) reportSuccess(raw []byte) {
+	if l.status == nil {
+		return
+	}
+	l.status.ReportSuccess(configstatus.DomainProviders, l.path, configstatus.HashBytes(raw), "")
+}
+
+func (l *Loader) reportFailure(err error) {
+	if l.status == nil {
+		return
+	}
+	l.status.ReportFailure(configstatus.DomainProviders, l.path, err)
+}
+
+// Providers 返回当前内存快照中 providers 的副本。
+// Loader 为 nil 或快照为空时返回 nil。
+func (l *Loader) Providers() []ProviderRecord {
+	if l == nil {
+		return nil
+	}
+	snap := l.snapshot()
+	if snap == nil || len(snap.providers) == 0 {
+		return nil
+	}
+	out := make([]ProviderRecord, len(snap.providers))
+	copy(out, snap.providers)
+	for i := range out {
+		if len(out[i].Models) == 0 {
+			continue
+		}
+		models := make([]ProviderModel, len(out[i].Models))
+		copy(models, out[i].Models)
+		out[i].Models = models
+	}
+	return out
 }
 
 // ResolveByModel 根据用户请求里的模型名查 admin 配置：

@@ -20,7 +20,7 @@ rich>=13.0.0,<14
 click>=8.0.0,<9
 PyYAML>=6.0,<7
 json5>=0.9.25,<1
-tomli>=2.0,<3; python_version<'3.11'
+tomli>=2.5.0,<3; python_version<'3.11'
 jinja2>=3.0.0,<4
 python-dotenv>=1.0.0,<2
 

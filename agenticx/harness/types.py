@@ -100,6 +100,10 @@ class TurnRequest:
     wait_seconds: float = 180.0
     # Honored only when capabilities.idempotency is True.
     idempotency_key: str = ""
+    # Near studio session that owns WorkPanel / chat_history (not harness surface id).
+    owner_session_id: str = ""
+    # Alias accepted by adapters; owner_session_id wins when both are set.
+    studio_session_id: str = ""
 
 
 # Unified turn status set. Each adapter maps its native outcome onto these:

@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
   "module_id": "chat",
-  "generation": "c225376704074474a3a0908853073366",
+  "generation": "89b4bdd3dd204c25b0ed1c6535e77bb2",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:34a4caf4e4b8142012c0c8fc61774869e7c95ead8f56f1688dc76ec4510c3384",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:0a6844f4fbc79e5357f1662c77df4025e3a7154d00e322f5fdc06312a09560a6",
   "summary_path": "enterprise/conclusions/features/chat_conclusion.md",
   "summary_sha256": "sha256:1d85cf873ec42e43f1c670ab5ae2b0f57c59e85335beaa6bfcf1f4d7ac90bbe7",
-  "updated_at": "2026-10-25T03:42:34.827512+00:00"
+  "updated_at": "2026-11-14T12:24:37.594624+00:00",
+  "summary_review": "unchanged-after-review"
 }

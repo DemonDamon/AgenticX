@@ -1,6 +1,6 @@
 # @agenticx/config 模块总结
 
-> 结论生成时间：2026-07-21（基于源码核验重写）
+> 结论生成时间：2026-11-14（target cebdabd5）
 
 ## 模块概述
 
@@ -24,7 +24,11 @@ packages/config/
     ├── feature-usage-limits.ts        # 联网搜索 / 深度研究用量上限解析
     ├── member-spending-limit.ts       # 成员个人层 token/费用配额规则
     ├── model-reasoning.ts             # 推理族 env 列表与 modelFamily 匹配
-    └── __tests__/            # vitest（loaders、capability-id、desktop-agent-action-policy、feature-usage-limits、member-spending-limit、model-reasoning 等）
+    ├── ecp-shelf-lifecycle.ts         # ECP E2 · 货架 draft/published/deprecated 与 scan 门禁（纯函数）
+    ├── ecp-approval-workflow.ts       # ECP E3 · 内置审批预设与步骤状态机（纯函数，无 IO）
+    ├── ecp-expert-package.ts          # ECP E4 · expert_package manifest / 租户分发与撤销效应
+    ├── ecp-errors.ts                  # ECP 稳定 error code 与 `resolveEcpErrorCode`（**未**经 `index.ts` 导出）
+    └── __tests__/            # vitest（loaders、capability-*、desktop-agent-action-policy、feature-usage-limits、member-spending-limit、model-reasoning、ecp-* 等）
 ```
 
 ## 关键导出
@@ -84,9 +88,9 @@ packages/config/
 
 ### desktop-agent-action-policy.ts
 
-- 类型 `DesktopAgentActionPolicy`：`deniedTools`、`alwaysAskTools`（fnmatch 语义匹配工具名 / `mcp:<tool>` / `git:push`，大小写不敏感）、`disableSessionAllow`。
-- 默认 `DEFAULT_DESKTOP_AGENT_ACTION_POLICY`：两列表均为 `[]`，`disableSessionAllow: false`。
-- `normalizeDesktopAgentActionPolicy(raw)`：非 object 回退默认；每条 pattern 须匹配 `^[A-Za-z0-9_:*./-]{1,128}$`，trim 去重，每列表最多 **100** 条；`disableSessionAllow` 仅 **`=== true`** 生效。
+- 类型 `DesktopAgentActionPolicy`：`deniedTools`、`alwaysAskTools`（fnmatch 语义匹配工具名 / `mcp:<tool>` / `git:push`，大小写不敏感）、`disableSessionAllow`、`traceContent`（是否允许 Desktop trace 附带对话摘录）。
+- 默认 `DEFAULT_DESKTOP_AGENT_ACTION_POLICY`：两列表均为 `[]`，`disableSessionAllow: false`，`traceContent: false`。
+- `normalizeDesktopAgentActionPolicy(raw)`：非 object 回退默认；每条 pattern 须匹配 `^[A-Za-z0-9_:*./-]{1,128}$`，trim 去重，每列表最多 **100** 条；`disableSessionAllow` 与 `traceContent` 仅 **`=== true`** 生效。
 
 ### feature-usage-limits.ts
 
@@ -107,3 +111,29 @@ packages/config/
 - `modelFamilySlug` 取模型 id 路径末段；`modelPrefillsThinkTag` / `modelTakesThinkingToggle` 对族名做分隔符容错匹配（避免 `qwen3.8` 误匹配 `qwen3.81`）；`process` 缺失时（客户端 bundle）读 env 为空对象。
 
 配套 vitest：`capability-id.test.ts`（legacy base32）、`desktop-agent-action-policy.test.ts`、`feature-usage-limits.test.ts`、`member-spending-limit.test.ts`、`model-reasoning.test.ts`。
+
+## 增量（22d051f5 → cebdabd5）
+
+`src/index.ts` 在既有 YAML/配额/能力契约之上再导出三组 **ECP（企业能力平台）纯逻辑契约**（无 IO；Brand/feature loader 未改）。`ecp-errors.ts` 与四套 `ecp-*.test.ts` 落盘，错误码模块暂未挂主入口。
+
+### ecp-shelf-lifecycle.ts（E2）
+
+- 类型 `ShelfStatus`（`draft` / `published` / `deprecated`）、`ScanVerdict`（`safe` / `caution` / `dangerous` / `null`）；异常 `ShelfPublishError`。
+- `isShelfPublished`、`assertScanAllowsPublish`（未扫描或 `dangerous` 不可发布）、`shouldPushCatalogUpdateToTenant`（grant + published 才推送目录更新）、`skillShelfAllowsBootstrap`（published 且 `active`）、`legacyCatalogStatusToShelf`（E1 `active`/`disabled` 迁移兼容）。
+
+### ecp-approval-workflow.ts（E3）
+
+- 动作 `ApprovalAction`（`shelf_publish` / `platform_introduce`）、资源 `ApprovalResourceType`（含 `expert_package`）、内置预设 `BUILTIN_APPROVAL_PRESETS`（`enterprise_admin_only` / `enterprise_admin_platform`，步骤 `auto_scan` + manual）。
+- `presetRequiredForAction` 按 settings 中 `skillPublishPresetSlug` / `catalogPublishPresetSlug` / `platformIntroducePresetSlug` 解析必填预设；`evaluateAutoScanStep` 复用 E2 `assertScanAllowsPublish`。
+- 步骤聚合：`findCurrentPendingManualStep`、`deriveRequestStatusFromSteps`；发布门禁 `assertPublishApprovalGate`（预设开启且 request 未 `approved` 或未消费 → `ApprovalRequiredError`）；`canActorApproveManualStep`（企管 `provider:update` + 同租户，平台运营方租户 + scope）。
+
+### ecp-expert-package.ts（E4）
+
+- 目录资源常量 `CATALOG_RESOURCE_SKILL` / `CATALOG_RESOURCE_EXPERT_PACKAGE`；`normalizeExpertPackageManifest`（members 至少一条，`capabilityId` 须匹配 `skill:` / `mcp:` 前缀）；`ExpertPackageManifestError`。
+- 租户分发 `EcpTenantDistributionPolicy` / `normalizeEcpTenantDistributionPolicy`（`installCopyEnabled` 仅 `=== true` 生效，默认关）；撤销策略 `EcpRevokePolicy` + `resolveExpertPackageRevokeEffect`；`catalogItemLibraryLayer` 区分平台运营与租户视角库层。
+
+### ecp-errors.ts（未导出）
+
+- `ECP_ERROR_CODES`（如 `approval_required`、`shelf_publish_blocked`、`expert_package_manifest_invalid` 等）与 `resolveEcpErrorCode`（按 `Error.name` / `code` / message 启发映射）。
+
+开发依赖：`package.json` 中 `@types/node` / `@types/react` / `vitest` 小版本抬升（5.x），对运行时 API 无影响。
