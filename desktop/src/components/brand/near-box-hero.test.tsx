@@ -112,7 +112,8 @@ describe("NearBoxHero", () => {
     fireEvent.pointerMove(root, { clientX: 160, clientY: 80 });
 
     const sensors = root.querySelector<SVGElement>('[data-part="sensor-group"]');
-    expect(sensors?.style.transform).toContain("translate(3px, 0px)");
+    // jsdom 31 起 CSS 序列化会省略零值分量（translate(3px)），两种写法等价
+    expect(sensors?.style.transform).toMatch(/translate\(3px(?:, 0px)?\)/);
     expect(root.getAttribute("data-gaze")).toBe("track");
   });
 

@@ -17,6 +17,8 @@ export const mcpServers = pgTable(
     backendConfig: jsonb("backend_config").notNull().default({}).$type<Record<string, unknown>>(),
     requiredScopes: text("required_scopes").array().notNull().default([]),
     status: varchar("status", { length: 16 }).notNull().default("active"),
+    /** 网关只认这一条已发布版本；空则仍读 mcp_tools。不建外键，避免与版本表循环删除。 */
+    publishedVersionId: ulid("published_version_id"),
     rateLimit: jsonb("rate_limit").notNull().default({}).$type<Record<string, unknown>>(),
     ...auditColumns,
   },

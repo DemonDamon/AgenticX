@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
   "module_id": "package-root",
-  "generation": "d710da6ee0e34f6797907660fb8faa3f",
-  "mapping_revision": 3,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:b9d5f7e893967f6ae35d98e3df28d602b6f4eb0ebe34d81b88846546efee7f3b",
+  "generation": "2a7447da8d5e479287c81e2f0c33c45e",
+  "mapping_revision": 4,
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:b2b4018ebe577ca2f202ffb4d34ee0016e07e8e3b29a0b1a3727845307efe4b6",
   "summary_path": "conclusions/package_root_conclusion.md",
-  "summary_sha256": "sha256:df5be52a858852918699fad76c86f13cb4cf0408b4253f6ff13a9c44a1a5b58b",
-  "updated_at": "2026-10-25T03:42:18.024896+00:00",
+  "summary_sha256": "sha256:333d3b3464b106dae40b6e947969d8ff98b20cb730e075094952be8c51364c48",
+  "updated_at": "2026-11-14T12:24:36.727492+00:00",
   "mapping_refresh": {
-    "previous_mapping_revision": 2,
-    "reason": "split cases, connectors, and rl out of package-root"
+    "previous_mapping_revision": 3,
+    "reason": "split data-suite, harness, managed, rules, and security-eval out of package-root"
   }
 }

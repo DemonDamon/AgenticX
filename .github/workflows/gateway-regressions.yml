@@ -1,0 +1,37 @@
+name: Gateway Regression Contracts
+
+on:
+  pull_request:
+    paths:
+      - "enterprise/apps/gateway/**"
+      - "enterprise/packages/policy-engine/**"
+      - "connector-runtime/**"
+      - ".github/workflows/gateway-regressions.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-regressions-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gateway-regressions:
+    name: Gateway config and server contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: enterprise/apps/gateway/go.mod
+          cache-dependency-path: |
+            enterprise/apps/gateway/go.sum
+            enterprise/packages/policy-engine/go.sum
+            connector-runtime/go.sum
+      - name: Test configuration and server with race detection
+        working-directory: enterprise/apps/gateway
+        run: go test -count=1 -race ./internal/config ./internal/server
+      - name: Vet configuration and server
+        working-directory: enterprise/apps/gateway
+        run: go vet ./internal/config ./internal/server

@@ -372,6 +372,68 @@ def test_template_summarizer_eight_sections():
     assert result.provider_id == "template-local-v1"
 
 
+def test_template_summarizer_prefers_recent_user_goal():
+    """Old Trump opener + recent 南沙 → full_summary carries 南沙."""
+    snap = AppThreadSnapshot(
+        app_thread_id="thread-nansha",
+        current_harness="python-agent",
+        cwd="/tmp",
+        history=[
+            HistoryMessage(role="user", content="特朗普新闻最近有啥", harness="python-agent"),
+            HistoryMessage(
+                role="assistant",
+                content="这里是几条特朗普相关新闻摘要…",
+                harness="python-agent",
+            ),
+            HistoryMessage(role="user", content="南沙今天天气怎么样", harness="python-agent"),
+            HistoryMessage(
+                role="assistant",
+                content="南沙今天多云，气温大约 24–28℃，偶有小雨。",
+                harness="python-agent",
+            ),
+        ],
+        runs=[],
+        threads=[],
+        memory_snapshot="",
+        knowledge_snapshot="",
+        todos="",
+    )
+    plan = decide_strategy(snap, "claude-code", user_strategy=STRATEGY_FULL)
+    result = TemplateSummarizer().summarize(snap, plan)
+    s = result.summary
+    assert "南沙" in s.goal
+    assert "特朗普" in s.goal  # retained as short thread objective
+    assert "南沙" in s.decisions
+    payload = summary_to_payload(s)
+    assert "南沙" in payload
+
+
+def test_template_summarizer_keeps_full_recent_assistant_turn():
+    """Latest assistant body should survive well past the old 400-char clip."""
+    body = "CubeSandbox信创适配。" + ("详情段落。" * 200)
+    assert len(body) > 400
+    snap = AppThreadSnapshot(
+        app_thread_id="thread-long",
+        current_harness="codebuddy",
+        cwd="/tmp",
+        history=[
+            HistoryMessage(role="user", content="还有哪些满足信创的？", harness="codebuddy"),
+            HistoryMessage(role="assistant", content=body, harness="codebuddy"),
+        ],
+        runs=[],
+        threads=[],
+        memory_snapshot="",
+        knowledge_snapshot="",
+        todos="",
+    )
+    plan = decide_strategy(snap, "codebuddy", user_strategy=STRATEGY_FULL)
+    result = TemplateSummarizer().summarize(snap, plan)
+    # Keep well more than the compact 400-char excerpt so a model switch
+    # can continue an unfinished answer.
+    assert body[:800] in result.summary.decisions
+    assert "还有哪些满足信创的" in result.summary.decisions
+
+
 def test_template_summarizer_manual_context():
     snap = _snapshot()
     plan = decide_strategy(snap, "codex", user_strategy=STRATEGY_MANUAL)

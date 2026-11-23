@@ -5,6 +5,7 @@ import {
   updateProviderModel,
   type ProviderModel,
 } from "../../../../../../../lib/model-providers-store";
+import { runAdmissionGate } from "../../../../../../../lib/model-admission-gate";
 
 export async function PATCH(
   request: Request,
@@ -23,6 +24,16 @@ export async function PATCH(
       body.capabilities.every((c): c is string => typeof c === "string")
     ) {
       patch.capabilities = body.capabilities as string[];
+    }
+    // SP2 model admission gate: enabling a model requires eval evidence
+    // at/above threshold, or a recorded override.
+    if (patch.enabled === true) {
+      const gate = await runAdmissionGate(
+        auth.session,
+        decodeURIComponent(modelName),
+        body.override,
+      );
+      if (!gate.ok) return gate.response;
     }
     const updated = await updateProviderModel(id, decodeURIComponent(modelName), patch);
     return NextResponse.json({ code: "00000", message: "ok", data: { provider: updated } });

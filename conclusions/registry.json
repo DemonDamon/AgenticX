@@ -42,7 +42,11 @@
     "paper",
     "plans",
     "results",
-    "wiki"
+    "wiki",
+    ".gitleaks.toml",
+    "extension",
+    "reports",
+    "requirements-docs.txt"
   ],
   "modules": [
     {
@@ -430,12 +434,52 @@
       "mapping_revision": 1
     },
     {
+      "id": "data-suite",
+      "name": "Data Suite",
+      "roots": ["agenticx/data_suite"],
+      "shared_paths": [],
+      "summary_path": "conclusions/data_suite_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "harness",
+      "name": "Harness",
+      "roots": ["agenticx/harness"],
+      "shared_paths": [],
+      "summary_path": "conclusions/harness_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "managed",
+      "name": "Managed",
+      "roots": ["agenticx/managed"],
+      "shared_paths": [],
+      "summary_path": "conclusions/managed_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "rules",
+      "name": "Rules",
+      "roots": ["agenticx/rules"],
+      "shared_paths": [],
+      "summary_path": "conclusions/rules_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "security-eval",
+      "name": "Security Eval",
+      "roots": ["agenticx/security_eval"],
+      "shared_paths": [],
+      "summary_path": "conclusions/security_eval_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
       "id": "package-root",
       "name": "Package Root",
       "roots": ["agenticx"],
       "shared_paths": ["pyproject.toml", "requirements.txt"],
       "summary_path": "conclusions/package_root_conclusion.md",
-      "mapping_revision": 3
+      "mapping_revision": 4
     }
   ],
   "retired_modules": []

@@ -13,6 +13,7 @@ describe("normalizeAgentActionPolicy", () => {
         denied_tools: [],
         always_ask_tools: [],
         disable_session_allow: false,
+        trace_content: false,
       });
     }
   });
@@ -28,6 +29,7 @@ describe("normalizeAgentActionPolicy", () => {
       denied_tools: ["bash_exec", "mcp:send_*", "git:push"],
       always_ask_tools: ["file_write"],
       disable_session_allow: false,
+      trace_content: false,
     });
   });
 
@@ -49,6 +51,7 @@ describe("normalizeAgentActionPolicy", () => {
       denied_tools: ["git:push", "bash_exec"],
       always_ask_tools: ["mcp:send_*"],
       disable_session_allow: false,
+      trace_content: false,
     });
   });
 
@@ -71,6 +74,13 @@ describe("normalizeAgentActionPolicy", () => {
       denied_tools: ["git:push"],
       always_ask_tools: ["bash_exec"],
       disable_session_allow: true,
+      trace_content: false,
     });
+  });
+
+  it("reads trace content only when the flag is a real boolean true", () => {
+    expect(normalizeAgentActionPolicy({ traceContent: true }).trace_content).toBe(true);
+    expect(normalizeAgentActionPolicy({ trace_content: true }).trace_content).toBe(true);
+    expect(normalizeAgentActionPolicy({ traceContent: "yes" }).trace_content).toBe(false);
   });
 });

@@ -19,18 +19,20 @@ type Registry struct {
 	enabled bool
 	reg     *prometheus.Registry
 
-	ttftSeconds *prometheus.HistogramVec
-	tps         *prometheus.HistogramVec
-	cacheHits   *prometheus.CounterVec
-	cacheLookups *prometheus.CounterVec
-	channelHealth *prometheus.GaugeVec
-	activeStreams *prometheus.GaugeVec
-	upstreamErrors *prometheus.CounterVec
-	pluginInvocations *prometheus.CounterVec
-	pluginErrors      *prometheus.CounterVec
-	pluginLatency     *prometheus.HistogramVec
-	httpRequests      *prometheus.CounterVec
-	httpDuration      *prometheus.HistogramVec
+	ttftSeconds         *prometheus.HistogramVec
+	tps                 *prometheus.HistogramVec
+	cacheHits           *prometheus.CounterVec
+	cacheLookups        *prometheus.CounterVec
+	channelHealth       *prometheus.GaugeVec
+	activeStreams       *prometheus.GaugeVec
+	upstreamErrors      *prometheus.CounterVec
+	pluginInvocations   *prometheus.CounterVec
+	pluginErrors        *prometheus.CounterVec
+	pluginLatency       *prometheus.HistogramVec
+	httpRequests        *prometheus.CounterVec
+	httpDuration        *prometheus.HistogramVec
+	configApplyFailures *prometheus.CounterVec
+	configLastSuccess   *prometheus.GaugeVec
 
 	once sync.Once
 }
@@ -105,6 +107,14 @@ func (r *Registry) register() {
 		Help:    "HTTP request latency in seconds",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"method", "route"})
+	r.configApplyFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "gateway_config_apply_failures_total",
+		Help: "Config snapshot apply failures by domain",
+	}, []string{"domain"})
+	r.configLastSuccess = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "gateway_config_last_success_timestamp_seconds",
+		Help: "Unix timestamp of the last successful config apply by domain",
+	}, []string{"domain"})
 
 	r.reg.MustRegister(
 		r.ttftSeconds,
@@ -119,7 +129,25 @@ func (r *Registry) register() {
 		r.pluginLatency,
 		r.httpRequests,
 		r.httpDuration,
+		r.configApplyFailures,
+		r.configLastSuccess,
 	)
+}
+
+// IncConfigApplyFailure counts a failed config apply for one core domain.
+func (r *Registry) IncConfigApplyFailure(domain string) {
+	if !r.Enabled() || r.configApplyFailures == nil {
+		return
+	}
+	r.configApplyFailures.WithLabelValues(safeLabel(domain)).Inc()
+}
+
+// SetConfigLastSuccess records the unix time of the last successful apply.
+func (r *Registry) SetConfigLastSuccess(domain string, at time.Time) {
+	if !r.Enabled() || r.configLastSuccess == nil || at.IsZero() {
+		return
+	}
+	r.configLastSuccess.WithLabelValues(safeLabel(domain)).Set(float64(at.Unix()))
 }
 
 // ObservePlugin implements wasmhost.MetricsRecorder.

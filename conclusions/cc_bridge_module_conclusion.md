@@ -1,6 +1,6 @@
 # AgenticX CC Bridge 模块总结
 
-> 结论生成时间：2026-05-29（首次创建，覆盖当前代码）
+> 结论生成时间：2026-11-14（target `cebdabd5`）
 
 ## 模块概述
 
@@ -19,6 +19,7 @@ agenticx/cc_bridge/
 ├── settings.py            # Studio 侧 HTTP 客户端配置解析（mode/url/token/loopback 校验）
 ├── http_app.py            # FastAPI 控制面（/v1/sessions* 路由 + Bearer 鉴权）
 ├── session_manager.py     # CC 子进程会话管理（headless + visible_tui，PTY 与 NDJSON 双路）
+├── pending_permissions.py # headless can_use_tool 待审批队列、工具风险分级与参数摘要
 ├── ndjson.py              # stream-json 行协议构造与解析（user message / control request/response）
 └── tui_parser.py          # visible_tui 终端转录的启发式解析（去 ANSI、锚点定位、置信度）
 ```
@@ -34,6 +35,16 @@ agenticx/cc_bridge/
 - `parse_control_request()`：识别 `type=control_request` 且 `subtype=can_use_tool` 的权限请求对象。
 - `build_control_response_allow()` / `build_control_response_deny()`：构造 allow/deny 的 `control_response`，支持 `updatedInput` 与 `toolUseID`。
 - `line_looks_like_result_success()`：启发式判定一行是否为 `type=result, subtype=success` 的回合完成标志。
+
+### 待审批权限 (pending_permissions.py)
+
+**文件功能**：在 `auto_allow` 关闭时，将 headless `control_request`（`can_use_tool`）结构化入队，供 Near/Studio SSE 拉起确认 UI，避免静默丢弃导致 CLI 挂起。
+
+**关键类型与函数**：
+- `PendingPermission`：单条未答权限（`request_id`、工具名/展示名、`tool_use_id`、`input_summary`、`risk`、`emitted`）；`to_public_dict()` 供列表/SSE 暴露。
+- `classify_cc_tool_risk()`：将工具分为 `low` / `protected`（未知默认 protected），对齐 Near 确认策略。
+- `summarize_tool_input()`：压缩工具参数供 UI 展示，避免大块 args 灌入气泡。
+- `pending_permission_from_control_request()`：从已解析的 `control_request` 构造 `PendingPermission`。
 
 ### HTTP 控制面 (http_app.py)
 
@@ -55,12 +66,17 @@ agenticx/cc_bridge/
 **文件功能**：`BridgeSessionManager` 持有所有 CC 子进程及其 stdin/stdout/PTY 接线，是模块的核心。
 
 **核心组件分析**：
-- `BridgeSession` 数据类：保存 `proc`、滚动行缓冲（上限 2000 行）、日志落盘路径、`session_kind`、PTY master fd 与监听队列，以及 visible_tui 的锚点/活动时间等状态。
-- `start_session()`：按 mode 分派到 `_start_session_headless()`（`claude --print --verbose --input-format stream-json --output-format stream-json --permission-prompt-tool stdio`）或 `_start_session_visible_tui()`（`pty.openpty()` 拉起交互式 `claude`）。
-- 读取线程：`_reader_thread`（headless stdout，识别 control_request 并按 `auto_allow` 自动放行）、`_stderr_thread`、`_pty_reader_thread`（PTY 输出广播给监听队列并按行落盘）。
-- `send_user_message()`：headless 写 NDJSON user 行；visible_tui 写入文本 + `\r` 并打入锚点（`[agx_tui_anchor] <uuid>`）用于后续转录定位。
-- `wait_for_success_result()`：轮询 headless 行缓冲直到出现 result/success、进程退出或超时。
+- `BridgeSession` 数据类：保存 `proc`、滚动行缓冲（上限 2000 行）、日志落盘路径、`session_kind`、`model`（spawn 时 CLI `--model`）、`permission_policy`（`ask` | `allowlist` | `auto`）、`pending_permissions`、`auto_allow`、PTY master fd 与监听队列；headless 另含 `_result_wait_watermark`、`_stream_generation` 及 `VisibleTextTracker`/`ToolProgressTracker` 驱动的回合内流式游标。
+- `start_session()`：支持 `permission_policy`、`model`；按 mode 分派到 `_start_session_headless()`（含 `--include-partial-messages`，`permission-prompt-tool stdio`）或 `_start_session_visible_tui()`（`pty.openpty()`）。
+- `_on_control_request()`：`auto_allow` 或 `permission_policy=allowlist` 且 `risk=low` 时自动写 `control_response`；否则写入 `pending_permissions` 等待 `respond_permission()`。
+- 读取线程：`_reader_thread`（headless stdout，解析 control_request 并交 `_on_control_request`）、`_stderr_thread`、`_pty_reader_thread`（PTY 输出广播）。
+- `send_user_message()`：headless 在写 stdin 前抬高 `_result_wait_watermark` 并重置回合内流式 tracker；visible_tui 仍用锚点 + `\r`。
+- `respond_permission()`：按 `request_id` 出队并写 allow/deny NDJSON（优先复用队列内 `tool_input`/`tool_use_id`）。
+- `list_pending_permissions()` / `drain_pending_permissions()`：查询或一次性拉出未 `emitted` 的待审批行（供 Near SSE，避免重复弹窗）。
+- `drain_midturn_stream_items()` / `drain_visible_stream_text()` / `list_turn_tool_progress()`：基于 `agenticx.harness.stream_json_text` 从行缓冲增量解析可见文本与工具起止，供阻塞等待期间的 SSE 泵。
+- `wait_for_success_result()`：仅统计索引 ≥ watermark 的 `result/success`，避免多轮对话误用上一轮结果。
 - `wait_for_visible_tui_result()`：基于锚点后文本 + 空闲时间 + 置信度阈值判定 TUI 回合完成。
+- `_session_to_dict()`：会话视图含 `model`、`pending_permission_count`。
 - 日志：每会话写 `~/.agenticx/logs/cc-bridge/<sid>.log`（可经 `CC_BRIDGE_LOG_DIR` 覆盖）。
 
 ### TUI 解析 (tui_parser.py)
@@ -91,11 +107,12 @@ FastAPI `Depends(verify_token)` 统一拦截所有受保护路由。
 
 ## 技术亮点
 
-1. **协议级权限闭环**：headless 通过 `control_request`/`control_response` 实现工具权限的程序化 allow/deny，可由 `auto_allow` 自动放行。
-2. **PTY 直连交互体验**：visible_tui 以真实 PTY 复刻 CC 原生终端，支持原始流 attach、按键写入与 `TIOCSWINSZ` 尺寸同步，赋能 Desktop 内嵌终端。
-3. **稳健的回合完成判定**：headless 依据 result/success 行，visible_tui 依据锚点 + 空闲时间 + 置信度，规避无终止符的流式 TUI 误判。
-4. **安全默认**：Bearer Token 恒定时间比较、UUID 强校验、默认仅 loopback 可达，非环回需显式开关。
-5. **可观测性**：每会话独立日志落盘，行缓冲限长防止内存膨胀。
+1. **协议级权限闭环**：headless 通过 `control_request`/`control_response` 实现工具权限的程序化 allow/deny；`auto_allow`、`permission_policy=allowlist`（低风险只读类）或入队 + `respond_permission` 与 Near 确认 UI 联动，避免无应答时 CLI 阻塞。
+2. **回合内流式可观测**：`--include-partial-messages` 与 `drain_midturn_stream_items` 在 `wait_for_success_result` 阻塞期间仍可向外泵送文本/工具进度；`wait_for_success_result` 用水印区分多轮 `result/success`。
+3. **PTY 直连交互体验**：visible_tui 以真实 PTY 复刻 CC 原生终端，支持原始流 attach、按键写入与 `TIOCSWINSZ` 尺寸同步，赋能 Desktop 内嵌终端。
+4. **稳健的回合完成判定**：headless 依据带水印的 result/success 行，visible_tui 依据锚点 + 空闲时间 + 置信度，规避无终止符的流式 TUI 误判。
+5. **安全默认**：Bearer Token 恒定时间比较、UUID 强校验、默认仅 loopback 可达，非环回需显式开关；工具风险未知时 fail-closed 为 `protected`。
+6. **可观测性**：每会话独立日志落盘，行缓冲限长防止内存膨胀。
 
 ## 应用场景
 
@@ -105,4 +122,4 @@ FastAPI `Depends(verify_token)` 统一拦截所有受保护路由。
 
 ## 总结
 
-CC Bridge 模块以一套受 Token 保护的 HTTP 控制面，桥接了本机 Claude Code CLI 的 headless（stream-json）与 visible_tui（PTY）两种形态，统一了会话生命周期、消息收发、权限审批与结果判定。它是 AgenticX 将外部成熟编码 Agent 内化进自身运行时与桌面体验的关键集成层，兼顾了自动化协作与人工可见交互两类需求。
+CC Bridge 模块以一套受 Token 保护的 HTTP 控制面，桥接了本机 Claude Code CLI 的 headless（stream-json）与 visible_tui（PTY）两种形态，统一了会话生命周期、消息收发、分层权限策略（自动/白名单低风险/入队人工确认）、回合内 SSE 流式旁路与多轮结果水印。它是 AgenticX 将外部成熟编码 Agent 内化进自身运行时与桌面体验的关键集成层，兼顾了自动化协作与人工可见交互两类需求。

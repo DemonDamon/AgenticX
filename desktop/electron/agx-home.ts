@@ -12,9 +12,21 @@ import os from "node:os";
 import path from "node:path";
 import yaml from "js-yaml";
 
-const BOOTSTRAP_DIR = path.join(os.homedir(), ".agenticx");
-const DATA_ROOT_POINTER = path.join(BOOTSTRAP_DIR, "data_root.json");
-const BOOTSTRAP_CONFIG = path.join(BOOTSTRAP_DIR, "config.yaml");
+/** Runtime paths — never freeze os.homedir() at import time.
+ * Vitest redirects HOME/USERPROFILE; import-time constants would write the
+ * real ~/.agenticx/data_root.json and leave Near pointing at emptied temp dirs.
+ */
+function bootstrapDir(): string {
+  return path.join(os.homedir(), ".agenticx");
+}
+
+function dataRootPointerFile(): string {
+  return path.join(bootstrapDir(), "data_root.json");
+}
+
+function bootstrapConfigFile(): string {
+  return path.join(bootstrapDir(), "config.yaml");
+}
 
 let cachedHome: string | null = null;
 
@@ -44,8 +56,9 @@ function readEnvAgxHome(): string | null {
 
 function readPointerDataDir(): string | null {
   try {
-    if (!fs.existsSync(DATA_ROOT_POINTER)) return null;
-    const parsed = JSON.parse(fs.readFileSync(DATA_ROOT_POINTER, "utf-8")) as {
+    const pointerPath = dataRootPointerFile();
+    if (!fs.existsSync(pointerPath)) return null;
+    const parsed = JSON.parse(fs.readFileSync(pointerPath, "utf-8")) as {
       data_dir?: unknown;
       agenticx_home_dir?: unknown;
     };
@@ -57,8 +70,9 @@ function readPointerDataDir(): string | null {
 
 function readBootstrapYamlDataDir(): string | null {
   try {
-    if (!fs.existsSync(BOOTSTRAP_CONFIG)) return null;
-    const loaded = yaml.load(fs.readFileSync(BOOTSTRAP_CONFIG, "utf-8")) as Record<string, unknown>;
+    const configPath = bootstrapConfigFile();
+    if (!fs.existsSync(configPath)) return null;
+    const loaded = yaml.load(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
     if (!loaded || typeof loaded !== "object") return null;
     const near = loaded.near;
     if (near && typeof near === "object" && !Array.isArray(near)) {
@@ -112,11 +126,11 @@ export function expandAgxVirtualPath(input: string): string {
 }
 
 export function bootstrapAgenticxDir(): string {
-  return BOOTSTRAP_DIR;
+  return bootstrapDir();
 }
 
 export function dataRootPointerPath(): string {
-  return DATA_ROOT_POINTER;
+  return dataRootPointerFile();
 }
 
 export function writeDataRootPointer(dataDir: string): void {
@@ -124,11 +138,13 @@ export function writeDataRootPointer(dataDir: string): void {
   if (!resolved) {
     throw new Error("data_dir must be a non-empty path");
   }
-  fs.mkdirSync(BOOTSTRAP_DIR, { recursive: true });
+  const stub = bootstrapDir();
+  const pointerPath = dataRootPointerFile();
+  fs.mkdirSync(stub, { recursive: true });
   const payload = { data_dir: resolved };
-  fs.writeFileSync(DATA_ROOT_POINTER, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+  fs.writeFileSync(pointerPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
   try {
-    fs.chmodSync(DATA_ROOT_POINTER, 0o600);
+    fs.chmodSync(pointerPath, 0o600);
   } catch {
     /* best-effort */
   }
@@ -136,7 +152,8 @@ export function writeDataRootPointer(dataDir: string): void {
 
 export function clearDataRootPointer(): void {
   try {
-    if (fs.existsSync(DATA_ROOT_POINTER)) fs.unlinkSync(DATA_ROOT_POINTER);
+    const pointerPath = dataRootPointerFile();
+    if (fs.existsSync(pointerPath)) fs.unlinkSync(pointerPath);
   } catch {
     /* best-effort */
   }

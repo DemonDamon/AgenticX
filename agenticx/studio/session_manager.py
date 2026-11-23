@@ -3721,6 +3721,9 @@ class SessionManager:
                     "provider": str(fs_meta.get("provider", "") or ""),
                     "model": str(fs_meta.get("model", "") or ""),
                     "workspace_dir": str(fs_meta.get("workspace_dir", "") or ""),
+                    "harness_id": fs_meta.get("harness_id"),
+                    "harness_thread_id": fs_meta.get("harness_thread_id"),
+                    "harness_session_id": fs_meta.get("harness_session_id"),
                 }
                 parent_sid = self._resolve_listed_parent_session_id(sid, fs_meta)
                 if parent_sid:

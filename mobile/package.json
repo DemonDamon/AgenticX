@@ -14,18 +14,18 @@
     "expo-secure-store": "~57.0.4",
     "expo-status-bar": "~57.0.1",
     "punycode": "^2.3.1",
-    "react": "19.2.3",
+    "react": "19.3.1",
     "react-dom": "19.2.3",
-    "react-native": "0.88.0",
+    "react-native": "0.88.1",
     "react-native-markdown-display": "^7.0.2",
     "react-native-safe-area-context": "~5.10.1",
-    "react-native-screens": "~4.26.0",
+    "react-native-screens": "~4.30.1",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
-    "@types/react": "~19.2.2",
+    "@types/react": "~19.3.0",
     "typescript": "~6.0.3",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   },
   "scripts": {
     "start": "expo start",

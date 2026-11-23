@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
@@ -96,6 +98,62 @@ func TestHandlerRateLimited(t *testing.T) {
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d", w.Code)
+	}
+}
+
+type handlerMemAudit struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (m *handlerMemAudit) Write(ev *audit.Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ev != nil {
+		m.events = append(m.events, *ev)
+	}
+	return nil
+}
+
+func TestHandlerEgressEnforceLoopbackForbidden(t *testing.T) {
+	t.Setenv("GATEWAY_EGRESS_GUARD_MODE", "enforce")
+	t.Setenv("GATEWAY_EGRESS_ALLOWLIST", "")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("upstream should not be reached")
+	}))
+	defer upstream.Close()
+
+	reg := NewRegistry()
+	reg.Replace([]MCPServer{{
+		ID:          "demo",
+		Name:        "Demo",
+		UpstreamURL: upstream.URL,
+		Enabled:     true,
+	}})
+	aw := &handlerMemAudit{}
+	h := NewHandler(reg, nil, aw, nil)
+
+	r := chi.NewRouter()
+	r.Handle("/v1/mcp/{server_id}/*", h)
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{}}}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/mcp/demo/v1/messages", bytes.NewReader(body))
+	req = req.WithContext(WithIdentity(req.Context(), CallerIdentity{TenantID: "t1", UserID: "u1"}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "egress:forbidden") {
+		t.Fatalf("body %s", w.Body.String())
+	}
+	found := false
+	for _, ev := range aw.events {
+		if ev.MCPStatus == "egress_blocked" && ev.MCPServer == "demo" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("audit events %+v", aw.events)
 	}
 }
 
