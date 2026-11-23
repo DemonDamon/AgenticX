@@ -23,7 +23,7 @@ export function CandidatesTab() {
   useEffect(() => { void load(); }, [load]);
 
   function statusLabel(row: EvalCandidateView): string {
-    if (row.status === "applied") return t("candidates.appliedVersion", { version: row.applied_version });
+    if (row.status === "applied") return t("candidates.appliedVersion", { version: row.applied_version ?? "-" });
     return t(`candidates.status.${row.status}`);
   }
 
@@ -83,7 +83,7 @@ export function CandidatesTab() {
                   toast.error(json.message ?? t("candidates.applyFailed"));
                   return;
                 }
-                toast.success(t("candidates.applySuccess", { version: json.data?.version, effective: json.data?.effective_version }));
+                toast.success(t("candidates.applySuccess", { version: json.data?.version ?? "-", effective: json.data?.effective_version ?? "-" }));
                 setConfirmId(null);
                 await load();
               });

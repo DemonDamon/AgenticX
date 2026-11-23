@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "rules",
+  "generation": "2575ff75994e4c27ae532cf2f6c07aa0",
+  "mapping_revision": 1,
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:113e887b474a310c000874df5395b1666b2a6e836da6e7cfe127bf022d6fd6aa",
+  "summary_path": "conclusions/rules_module_conclusion.md",
+  "summary_sha256": "sha256:c09eef9b14fa55fb0143e664ebcf5bb351199d63d762331a460f8b3484eca84f",
+  "updated_at": "2026-11-14T12:24:36.388482+00:00"
+}

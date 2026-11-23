@@ -6,8 +6,7 @@ import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 import type { SubAgent } from "../store";
 import { useAppStore } from "../store";
-import { formatModelOptionLabel } from "../utils/model-display";
-import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
+import { collectSelectableModelOptions, resolveSubAgentModelSelection } from "../utils/model-options";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { fetchArtifactPreview, type ArtifactPreviewResponse } from "./subagent/run-drawer-api";
 import { previewBaseName } from "./workspace/workspace-preview-types";
@@ -368,14 +367,16 @@ function SubAgentModelPicker({
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
 
   const options = useMemo(() => collectSelectableModelOptions(settings), [settings]);
-  const currentProvider = (provider ?? "").trim();
-  const currentModel = (model ?? "").trim();
+  const resolved = useMemo(
+    () => resolveSubAgentModelSelection(provider, model, settings),
+    [provider, model, settings],
+  );
+  const currentProvider = resolved.provider;
+  const currentModel = resolved.model;
   const label = useMemo(() => {
-    if (!currentModel) return t("subagent.pickModel");
-    if (!currentProvider) return currentModel;
-    if (!isModelSelectable(currentProvider, currentModel, settings)) return t("subagent.pickModel");
-    return formatModelOptionLabel(currentProvider, currentModel, settings[currentProvider]);
-  }, [currentModel, currentProvider, settings, t]);
+    if (!resolved.model) return t("subagent.pickModel");
+    return resolved.label || t("subagent.pickModel");
+  }, [resolved.label, resolved.model, t]);
 
   const syncPanelPosition = useCallback(() => {
     const el = anchorRef.current;

@@ -1,6 +1,6 @@
 # @agenticx/ui 模块总结
 
-> 结论生成时间：2026-07-21（基于源码核验重写）
+> 结论生成时间：2026-11-14（target cebdabd5）
 
 ## 模块概述
 
@@ -22,7 +22,7 @@ packages/ui/
     │   │                       #   alert, sheet, skeleton, popover, checkbox, switch,
     │   │                       #   progress, command, sonner
     │   ├── layout/             # GridBackdrop, PageHeader, Breadcrumb, EmptyState, StatCard
-    │   ├── data/               # DataTable（@tanstack/react-table 包装）
+    │   ├── data/               # DataTable；citation-view（视图类型）；CitationEvidencePanel
     │   └── charts/             # ChartCard + theme.ts（chartPalette + chartColors）
     ├── branding/               # MachiAvatar.tsx, locale.tsx, useUiTheme.ts, locale-constants.ts
     └── themes/
@@ -35,7 +35,7 @@ packages/ui/
 - **工具**：`cn`（tailwind-merge + clsx）
 - **shadcn 原语**（24 个）：button / card / input / textarea / scroll-area / tooltip / select / separator / avatar / dropdown-menu / tabs / label / dialog / badge / table / alert / sheet / skeleton / popover / checkbox / switch / progress / command / sonner
 - **布局**：`GridBackdrop, PageHeader, Breadcrumb, EmptyState, StatCard`
-- **数据**：`DataTable`（基于 `@tanstack/react-table`）
+- **数据**：`DataTable`（基于 `@tanstack/react-table`）；`CitationView` / `CitationItem` / `CitationConflict` 等（`citation-view.ts`）；`CitationEvidencePanel`；`formatConfidence`、`assertCitationViewShape`、`buildBrandACitationFixture`
 - **图表**：`ChartCard`；`chartPalette` / `chartColors` 及 `chartTooltipStyle`、`chartLabelStyle`、`chartAxisTickProps`、`chartLegendWrapperStyle`（`components/charts/theme.ts`）
 - **品牌 / 主题**：`MachiAvatar`、locale provider、`useUiTheme`、`buildBrandThemeVars`
 
@@ -66,3 +66,11 @@ packages/ui/
 - `src/branding/MachiAvatar.tsx`：默认 `src="/near-logo.png"`；图片 `object-contain`；移除默认 logo 的 `rounded-md` 与 `dark:invert`；`aria-label` / `alt` 为 Near（组件导出名仍为 `MachiAvatar`）。
 - `src/components/charts/ChartCard.tsx`：`BarCard` / `BarChartCardProps` 新增 `horizontal?: boolean`；为 true 时用 Recharts `layout="vertical"`（类目在 `YAxis`、`width={148}`，数值在 `XAxis type="number"`），适合较长名称的 Top 列表；纵向柱图路径不变（仍支持 `stacked`）。
 - `src/index.ts`：barrel 额外导出 `chartTooltipStyle`、`chartLabelStyle`、`chartAxisTickProps`、`chartLegendWrapperStyle`。
+
+## 增量（22d051f5 → cebdabd5）
+
+- `src/components/data/citation-view.ts`：新增与 `citation-ui-contract` 对齐的 `CitationView` 视图类型、`CITATION_VIEW_KEYS` / `CITATION_ITEM_KEYS`、`formatConfidence`、`assertCitationViewShape`、`buildBrandACitationFixture`。
+- `src/components/data/CitationEvidencePanel.tsx`：前台/后台共用的引用证据面板（`CitationEvidencePanel` / `CitationEvidencePanelProps`），展示 citations、conflicts、missing 与可选 `summary`。
+- `src/components/ui/dialog.tsx`：`DialogContent` 增加 `max-h-[calc(100vh-2rem)]` 与 `overflow-y-auto`，长内容弹窗可纵向滚动。
+- `src/index.ts`：barrel 导出 `citation-view` 与 `CitationEvidencePanel`。
+- `package.json`：`@types/react` 升至 `19.3.0`（devDependency）。

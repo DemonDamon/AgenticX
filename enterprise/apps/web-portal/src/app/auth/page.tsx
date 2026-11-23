@@ -28,7 +28,7 @@ import {
   ArrowRight,
   CheckCircle2,
   ChevronRight,
-  Github,
+  Globe,
   Languages,
   ShieldAlert,
   ShieldCheck,
@@ -380,7 +380,7 @@ function AuthPageInner() {
                   size="sm"
                   disabled
                 >
-                  <Github />
+                  <Globe />
                 </Button>
               </div>
 

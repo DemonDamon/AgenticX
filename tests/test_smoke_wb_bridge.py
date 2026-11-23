@@ -232,6 +232,7 @@ def test_ac3_and_ac4_headless_argv(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert argv[0] == "/tmp/fake-cb"
     assert "--input-format" in argv and argv[argv.index("--input-format") + 1] == "stream-json"
     assert "--output-format" in argv and argv[argv.index("--output-format") + 1] == "stream-json"
+    assert "--include-partial-messages" in argv
     assert "--permission-mode" in argv and argv[argv.index("--permission-mode") + 1] == "default"
     assert "--permission-prompt-tool" not in argv
     mgr.stop_session(s.session_id)

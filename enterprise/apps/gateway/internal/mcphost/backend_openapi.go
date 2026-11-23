@@ -10,17 +10,76 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/agenticx/enterprise/gateway/internal/audit"
+	"github.com/agenticx/enterprise/gateway/internal/egress"
 )
 
 // OpenAPIBackend proxies MCP tool calls to HTTP endpoints described by OpenAPI 3.x.
 type OpenAPIBackend struct {
 	client *http.Client
+	hook   func(egress.Decision)
+	audit  audit.EventWriter
 }
 
 func NewOpenAPIBackend() *OpenAPIBackend {
-	return &OpenAPIBackend{
-		client: &http.Client{Timeout: 30 * time.Second},
+	b := &OpenAPIBackend{}
+	b.client = egress.NewHTTPClient(
+		&http.Client{Timeout: 30 * time.Second},
+		egress.ModeFromEnv(),
+		egress.AllowlistFromEnv(),
+		nil,
+	)
+	return b
+}
+
+// SetDecisionHook 在每次出站判定需要记录时回调。干净放行不会触发。
+func (b *OpenAPIBackend) SetDecisionHook(fn func(egress.Decision)) {
+	b.hook = fn
+}
+
+// SetAuditWriter 注入审计写入器。未注入时只执行守护，不写审计。
+func (b *OpenAPIBackend) SetAuditWriter(w audit.EventWriter) {
+	b.audit = w
+}
+
+func (b *OpenAPIBackend) withEgressCallback(ctx context.Context, rec *ServerRecord, tool string) context.Context {
+	return egress.WithDecisionCallback(ctx, func(d egress.Decision) {
+		if b.hook != nil {
+			b.hook(d)
+		}
+		b.writeEgressAudit(rec, tool, d)
+	})
+}
+
+func (b *OpenAPIBackend) writeEgressAudit(rec *ServerRecord, tool string, d egress.Decision) {
+	if b == nil || b.audit == nil || (!d.Blocked && !d.WouldBlock) {
+		return
 	}
+	status := "egress_would_block"
+	if d.Blocked {
+		status = "egress_blocked"
+	}
+	serverName := ""
+	if rec != nil {
+		serverName = rec.Name
+	}
+	summary := ""
+	if d.IP != nil {
+		summary = d.IP.String()
+	}
+	ev := audit.Event{
+		ID:          fmt.Sprintf("audit_%d", time.Now().UnixNano()),
+		EventTime:   time.Now().UTC().Format(time.RFC3339),
+		EventType:   "mcp_tool_call",
+		ClientType:  "web-portal",
+		Route:       "mcp",
+		MCPServer:   serverName,
+		MCPToolName: tool,
+		MCPStatus:   status,
+		Digest:      &audit.Digest{ResponseSummary: summary},
+	}
+	_ = b.audit.Write(&ev)
 }
 
 func (b *OpenAPIBackend) Name() string { return BackendOpenAPI }
@@ -29,7 +88,7 @@ func (b *OpenAPIBackend) ListTools(ctx context.Context, rec *ServerRecord) ([]To
 	if rec == nil {
 		return nil, fmt.Errorf("openapi backend: nil server")
 	}
-	if len(rec.Tools) > 0 {
+	if rec.ToolsFromPublishedVersion || len(rec.Tools) > 0 {
 		out := make([]Tool, 0, len(rec.Tools))
 		for _, t := range rec.Tools {
 			if t.Enabled {
@@ -74,7 +133,7 @@ func (b *OpenAPIBackend) CallTool(ctx context.Context, rec *ServerRecord, name s
 	if err != nil {
 		return textResult(err.Error(), true), nil
 	}
-	req, err := http.NewRequestWithContext(ctx, op.Method, target, body)
+	req, err := http.NewRequestWithContext(b.withEgressCallback(ctx, rec, name), op.Method, target, body)
 	if err != nil {
 		return textResult(err.Error(), true), nil
 	}

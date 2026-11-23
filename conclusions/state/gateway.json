@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "gateway",
-  "generation": "788ed633afc34ab6a437b8772a1729ed",
+  "generation": "4840a962ff1348899817dc7cdbd22122",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:7763f8fc80490559f967229ad294500b9f1bbef7c242b122f8e07c3fd1e9a652",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:d8678a8fc280ea3cd87951516d8c5b1173e436ad86f4692267b100698fbcb435",
   "summary_path": "conclusions/gateway_module_conclusion.md",
-  "summary_sha256": "sha256:fb92ca44584242700649bf5497251952bdde058201dc0fc5ce7cffdf6e9b6b09",
-  "updated_at": "2026-10-25T03:42:12.885613+00:00"
+  "summary_sha256": "sha256:1700b0e9f6a335119672814663cbb376e3f181eaf8865317069cb6ec22a0613d",
+  "updated_at": "2026-11-14T17:16:32.318335+00:00"
 }

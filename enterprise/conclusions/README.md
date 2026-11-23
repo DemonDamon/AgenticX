@@ -4,7 +4,7 @@
 >
 > **原则**：只覆盖到一级目录 / 一级子模块，不下钻到文件级。需要文件级细节时，查阅对应 `conclusions/<dimension>/<module>_conclusion.md`。
 >
-> **最近增量刷新**：2026-10-25（target `22d051f5`，相对基线 `30e57496`）。控制面 `layout: custom`。映射新增 `context-service`，`enterprise-root` 不再拥有该 app；`exclude_paths` 补上仓外新树（`mobile`、`connector-runtime`、`plans`、`cases`、`diagrams`、`paper`、`results`、`wiki` 等）。
+> **最近增量刷新**：2026-11-14（target `cebdabd5`，相对基线 `22d051f5`）。映射新增 `agent-runtime`，`enterprise-root` 不再拥有该 app。仓外新树 `extension/`、`reports/`、`.gitleaks.toml`、`requirements-docs.txt` 记入 `exclude_paths`。
 
 ---
 
@@ -25,13 +25,14 @@
 
 ```
 enterprise/
-├── apps/                      🎯 可部署整机（6 个）
+├── apps/                      🎯 可部署整机（7 个）
 │   ├── web-portal/            #  员工前台（Next.js 15，端口 3000）
 │   ├── admin-console/         #  管理后台（Next.js 15，端口 3001）
 │   ├── gateway/               #  AI 网关（Go，端口 8088，OpenAI 兼容）
 │   ├── skill-registry/        #  窄技能注册服务（Python，端口 8090）
 │   ├── edge-agent/            #  端侧 sidecar（Go，端口 127.0.0.1:7420）
-│   └── context-service/       #  企业共享知识上下文（FastAPI，端口 8091）
+│   ├── context-service/       #  企业共享知识上下文（FastAPI，端口 8091）
+│   └── agent-runtime/         #  托管智能体执行面（FastAPI，端口 8092）
 │
 ├── features/                  🧩 业务功能域 workspace 包（11 个）
 │   ├── chat/                  对话工作区（最大，~18 文件）
@@ -49,7 +50,7 @@ enterprise/
 ├── packages/                  📦 技术零件 workspace 包（11 个）
 │   ├── auth/                  认证抽象（password / OIDC / SAML / JWT / 加密）
 │   ├── iam-core/              IAM 数据访问层（PG + MySQL 双方言 repos）
-│   ├── db-schema/             Drizzle 双方言 schema（双方言 73 表；PG journal 60）
+│   ├── db-schema/             Drizzle 双方言 schema（双方言 115 表；PG journal 78 / MySQL 53）
 │   ├── ui/                    shadcn 设计系统（OKLCH 近黑品牌色）
 │   ├── policy-engine/         Go 规则引擎（gateway replace 嵌入；TS 侧 stub）
 │   ├── core-api/              类型契约
@@ -59,7 +60,7 @@ enterprise/
 │   ├── telemetry/             埋点 · 审计上报（占位）
 │   └── branding/              白标（部分：版本标签；视觉主体在 ui）
 │
-├── plugins/                   🔌 运行时插件（10 个）
+├── plugins/                   🔌 运行时插件（11 个）
 │   ├── moderation-pii-baseline/   基线 PII 规则
 │   ├── moderation-finance/         金融行业
 │   ├── moderation-medical/         医疗行业
@@ -99,6 +100,7 @@ enterprise/
 | **skill-registry** | 窄技能注册服务：search + fetch/scan，不连租户库 | Python | 8090 | [apps/skill-registry_conclusion.md](apps/skill-registry_conclusion.md) |
 | **edge-agent** | 端侧 sidecar（Go）：沙箱执行 + trace 落盘/上送（v0.2.0 MVP；Desktop 尚未接线）| Go | 127.0.0.1:7420 | [apps/edge-agent_conclusion.md](apps/edge-agent_conclusion.md) |
 | **context-service** | 企业共享知识上下文：入库、wiki 编译、L0/L1 读取与案例检索；不持有租户库 | Python | 8091 | [apps/context-service_conclusion.md](apps/context-service_conclusion.md) |
+| **agent-runtime** | 托管智能体执行面：把 `agenticx.managed` 接到企业 PG、控制面与模型网关 | Python | 8092 | [apps/agent-runtime_conclusion.md](apps/agent-runtime_conclusion.md) |
 
 ---
 
@@ -126,7 +128,7 @@ enterprise/
 
 | 子模块 | 一句话定位 | 结论文档 |
 |---|---|---|
-| **db-schema** | Drizzle 双方言 schema —— 双方言 73 表；PG journal 60 / MySQL journal 35 | [packages/db-schema_conclusion.md](packages/db-schema_conclusion.md) |
+| **db-schema** | Drizzle 双方言 schema —— 双方言 115 表；PG journal 78 / MySQL journal 53 | [packages/db-schema_conclusion.md](packages/db-schema_conclusion.md) |
 | **auth** | 认证抽象 —— password / OIDC（discovery cache）/ SAML 2.0 SP / JWT RS256 / 信封加密 / Next.js 中间件（无 LDAP/Supabase 实现） | [packages/auth_conclusion.md](packages/auth_conclusion.md) |
 | **iam-core** | IAM 数据访问层 —— 双方言 repos（用户/部门/角色/配额，以及 agents、cases、projects）+ provider-key 加密 + legacy 迁移 | [packages/iam-core_conclusion.md](packages/iam-core_conclusion.md) |
 | **config** | 配置加载器（brand / feature flags YAML → Zod；apps 多半只消费默认常量）| [packages/config_conclusion.md](packages/config_conclusion.md) |
@@ -143,7 +145,7 @@ enterprise/
 | 子模块 | 一句话定位 | 结论文档 |
 |---|---|---|
 | **sdk-ts** | TS 客户端 SDK —— `ChatClient` + Mock/HTTP + SSE 流式 / 多模态附件 / 中断语义（web-portal 已消费） | [packages/sdk-ts_conclusion.md](packages/sdk-ts_conclusion.md) |
-| **sdk-py** | Python SDK（占位，仅 `__version__`）| [packages/sdk-py_conclusion.md](packages/sdk-py_conclusion.md) |
+| **sdk-py** | Python SDK：已实现 Managed Agents 同步客户端；通用 Chat 客户端仍无 | [packages/sdk-py_conclusion.md](packages/sdk-py_conclusion.md) |
 
 ### UI 与品牌
 
@@ -159,9 +161,9 @@ enterprise/
 
 | 维度 | 一句话定位 | 结论文档 |
 |---|---|---|
-| **plugins/** | 10 个运行时插件：3 个 PII/合规规则包 + 4 个 wasm 网关插件 + 2 个工具 CLI + 1 个主题（合订一篇）| [plugins/plugins_overview_conclusion.md](plugins/plugins_overview_conclusion.md) |
+| **plugins/** | 11 个运行时插件：4 个合规规则包 + 4 个 wasm 网关插件 + 2 个工具 CLI + 1 个主题（合订一篇）| [plugins/plugins_overview_conclusion.md](plugins/plugins_overview_conclusion.md) |
 | **deploy/** | 部署资产：Docker Compose dev/prod + K8s deployment/service/hpa + Nginx 公网入口 + 公私混合部署 | [deploy/deploy_conclusion.md](deploy/deploy_conclusion.md) |
-| **enterprise-root** | monorepo 胶水：pnpm/turbo、start-dev、方言迁移、e2e/压测脚本 | [enterprise_root_conclusion.md](enterprise_root_conclusion.md) |
+| **enterprise-root** | monorepo 胶水：pnpm/turbo、start-dev、e2e harness 与脚本；不拥有 agent-runtime | [enterprise_root_conclusion.md](enterprise_root_conclusion.md) |
 
 ---
 

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "db-schema",
-  "generation": "6b980585c2cc47eaa0f8e350e282b85b",
+  "generation": "b6cd96cb06834b52881fc06ca5b8ac62",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:181dec0dbde1ef6077881d873bcbf83623ae01acbcc73009d11a28124a31358f",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:64716601b0a3bd552012099430f03b2956216773d50caf6e802da58dd8f685ad",
   "summary_path": "enterprise/conclusions/packages/db-schema_conclusion.md",
-  "summary_sha256": "sha256:d5e0fcaf6b2383730d8660cd6c0612d7ac9083245cd8e8606a01e0c5a1226f2a",
-  "updated_at": "2026-10-25T03:42:36.222213+00:00"
+  "summary_sha256": "sha256:2ed4fb0ef22c465ed2a21a6ecb1379f32949b4905022a3c7cc8a5c1cf26b645e",
+  "updated_at": "2026-11-14T12:29:38.591694+00:00"
 }

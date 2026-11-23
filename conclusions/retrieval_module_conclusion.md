@@ -1,10 +1,10 @@
 # AgenticX Retrieval 模块完整结构分析
 
-> 结论更新时间：2026-05-29（覆盖 2026-02-14 之后的变更）
-> 自 2026-02-14 起 `agenticx/retrieval/` 无重大变更（git log 无提交），本文保持原状。
+> 结论更新时间：2026-11-14（target `cebdabd5`）
+> 相较 BASE `22d051f5`：新增 K1 溯源/证据/引用视图与对象命中消歧适配层；`RetrievalResult` 可选挂载 `Provenance`。
 
 ## 目录路径
-`d:\myWorks\AgenticX\agenticx\retrieval`
+`agenticx/retrieval`
 
 ## 模块概述
 AgenticX 框架的智能检索系统（M15），实现了统一的检索抽象层，支持多种检索策略（向量检索、BM25、混合检索、图检索、自动检索），并提供智能检索Agent和RAG工作流工具，构建了企业级的检索平台。
@@ -18,9 +18,13 @@ retrieval/
 ├── agents.py (8,234 bytes)
 ├── auto_retriever.py (9,876 bytes)
 ├── base.py (4,567 bytes)
+├── citation_view.py
+├── disambiguation.py
+├── evidence.py
 ├── bm25_retriever.py (6,789 bytes)
 ├── graph_retriever.py (7,654 bytes)
 ├── hybrid_retriever.py (8,123 bytes)
+├── provenance.py
 ├── reranker.py (8,890 bytes)
 ├── tools.py (7,432 bytes)
 └── vector_retriever.py (6,543 bytes)
@@ -38,16 +42,44 @@ retrieval/
 #### __init__.py
 **文件功能**：定义 retrieval 模块的统一导出接口和模块初始化
 **技术实现**：通过 __all__ 列表导出核心抽象、检索器、Agent组件和工具
-**关键组件**：导出 BaseRetriever、VectorRetriever、BM25Retriever、HybridRetriever、GraphRetriever、AutoRetriever、QueryAnalysisAgent、RetrievalAgent、DocumentIndexingTool、RetrievalTool 等核心类
+**关键组件**：在既有检索器与 RAG 工具导出之外，新增 `Provenance`、`SourceType`、`attach_provenance`、`provenance_from_legacy`、`EvidenceItem`、`EvidenceBundle`、`assemble_evidence`、`to_citation_view`（`disambiguation` 子模块未列入 `__all__`，按需子路径导入）
 **业务逻辑**：提供统一的检索系统入口，支持多种检索策略的无缝切换
 **依赖关系**：作为模块入口，被其他模块导入使用
 
 #### base.py
 **文件功能**：定义 AgenticX 检索系统的核心抽象和基础数据结构
 **技术实现**：使用抽象基类和数据类定义统一的检索接口和数据模型
-**关键组件**：RetrievalType 枚举（VECTOR、BM25、HYBRID、GRAPH、AUTO）、RetrievalQuery 数据类、RetrievalResult 数据类、BaseRetriever 抽象基类、RetrievalError 异常类
+**关键组件**：RetrievalType 枚举（VECTOR、BM25、HYBRID、GRAPH、AUTO）、RetrievalQuery 数据类、RetrievalResult 数据类（含可选 `provenance` 及 `with_provenance` / `ensure_provenance`）、BaseRetriever 抽象基类、RetrievalError 异常类
 **业务逻辑**：为所有检索器提供统一的接口规范，确保不同检索策略的一致性
-**依赖关系**：被所有具体检索器实现类继承和使用
+**依赖关系**：被所有具体检索器实现类继承和使用；与 `provenance.py` 协同完成 legacy `source` / `chunk_id` 回填溯源
+
+#### provenance.py
+**文件功能**：为检索证据定义统一的溯源字段模型（K1-1）
+**技术实现**：`SourceType` 枚举（STRUCTURED、GRAPH、DOCUMENT、INFERENCE）与 `Provenance` 数据类，支持 `to_dict` / `from_dict` 与置信度校验
+**关键组件**：`attach_provenance`、`provenance_from_legacy`
+**业务逻辑**：将结构化记录、图关系、文档片段与推理摘要映射为可序列化溯源，供证据聚合与前台引用展示
+**依赖关系**：被 `base.RetrievalResult`、`evidence.EvidenceItem` 消费
+
+#### evidence.py
+**文件功能**：面向单实体的多源证据聚合（K1-2）
+**技术实现**：`EvidenceItem` 绑定 `kind` / `payload` / `Provenance`；`assemble_evidence` 按策略排序并检测 `missing` 与 `conflicts`
+**关键组件**：种类常量 `KIND_LEDGER_ATTR`、`KIND_RELATED_RECORD`、`KIND_GRAPH_EDGE`、`KIND_DOCUMENT_CLAUSE`；`EvidenceBundle`
+**业务逻辑**：把账本属性、关联记录、图边与文档条款汇成对象中心证据包，payload 保持与客户名无关的中性结构
+**依赖关系**：依赖 `provenance`；输出由 `citation_view.to_citation_view` 序列化
+
+#### citation_view.py
+**文件功能**：证据包到门户/管理台可消费的引用与冲突视图（K1-3）
+**技术实现**：纯函数 `to_citation_view`，将 `EvidenceBundle` 或等价 dict 转为 JSON 友好结构；契约键 `CITATION_VIEW_KEYS`、`CITATION_ITEM_KEYS`
+**关键组件**：`to_citation_view`（可选 `include_summary`）
+**业务逻辑**：统一 citations / conflicts / missing 展示形态，不依赖具体 UI 框架
+**依赖关系**：仅依赖 `evidence` 模型
+
+#### disambiguation.py
+**文件功能**：多对象命中与属性冲突时对接运行时 R2 消歧协议
+**技术实现**：`ObjectHit` 表示候选；`needs_object_disambiguation` 判定分数边际或同 label 歧义；经 `object_hits_to_request` / `attribute_conflicts_to_request` 构造 `DisambiguationRequest`
+**关键组件**：`resolve_object_hits`（异步，可接 `DisambiguationGate` / `DisambiguationFileStore`）、`resolve_attribute_conflict`
+**业务逻辑**：与规则 NL 共用同一消歧交互面，避免检索侧自建确认流
+**依赖关系**：依赖 `agenticx.runtime.disambiguation`；未从包根 `__init__` 导出
 
 #### agents.py
 **文件功能**：实现智能检索Agent，提供查询分析和检索策略选择能力
@@ -135,6 +167,12 @@ retrieval/
 - 可配置的参数和策略
 - 错误处理和异常管理
 - 扩展性和模块化设计
+
+### 6. 溯源、证据与消歧（K1 / R2）
+- 检索结果可选 `Provenance`，兼容 legacy 字段回填
+- `EvidenceBundle` 聚合多源证据并标记缺失与冲突
+- `to_citation_view` 为 Enterprise 前台/后台提供稳定引用 JSON 契约
+- `disambiguation` 将含糊对象命中接入共享 `DisambiguationRequest` 流程
 
 ## 技术优势
 
