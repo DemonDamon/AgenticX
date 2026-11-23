@@ -6,6 +6,7 @@
  * and is deprecated for business/API layers after Phase 4.
  */
 import { resolveDatabaseConfig } from "./database/config";
+import { getTenantIamTransaction } from "./database/tenant-iam-transaction";
 import {
   createPgDb,
   createPgPool,
@@ -49,7 +50,7 @@ export function getIamDb(): IamDb {
       `getIamDb() is PostgreSQL-only; current dialect=${config.dialect}. Use getRepositoryRegistry().`,
     );
   }
-  return createPgDb(config);
+  return (getTenantIamTransaction("postgresql") as IamDb | null) ?? createPgDb(config);
 }
 
 /** Test-only: release pools */

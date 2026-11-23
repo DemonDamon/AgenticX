@@ -34,8 +34,7 @@ export async function updateEcpTenantDistributionPolicy(
   tenantId: string,
   input: { installCopyEnabled?: boolean },
 ): Promise<EcpTenantDistributionPolicyRecord> {
-  const database = resolveDatabaseConfig();
-  const { raw: db } = await createMysqlDb(database);
+  const db = getAdminMysqlDb();
   const existing = await getEcpTenantDistributionPolicy(tenantId);
   const installCopyEnabled =
     input.installCopyEnabled === undefined ? existing.installCopyEnabled : input.installCopyEnabled === true;

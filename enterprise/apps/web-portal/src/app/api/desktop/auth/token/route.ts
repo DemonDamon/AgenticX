@@ -44,6 +44,7 @@ export async function POST(request: Request) {
   try {
     const result = await createPat({
       tenantId: identity.tenantId,
+      actor: { kind: "user", tenantId: identity.tenantId, userId: identity.userId, scopes: [] },
       userId: identity.userId,
       deptId: identity.deptId,
       name: desktopPatDisplayName(deviceName),
