@@ -68,6 +68,7 @@ async function main(): Promise<void> {
     }
     const { record, token } = await createPat({
       tenantId,
+      actor: { kind: "system", tenantId, purpose: "provisioning" },
       userId: user.id,
       deptId: user.deptId ?? null,
       name: target.name,

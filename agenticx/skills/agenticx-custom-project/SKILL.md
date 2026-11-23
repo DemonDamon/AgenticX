@@ -1,22 +1,24 @@
 ---
 name: agenticx-custom-project
 slug: agenticx-custom-project
-displayName: AgenticX 定制项目助手
-version: "1.2.0"
-summary: 帮助基于 AgenticX 初始化定制项目，并判断 bug 或新功能该留在自己的仓库还是给官方提 Issue / PR；含 depend 模式自研业务闭环分层、本地 Demo UI 归属，以及默认前端栈 shadcn + Bits。
+displayName: 项目定制.Skill
+version: "1.2.3"
+summary: 帮助基于 AgenticX 初始化定制项目，并判断 bug 或新功能该留在自己的仓库还是给官方提 Issue / PR；覆盖案例库起项目与沉淀、多引擎、移动端与浏览器扩展的归属，doctor 自动探测版本与新命令，自检校验技能文件一致性，附英文速查。
 license: Apache-2.0
 homepage: https://www.agxbuilder.com/
-description: Use when a user builds a custom or client project on AgenticX, or asks whether a bug or feature should stay in their repo or become an upstream issue or pull request. 用户说「帮我初始化项目」「这个 bug 要不要提给官方」「新功能该留在自己仓库还是提 PR」「怎么 fork」「连不上 GitHub」「Windows 找不到命令」时启用。也用于起草 Issue 或 PR。不用于只在 Near 里聊天，或只想写第一段示例智能体。
+description: Use when a user builds a custom or client project on AgenticX, or asks whether a bug or feature should stay in their repo or become an upstream issue or pull request. 用户说「帮我初始化项目」「这个 bug 要不要提给官方」「新功能该留在自己仓库还是提 PR」「怎么 fork」「从案例库起一个新项目」「移动端或浏览器扩展的问题找谁」「连不上 GitHub」「Windows 找不到命令」时启用。也用于起草 Issue 或 PR。不用于只在 Near 里聊天，或只想写第一段示例智能体。
 metadata:
   author: Damon Li
-  version: "1.2.0"
+  version: "1.2.3"
 ---
 
-# AgenticX 定制项目助手
+# 项目定制.Skill
 
 帮人把基于 AgenticX 的项目建对，并在遇到 bug 或新功能时判断：留在自己的仓库，还是给官方提 Issue / PR。判断以本技能目录里的 `scripts/custom_project.py` 为准，不要凭感觉改结论。
 
-官方仓库是 [DemonDamon/AgenticX](https://github.com/DemonDamon/AgenticX)。产品说明在 [agxbuilder.com](https://www.agxbuilder.com/)。三条入口（Python SDK、Near 桌面、企业门户）共用能力，但业务代码不要写进官方仓库。
+官方仓库是 [DemonDamon/AgenticX](https://github.com/DemonDamon/AgenticX)。产品说明在 [agxbuilder.com](https://www.agxbuilder.com/)。入口有 Python SDK、Near 桌面、企业门户，以及新增的移动端和浏览器扩展。它们共用能力，但业务代码不要写进官方仓库。
+
+English readers: see [references/quickstart-en.md](references/quickstart-en.md).
 
 ## 什么时候用
 
@@ -33,6 +35,9 @@ metadata:
 | 基于 AgenticX 做领域 Demo / 最小可跑闭环（不改框架） | 初始化（depend）+ 业务分层指引 |
 | Demo UI 要换皮 / 想做漂亮门户 | 初始化后的业务 style；默认按本技能 `references/frontend-ui.md`（shadcn + Bits）；第三方设计技能可并列，勿把其全文粘进本技能 |
 | 门户、管理台、网关里的问题能不能直接改代码提 PR | 判断，结论是先开 Issue |
+| 手机端或浏览器扩展里的问题 | 判断（`--where client`），结论是先开 Issue |
+| 照着以前的交付案例起一个新项目 / 交付完想沉淀成案例 | 初始化或收尾，见「案例库」 |
+| Near 里切到 Claude Code、CodeBuddy、Codex 后出问题 | 判断，按 [references/new-capabilities.md](references/new-capabilities.md) 第 3 节分归属 |
 
 ## 什么时候不用
 
@@ -46,9 +51,12 @@ metadata:
 | --- | --- |
 | 系统 | Windows 10/11、macOS、Linux。命令按当前系统打印。 |
 | Python | 安装和运行 AgenticX 需要 3.10 或更高。脚本本身可以在更旧的 Python 上给出提示。 |
-| 会不会上传 | 默认不上传。不读取 `~/.agenticx`。`doctor` 只探测 `github.com` 和 `pypi.org` 的 443 端口，不发送项目内容。 |
+| 会不会上传 | 默认不上传。不读取 `~/.agenticx`。`doctor` 只探测 `github.com` 和 `pypi.org` 的 443 端口，并读取 PyPI 公开的版本号，不发送项目内容。 |
+| 版本号 | PyPI 发布包和官方源码可能都叫 `0.6.5`，命令却不同。能不能用 `agx case` 等新命令，以 `doctor` 的探测为准。 |
+| Near 企业账号 | 登录后会向企业回传运行指标；企业开启摘录时附对话前 500 字。用真实客户材料前先和用户确认，见 [references/new-capabilities.md](references/new-capabilities.md) 第 5 节。本技能不改这个开关。 |
 | 什么时候才会发到 GitHub | 只有用户已经要求提交，并且命令带 `--execute`、门禁通过时，才调用 `gh` 创建 Issue 或 PR。不会 `git push`，不会推 `main`。 |
 | 官方 enterprise 目录 | 员工门户、管理台、Go 网关。外部贡献先开 Issue。维护者在 Issue 里同意之前，不要提 PR。 |
+| 官方 mobile、extension 目录 | 还没写进贡献说明的仓库地图。同样先开 Issue，维护者同意后再提 PR。 |
 | `agx project create --template enterprise` | 这只是应用骨架的名字，不是上面那个目录。 |
 
 ## 助手按这个顺序做
@@ -84,7 +92,7 @@ python3 scripts/custom_project.py plan --mode depend --stack python --name my-ag
 
 #### depend 模式：领域 Demo 的默认路径
 
-大多数「基于 AgenticX 做客户或领域 Demo」就是 `--mode depend --stack python`：用 pip 安装官方发布包（写作时验证过的示例是 `agenticx==0.6.5`，安装前以 `agx --version` / PyPI 为准），**不要克隆官方源码**。闭环全部自研，放在业务仓。典型分层（示意路径，可按项目改名）：
+大多数「基于 AgenticX 做客户或领域 Demo」就是 `--mode depend --stack python`：用 pip 安装官方发布包（骨架里的示例版本是 `agenticx==0.6.5`；`doctor` 会打印 PyPI 上的最新发布版，以它或你们验证过的版本为准），**不要克隆官方源码**。闭环全部自研，放在业务仓。典型分层（示意路径，可按项目改名）：
 
 | 路径 | 职责 |
 | --- | --- |
@@ -131,6 +139,23 @@ npx shadcn@latest add @react-bits/SplitText-TS-TW
 - **禁止**把第三方设计技能的全文粘进 `agenticx-custom-project`；本技能只维护上面这套默认前端栈说明。也不要把本技能内容并进别人的技能。
 - 安装任何外部技能前，先汇总来源、版本、风险，征得用户确认。
 
+#### 案例库：从已有交付起项目，交付后沉淀
+
+先看 `doctor` 里「新能力 案例库」那一行。显示「当前安装里没有」就跳过本节，不要照写命令。
+
+```bash
+agx case search "审批 助手"
+agx case init --case <case_id> --target ./approval-helper
+agx case compile --plan ./approval-helper/plan.mdc
+```
+
+- 三条命令默认只读写本地。`--remote` 查或取云端案例，`--push` 把案例上报云端。
+- **`--push` 前必须得到用户明确授权**，并确认条目里没有客户名称、内网地址、密钥和真实数据。没授权就说「已在本地生成，尚未上报」。
+- 云端令牌走环境变量 `AGX_CONTEXT_SERVICE_TOKEN`，不要写进命令行或仓库。
+- 案例内容属于业务仓：`--kind docs --where business`。
+
+完整说明见 [references/new-capabilities.md](references/new-capabilities.md)。
+
 ### 2. 判断 bug 或新功能
 
 把用户的话翻译成参数，然后运行 `classify`。翻译对照：
@@ -144,15 +169,16 @@ npx shadcn@latest add @react-bits/SplitText-TS-TW
 | `--kind deps` | 升级依赖或版本对不上 |
 | `--kind security` | 密钥、漏洞 |
 | `--where business` | 客户流程、他们自己的界面和规则 |
-| `--where runtime` | Python 运行时、SDK、`agx` |
+| `--where runtime` | Python 运行时、SDK、`agx`。多引擎桥接也写 `--where harness`，结论相同 |
 | `--where desktop` | Near 桌面 |
 | `--where protocol` | 两边都要认的接口或协议 |
 | `--where enterprise` | 门户、管理台、网关 |
+| `--where client` | 官方的移动端 `mobile/`、浏览器扩展 `extension/`（也可写 `mobile`、`extension`） |
 | `--cause-clear yes` | 已经知道要改哪一处 |
 | `--size small` | 局部小修。说不清就用 `small` |
 | `--others-need` | 不看这家客户的规则，别的用户还要不要 |
 | `--can-fix no` | 对方改不了官方代码，只想反映问题 |
-| `--maintainer-agreed yes` | 维护者已经在 Issue 里同意改 enterprise |
+| `--maintainer-agreed yes` | 维护者已经在 Issue 里同意改 enterprise 或 client |
 
 不确定「别的用户要不要」时不要猜，让脚本返回提问。
 
@@ -166,7 +192,7 @@ python3 scripts/custom_project.py classify --kind bug --where runtime --cause-cl
 flowchart TD
   start[收到改动] --> own{只影响这家的文案规则或界面?}
   own -->|是| local[留在自己的仓库]
-  own -->|否| ent{门户管理台或网关?}
+  own -->|否| ent{门户管理台网关 或 移动端浏览器扩展?}
   ent -->|是| issue[先开 Issue]
   ent -->|否| small{原因清楚的小问题?}
   small -->|是| fix[本仓修复]
@@ -189,7 +215,7 @@ flowchart TD
 | 大家都能用的新能力，还没核对官方 | 只查相关目录和标题对得上的 Issue |
 | 官方已经有 | 升级或最小移植，不重写，不整仓合并 |
 | 核对后官方没有，且是通用能力 | 最小 PR 加测试；客户部分留下 |
-| enterprise 目录 | 只开 Issue，除非维护者已同意 |
+| enterprise 目录，或 mobile、extension 目录 | 只开 Issue，除非维护者已同意 |
 | 这边改不了代码 | 开 Issue，不要求克隆仓库 |
 | 密钥出在业务仓库 | 本地轮换。不要开公开 Issue |
 
@@ -275,14 +301,31 @@ python3 scripts/custom_project.py classify --kind bug --where desktop --cause-cl
 | `agx` 不是内部或外部命令 | 关掉终端重开。Windows 检查 Python 的 Scripts 是否在 PATH。 |
 | 目录里已经有文件 | 没有覆盖。换项目名，或让用户清空后再写。 |
 | 中文乱码 | Windows 命令提示符先执行 `set PYTHONUTF8=1`，PowerShell 用 `$env:PYTHONUTF8=1`。 |
+| `No such command 'case'` 或 `harness-surface` | 当前安装的发布包还没带这条命令，不是装坏了。见 [references/new-capabilities.md](references/new-capabilities.md) 第 1 节。 |
+| `case init` 说目标目录不为空 | 换一个空目录。不要替用户清空已有目录。 |
 
-完整对照见 [references/troubleshooting.md](references/troubleshooting.md)。发布或接手这个技能时，先运行：
+完整对照见 [references/troubleshooting.md](references/troubleshooting.md)。
+
+## 维护这个技能
+
+发布或接手这个技能时，先运行：
 
 ```bash
 python3 scripts/custom_project.py self-test
 ```
 
-自检不联网、不提交。失败时它会列出哪一条判断和预期不一致。
+自检不联网、不提交。它检查判断表、脱敏、草稿门禁、项目骨架，以及技能文件本身：头部两个版本号一致、`references/` 链接都存在、脚本支持的每个 `--where` 都写进了翻译对照。任何一条失败就不要发布。
+
+会随官方变化而过时的事实集中在下表。官方有新发布时只核对这几处：
+
+| 事实 | 写在哪 | 怎么重新核对 |
+| --- | --- | --- |
+| 骨架示例版本 `0.6.5` | `scripts/custom_project.py` 的 `PIN_EXAMPLE` | `doctor` 打印的 PyPI 最新发布版 |
+| 新命令是否已进发布包 | `CAPABILITY_PROBES` 与 `references/new-capabilities.md` | `doctor` 的「新能力」行 |
+| 哪些目录不收未约定的 PR | `classify` 的 enterprise、client 分支 | 官方 `CONTRIBUTING.md` 的仓库地图与 Enterprise 一节 |
+| 项目模板名 `basic`、`multi_agent`、`enterprise` | 本文件与 `render_plan` | `agx project create --help` |
+
+上次核对：2026-11-23。
 
 ## 常见问题
 
@@ -308,6 +351,10 @@ python3 scripts/custom_project.py self-test
 
 **各个业务仓必须锁同一个 AgenticX 版本吗？** 不必。各仓库使用自己验证过的版本。
 
+**交付完了，能直接 `agx case compile --push` 把案例传上去吗？** 先问用户。没有明确授权就只落本地，并检查条目里没有客户信息。
+
+**手机端或浏览器扩展的 bug 我知道改哪一行，能直接提 PR 吗？** 不能。这两个目录还没写进贡献说明的仓库地图，先开 Issue。
+
 ## 不能违反
 
 | 借口 | 实际要求 |
@@ -317,7 +364,9 @@ python3 scripts/custom_project.py self-test
 | 草稿写了就算提交了 | 没创建成功就说尚未提交，并留下原因 |
 | 网络失败就停掉客户交付 | 只停下提交这一步，其余继续 |
 | 用真实客户材料当复现 | 只用合成或允许公开的脱敏样例 |
-| enterprise 目录我直接 PR | 维护者同意之前只开 Issue |
+| enterprise、mobile、extension 目录我直接 PR | 维护者同意之前只开 Issue |
+| 案例反正要共享，顺手 `--push` | 没有用户明确授权只落本地 |
+| 版本号一样，命令肯定也有 | 以 `doctor` 的探测为准 |
 | 官方还没有，所以我重写一套 | 先核对。已经有就升级或最小移植 |
 | 一行 bug 一个 PR | 同一批同类小修合成一个，不要混进无关功能 |
 
@@ -328,6 +377,8 @@ python3 scripts/custom_project.py self-test
 | 文件 | 什么时候打开 |
 | --- | --- |
 | `scripts/custom_project.py` | 检查环境、初始化、判断、草稿、提交、自检 |
+| [references/new-capabilities.md](references/new-capabilities.md) | 案例库、多引擎、移动端与浏览器扩展、运行记录回流 |
+| [references/quickstart-en.md](references/quickstart-en.md) | English quick start |
 | [references/frontend-ui.md](references/frontend-ui.md) | 搭 Demo 门户 / 换皮：shadcn + Bits |
 | [references/examples.md](references/examples.md) | 要对照一个完整案例 |
 | [references/faq.md](references/faq.md) | 用户问「为什么不能」 |
