@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { officePreviewKind, officePreviewMime } from "./office-preview-kind";
 import { pptxNavDeltaFromKey } from "./pptx-preview-keys";
-import { pptxNavDeltaFromKey } from "./pptx-preview-keys";
 
 describe("officePreviewKind", () => {
   it("routes modern Office files to the matching preview", () => {

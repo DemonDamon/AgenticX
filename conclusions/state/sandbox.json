@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "sandbox",
-  "generation": "450e86b85db24b3697bf36670f031a47",
+  "generation": "350afbaec62f41a38511377882883df5",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
   "source_fingerprint": "sha256:8f7956cdc71dd5e252a10e7e3be743ef4ea4097c015e59aa91682de40f3699ed",
   "summary_path": "conclusions/sandbox_module_conclusion.md",
   "summary_sha256": "sha256:162795d30060fa9ad9d4978f9a10e94da28e676e12c2ebdced4a7e7d9e3ce67b",
-  "updated_at": "2026-10-24T13:53:17.671948+00:00"
+  "updated_at": "2026-11-14T12:15:48.103463+00:00"
 }

@@ -18,13 +18,33 @@
 cd enterprise/deploy/docker-compose
 POSTGRES_PASSWORD=replace-me \
 ADMIN_CONSOLE_LOGIN_PASSWORD=replace-me \
+AGX_PROVIDER_SECRET_KEY=replace-me \
+SSO_PROVIDER_SECRET_KEY=replace-me \
 JWT_PUBLIC_KEY="$(cat /path/to/jwt.pub)" \
 JWT_PRIVATE_KEY="$(cat /path/to/jwt.key)" \
 DATABASE_URL="postgresql://agenticx:replace-me@postgres-primary:5432/agenticx?sslmode=disable" \
 docker compose -f prod.yml --profile postgresql up -d
 ```
 
-（`prod.yml` 会通过 `${ADMIN_CONSOLE_LOGIN_PASSWORD?...}` / `${DATABASE_URL?...}` 强制要求相关变量已导出；内置 Postgres 需加 `--profile postgresql`。）
+（`prod.yml` 会通过 `${ADMIN_CONSOLE_LOGIN_PASSWORD?...}` / `${DATABASE_URL?...}` / `${AGX_PROVIDER_SECRET_KEY?...}` / `${SSO_PROVIDER_SECRET_KEY?...}` 强制要求相关变量已导出；内置 Postgres 需加 `--profile postgresql`。`AGX_PROVIDER_SECRET_KEY` 用于加密模型厂商 API Key、`SSO_PROVIDER_SECRET_KEY` 用于加密 SSO client_secret，生产环境缺失任一都会直接启动失败；两者须分别生成强随机值（如各自执行 `openssl rand -hex 32`），勿复用同一值、勿写入仓库。）
+
+### 容器部署的两个坑（每套环境都要确认）
+
+1. **web-portal 调网关不能用 `127.0.0.1`。** `127.0.0.1` 在容器内指向容器自己，网关根本不在那儿。`prod.yml` 已默认 `GATEWAY_COMPLETIONS_URL=http://gateway-a:8088/v1/chat/completions`；网关不在同一 compose 网络时，改成实际可达的内网地址。缺失时聊天会报 `Gateway 不可用：connect http://127.0.0.1:8088/v1/chat/completions: fetch failed`。
+2. **`NEXT_PUBLIC_*` 是构建期内联，运行期改环境变量不生效。** 生产构建必须按实际对外地址传参，否则前端会回落到 `127.0.0.1` / `localhost`：
+
+```bash
+docker build -f apps/Dockerfile.next \
+  --build-arg APP_NAME=admin-console \
+  --build-arg APP_PACKAGE=@agenticx/app-admin-console \
+  --build-arg APP_PORT=3001 \
+  --build-arg NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL=https://<网关对外域名> \
+  -t <registry>/enterprise-admin-console:<tag> .
+```
+
+`NEXT_PUBLIC_ADMIN_CONSOLE_URL` 默认 `/admin/`（同源，由 nginx 代理），一般无需覆盖。
+
+改完环境变量必须重建容器（`docker compose up -d --force-recreate web-portal`），`restart` 不会重新读取。
 
 ## 移动云私有镜像仓库生产部署
 
@@ -99,6 +119,8 @@ ENTERPRISE_IMAGE_TAG=2026.07.16-gitsha
 
 POSTGRES_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
 ADMIN_CONSOLE_LOGIN_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
+AGX_PROVIDER_SECRET_KEY=REPLACE_WITH_STRONG_RANDOM_SECRET
+SSO_PROVIDER_SECRET_KEY=REPLACE_WITH_STRONG_RANDOM_SECRET
 DATABASE_URL=postgresql://agenticx:REPLACE_WITH_URL_ENCODED_PASSWORD@postgres-primary:5432/agenticx?sslmode=disable
 ```
 
@@ -210,6 +232,8 @@ ENTERPRISE_IMAGE_TAG=2026.07.16-gitsha
 
 POSTGRES_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
 ADMIN_CONSOLE_LOGIN_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
+AGX_PROVIDER_SECRET_KEY=REPLACE_WITH_STRONG_RANDOM_SECRET
+SSO_PROVIDER_SECRET_KEY=REPLACE_WITH_STRONG_RANDOM_SECRET
 DATABASE_URL=postgresql://agenticx:REPLACE_WITH_URL_ENCODED_PASSWORD@postgres-primary:5432/agenticx?sslmode=disable
 ```
 

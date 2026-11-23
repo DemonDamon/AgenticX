@@ -1,8 +1,8 @@
 # AgenticX Gateway 模块总结
 
-> 结论生成时间：2026-05-29；代码基线覆盖至 `22d051f5d18ad83a4c6083683342ab41d7850149`（相对 `ca9d92bec05627539228094cacc30dd6d4879f47` 的 gateway 增量以移动端桥接为主）。
+> 结论生成时间：2026-11-14；代码基线覆盖至 `cebdabd5883de1d5a62c96ae4084de6ad036b32f`（相对 `22d051f5d18ad83a4c6083683342ab41d7850149` 的 gateway 增量为 `app.py` 侧设备/command 密钥常量时间比对）。
 
-> 说明：本文档描述的是 **IM 远程指令网关**（飞书/企业微信/钉钉/Slack/Telegram/QQ/微信 → 云端 Gateway → 本机 Agent），与 `conclusions/server_gateway_conclusion.md`（API 服务网关）是不同模块，不要混淆。
+> 说明：本文档描述的是 **IM 远程指令网关**（飞书/企业微信/钉钉/Slack/Telegram/QQ/微信 → 云端 Gateway → 本机 Agent），与 `conclusions/_archive/server_gateway_conclusion.md`（API 服务网关，已归档）是不同模块，不要混淆。
 
 ## 模块概述
 
@@ -66,6 +66,8 @@ agenticx/gateway/
 **二维码对外 URL**：`POST /api/connect/session` 生成 QR 时优先 `gateway.server.public_base_url`，未配置则退回 `request.base_url`（桌面用 localhost 时手机不可扫）。
 
 **生命周期**：`startup`/`shutdown` 钩子负责启停 `WeChatILinkAdapter`；各适配器按配置 `enabled` 条件实例化并挂到 `app.state`。
+
+**密钥比对**：模块级 `_secret_equals(expected, candidate)` 用 `secrets.compare_digest` 对期望值与候选串做 UTF-8 常量时间相等判断；`expected` 为空或缺失一律视为不匹配。`_require_device_token`、`POST /api/command`（`command_api_secret` 与 `x-agx-command-secret` / body·query `token`，以及回退的 `devices.auth_tokens`）与 `WebSocket /ws/device/{device_id}` 的 query `token` 均经此函数校验，不再使用明文 `==`。
 
 ### 消息路由 (router.py)
 

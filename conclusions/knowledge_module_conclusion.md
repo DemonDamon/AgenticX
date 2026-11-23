@@ -1,8 +1,8 @@
 # agenticx.knowledge 模块结论
 
-> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更）
+> 结论更新时间：2026-11-14（覆盖基线 `22d051f5` → 目标 `cebdabd5`）
 >
-> Maintainer-facing summary for `agenticx/knowledge` (~35 tracked files).
+> Maintainer-facing summary for `agenticx/knowledge` (~59 tracked files).
 
 ## Responsibility
 
@@ -13,7 +13,8 @@
 - 文档抽象与读写：`Document` / `DocumentMetadata`、`readers.*`、`get_reader` 扩展点。
 - 分块框架：`ChunkingFramework`、多种 Chunker（recursive / semantic / agentic 等）及 `get_chunker` 注册表。
 - 文档处理与结构抽取：`DocumentProcessor` 多 backend 选型；`ContentExtractor` 结构元素模型。
-- 知识图谱：`KnowledgeGraphBuilder` + SPO 抽取、质量校验、社区发现、Neo4j 导出（可选）。
+- 知识图谱：`KnowledgeGraphBuilder` + SPO 抽取、质量校验、社区发现、Neo4j 导出（可选）；K3 增量管线（`graphers/incremental`）与可插拔发布存储（`graphers/store`）。
+- 知识对象生命周期（K2）：`lifecycle/` 下 `KnowledgeObject` 状态机、JSON 文件存储、变更留痕、质量检查与 Issue 治理。
 - 向量知识库门面：`Knowledge` 类封装 `BaseVectorStorage` + `BaseEmbeddingProvider` 的 CRUD/search。
 - 检索意图编排：`KnowledgeSearchOrchestrator`（`FORCE` vs `INTENT`）。
 
@@ -37,6 +38,10 @@
 | `DocumentProcessor.process_document` | 按复杂度自动或指定 backend 解析单文件 |
 | `KnowledgeGraphBuilder.build_from_texts` | 文本列表 → Entity/Relationship 图 |
 | `KnowledgeSearchOrchestrator.search` | 强制检索或 LLM 意图门控后再检索 |
+| `agenticx.knowledge.lifecycle` | K2：`KnowledgeObjectFileStore`、`run_quality_checks`、`IssueFileStore`、`ingest_with_idmapping` |
+| `IncrementalGraphSync.sync` | K3：源文档指纹 → 增量抽取 → 可选审核/发布 → `GraphStore` |
+| `create_graph_store()` | K3 发布 SoT：`Neo4jGraphStore`（`NEO4J_URI`）或测试用 `InMemoryGraphStore` |
+| `GraphStore.neighborhood` / `subgraph` | 图谱读取唯一推荐门面（经 `query.build_neighborhood` / `build_subgraph`） |
 | `agenticx.studio.kb.runtime._chunk_with_agenticx` | Studio 入库分块适配层（失败回落 naive split） |
 | `agenticx.tools.document_text` | 工具层通过 `get_reader` 读文档 |
 | `agenticx.llms.llm_factory` | 读取 `knowledge.graphers.config.LLMConfig` 构造 LLM |
@@ -84,6 +89,37 @@ flowchart LR
 
 - `KnowledgeGraphBuilder` 经 `LlmFactory.create_llm(LLMConfig)` 获取 LLM；默认 `extraction_method='spo'`（传统分离抽取已移除）。
 - `networkx` 为可选依赖（`agenticx[graph]`）；Neo4j 导出为惰性加载：`graphers/__init__.py` 通过模块级 `__getattr__`（PEP 562）在首次访问 `Neo4jExporter` / `Neo4jExporterContext` / `NEO4J_AVAILABLE` 时才 import `neo4j_exporter`，包初始化阶段不再触发 neo4j 驱动导入；驱动缺失时 `NEO4J_AVAILABLE=False`（`GraphDatabase` 置 `None`），且 import 期不再打印 warning，仅在实例化 `Neo4jExporter` 时抛 `ImportError`。
+- K3 增量发布与读取走 `GraphStore`：`create_graph_store()` 在 `NEO4J_URI` 已配置时默认 `Neo4jGraphStore`（MERGE 增量 upsert）；`FileGraphStore` 仅测试/离线 fixture，不得作生产 SoT。与批式 `Neo4jExporter` 路径并列，勿混用职责。
+
+**路径 F — 知识对象生命周期（K2，`lifecycle/`）**
+
+```mermaid
+flowchart LR
+  I[upsert / ingest_with_idmapping] --> O[KnowledgeObjectFileStore]
+  O --> Q[run_quality_checks]
+  Q --> IS[IssueFileStore]
+  O --> T[transition DRAFT → PENDING_REVIEW → PUBLISHED]
+  T --> TR[ChangeTrailStore]
+```
+
+- 状态机见 `KnowledgeStatus` / `ALLOWED_TRANSITIONS`；非法跳转抛 `KnowledgeTransitionError`。
+- 默认持久化目录：`resolve_store_dir()` → `AGX_KNOWLEDGE_LIFECYCLE_STORE_DIR` 或 cwd 下 `.runtime/knowledge-lifecycle/objects.json`。
+
+**路径 G — 图谱增量同步（K3，`graphers/incremental/`）**
+
+```mermaid
+flowchart TD
+  SD[SourceDocument list] --> FP[SourceChangeTracker → ChangeSet]
+  FP --> AF[SourceObjectIndex.resolve_affected]
+  AF --> EX[Extractor → apply_extraction → K2 drafts]
+  EX --> RV{auto_publish?}
+  RV -->|yes| PU[publish_objects → publish_to_store]
+  PU --> GS[GraphStore]
+  RV -->|removed sources| RT[retire objects / retire_from_store]
+```
+
+- `IncrementalGraphSync` 串联指纹、`SyncRunStore` 运行留档与可选 `mirror_knowledge_graph`（进程内 `KnowledgeGraph` 镜像，兼容旧路径）。
+- 增量状态目录：`resolve_incremental_store_dir()` → `AGX_GRAPH_INCREMENTAL_STORE_DIR` 或 `.runtime/graph-incremental`。
 
 **路径 E — 检索编排（`KnowledgeSearchOrchestrator`）**
 
@@ -107,6 +143,11 @@ flowchart LR
 | `SPOExtractor` / `SchemaGenerator` | LLM 模式/schema + 三元组抽取 |
 | `GraphQualityValidator` / `CommunityDetector` / `GraphOptimizer` | 图质量、社区、优化 |
 | `Neo4jExporter` | 可选图导出 |
+| `GraphStore` / `create_graph_store` / `Neo4jGraphStore` | K3 发布与读取后端 |
+| `IncrementalGraphSync` / `SourceChangeTracker` / `Extractor` | K3 增量编排与可插拔抽取 |
+| `KnowledgeObject` / `KnowledgeObjectFileStore` / `ChangeTrailStore` | K2 对象与留痕 |
+| `run_quality_checks` / `IssueFileStore` / `KnowledgeIssue` | K2 质量与 Issue 闭环 |
+| `ingest_with_idmapping` | IdMappingEngine 合并结果落 K2 草稿 |
 | `KnowledgeSearchOrchestrator` | `KnowledgeRecognitionMode.FORCE` / `INTENT` |
 
 ## Data and configuration
@@ -118,14 +159,17 @@ flowchart LR
 | `GraphRagConfig` / `LLMConfig` | `graphers/config.py` | 图谱抽取、社区检测、强模型等；也被 `LlmFactory` 复用 |
 | `agenticx/configs/knowledge_graphers_config.yml` | 仓库 configs | GraphRAG 示例/默认配置源 |
 | 向量/嵌入 | 调用方注入 | `Knowledge` 不内置存储；由 `agenticx.storage` / `agenticx.embeddings` 提供 |
+| `AGX_KNOWLEDGE_LIFECYCLE_STORE_DIR` | 环境变量 | K2 对象/Issue/留痕 JSON 根目录 |
+| `AGX_GRAPH_INCREMENTAL_STORE_DIR` | 环境变量 | K3 指纹、source_index、sync_runs 根目录 |
+| `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | 环境变量 | `Neo4jGraphStore` 默认连接（见 `neo4j_settings_from_env`） |
 
-持久化路径**不在**本模块内定义；Studio KB 与 Brain 各自管理 `~/.agenticx/` 下的 chroma/registry 目录。
+持久化路径：向量 KB 仍由 Studio KB / Brain 管理 `~/.agenticx/`；K2/K3 默认落在进程 cwd 下 `.runtime/*`（见上表 env 覆盖），图谱生产 SoT 以 Neo4j 为准。
 
 ## Dependencies
 
-- **inward：** `agenticx.embeddings.base.BaseEmbeddingProvider`、`agenticx.storage.base.BaseVectorStorage`、`agenticx.retrieval.base.BaseRetriever`（`BaseKnowledge` 可选 retriever 字段）、`agenticx.llms.LlmFactory`（graphers）。
+- **inward：** `agenticx.embeddings.base.BaseEmbeddingProvider`、`agenticx.storage.base.BaseVectorStorage`、`agenticx.retrieval.base.BaseRetriever`（`BaseKnowledge` 可选 retriever 字段）、`agenticx.llms.LlmFactory`（graphers）、`agenticx.data_suite.idmapping.engine.IdMappingEngine`（`lifecycle.idmap_hook`）。
 - **optional：** `networkx`（图算法）、Neo4j 驱动（导出）、各 Reader 的三方库（PDF/Word/PPT 等，按 reader 懒加载）。
-- **outward consumers：** `studio/kb/runtime`（chunker）、`tools/document_text`（reader）、`storage/graph_storages/neo4j.py`（图模型）、`integrations/agentkit/knowledge_bridge.py`、`examples/agenticx-for-graphrag/*`。
+- **outward consumers：** `studio/kb/runtime`（chunker）、`tools/document_text`（reader）、`storage/graph_storages/neo4j.py`（图模型）、`integrations/agentkit/knowledge_bridge.py`、`examples/agenticx-for-graphrag/*`；Enterprise admin 图谱增量 / 知识生命周期 UI 消费 `graphers/store.query_cli` 与 K2/K3 store（实现不在本模块）。
 
 ## Tests and operations
 
@@ -147,3 +191,5 @@ flowchart LR
 - `BaseKnowledge` 抽象 API（sync `add_content` / `search`）与具体实现 `Knowledge`（全 async）在接口形态上不完全一致，调用方需以 `Knowledge` 为准。
 - `DocumentProcessor` 的 `VLMLayoutBackend` 能力取决于 feature flag 与外部模型/API，仓库内未见端到端生产化接线至 Studio KB 主路径。
 - `KnowledgeGraphBuilder` 对 repo 根目录 `PromptManager` 的动态 import 在标准包安装布局下可能不可用，GraphRAG 更多见于 `examples/` 而非 Near 默认功能。
+- K3 `IncrementalGraphSync` 依赖调用方注入具体 `Extractor`（库内示例为确定性 mock）；未接 LLM/领域本体时仅保证管线与存储契约。
+- `graphers/store/query_cli.py` 为 admin 桥接 CLI（stdin JSON op），非 Desktop/Near 默认入口。

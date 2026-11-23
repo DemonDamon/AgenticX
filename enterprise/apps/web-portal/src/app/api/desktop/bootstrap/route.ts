@@ -9,6 +9,7 @@ const DEFAULT_AGENT_ACTIONS = {
   deniedTools: [] as string[],
   alwaysAskTools: [] as string[],
   disableSessionAllow: false,
+  traceContent: false,
 };
 
 function isMissingCapabilityRelation(error: unknown): boolean {

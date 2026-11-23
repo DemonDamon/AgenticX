@@ -3,6 +3,7 @@ package server
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
@@ -109,7 +110,11 @@ func (s *Server) runChatQuotaGate(
 	estimatedInputTokens int,
 	reserveTokens int64,
 ) (quota.CheckResult, billing.Reservation, bool) {
-	estimatedCost := s.estimateRequestCostUSD(req.Model, estimatedInputTokens)
+	costModel := req.Model
+	if strings.TrimSpace(qctx.Model) != "" {
+		costModel = qctx.Model
+	}
+	estimatedCost := s.estimateRequestCostUSD(costModel, estimatedInputTokens)
 	if s.useChannelRelay() {
 		reservation := s.billingService.ReserveContext(qctx, reserveTokens, estimatedCost)
 		if !reservation.Allowed {

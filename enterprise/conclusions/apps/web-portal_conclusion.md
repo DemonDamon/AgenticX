@@ -1,12 +1,12 @@
 # AgenticX Enterprise web-portal 模块总结
 
-> 结论生成时间：2026-07-21（基于当前 worktree 代码重写，覆盖旧版）
+> 结论生成时间：2026-11-14（基于目标提交 `cebdabd5`）
 
 > 说明：本文档描述 **员工前台**（Next.js 15 App Router 实现的消费端入口）。与 `apps/admin-console`（管理员后台）是**两个独立的 Next.js app**，部署端口默认 `:3000`。
 
 ## 模块概述
 
-`apps/web-portal` 是 AgenticX Enterprise 面向员工（end-user）的前台 Web 应用，Next.js 15 + React 19 + App Router + Turbopack。它的角色是**消费端入口**：员工在这里与 LLM 对话、管理个人设置、查看配额、通过本地账密 / OIDC / SAML SSO 登录。Portal 层故意做得很薄 —— 大量重业务逻辑放在 workspace 包（`@agenticx/feature-chat`、`feature-settings`、`feature-model-service`、`feature-knowledge-base`）以及 `@agenticx/iam-core` / `@agenticx/auth` 里。Portal 主要负责**把这些 feature 装到路由、拥有 workspace 外壳 UI、处理 session cookie、提供 Next.js API Route 适配器**来调用共享 core。
+`apps/web-portal` 是 AgenticX Enterprise 面向员工（end-user）的前台 Web 应用，Next.js 15 + React 19 + App Router + Turbopack。它的角色是**消费端入口**：员工在这里与 LLM 对话、管理个人设置、查看配额、通过本地账密 / OIDC / SAML SSO 登录；同时承载协作房间智能体回复、Desktop 员工分身发布、运行时消歧、数据查询 ACL 等服务端适配。共享认证、IAM、模型与 Agent 版本能力仍由 `@agenticx/auth`、`@agenticx/iam-core` 和 workspace feature 包提供，Portal 负责把这些能力装配到页面、session cookie 与 Next.js API Route。
 
 ## 定位 / 栈 / 端口
 
@@ -27,11 +27,14 @@ apps/web-portal/
 ├── public/
 └── src/
     ├── app/                    # Next.js App Router（页面 + API 路由）
-    │   ├── layout.tsx              # 根布局：theme bootstrap 脚本、NextIntlClientProvider、AppProviders
+    │   ├── layout.tsx              # 根布局：theme bootstrap、i18n/providers、全页合规水印
     │   ├── page.tsx                # 根：有 session 跳 /workspace，否则跳 /auth
     │   ├── globals.css
     │   ├── auth/page.tsx           # 登录 / 注册 / SSO 入口（client component，410 行）
     │   ├── workspace/page.tsx      # 服务端 auth gate，渲染 <WorkspaceShell/>
+    │   ├── workspace/
+    │   │   ├── citations/page.tsx     # 引用证据脱敏 fixture 展示
+    │   │   └── disambiguation/page.tsx # 运行时消歧选择面板
     │   └── api/                    # 所有后端端点（见路由表）
     ├── components/             # portal 专属 React UI（shell + chat 视图 + 设置）
     │   ├── WorkspaceShell.tsx      # 三栏 workspace 主壳（555 行）
@@ -39,7 +42,9 @@ apps/web-portal/
     │   ├── MachiChatView.tsx       # "Machi" 品牌化对话界面（722 行）
     │   ├── QuotaCard.tsx           # 用户 / 部门配额进度卡（184 行）
     │   ├── SessionGeneratingDots.tsx # 会话生成中的动态三点动画（37 行）
-    │   └── settings/SettingsPanel.tsx # 分 tab 设置面板（605 行）
+    │   ├── PageWatermark.tsx       # 非交互式对角线页面水印
+    │   ├── disambiguation/DisambiguationChoicePanel.tsx # 三种消歧模式交互
+    │   └── settings/SettingsPanel.tsx # 分 tab 设置面板
     ├── lib/                    # 服务端辅助（API 路由共用）
     │   ├── session.ts              # getSessionFromCookies() —— access 校验 + refresh 自动刷新 + PG hydrate
     │   ├── auth-runtime.ts         # AuthService 装配 + IAM repos + 审计 + dev 引导 + SSO JIT 登录
@@ -55,6 +60,10 @@ apps/web-portal/
     │   ├── chat-message-order.ts   # normalizeChatMessageOrder —— 修正同轮 user/assistant 时间戳倒挂
     │   ├── chat-message-sanitize.ts # sanitizeInboundMessages —— 入站消息角色/长度/附件校验
     │   ├── admin-providers-reader.ts # 只读 admin 配置的 providers + 用户可见性（PG/MySQL 双方言）
+    │   ├── desktop-agent-catalog.ts # Desktop Agent 卡片与安全 manifest 摘要
+    │   ├── desktop-agent-publish.ts # 员工分身建档、版本追加与并发冲突处理
+    │   ├── disambiguation-runtime-store.ts # runtime sessions.json 存储与响应校验
+    │   ├── data-query-acl.ts       # 示例取数 ACL 与强制字段脱敏
     │   ├── effective-models.ts    # 可见模型级联收窄纯函数（部门祖先链 → 用户级）
     │   ├── provider-api-key-crypto.ts # 重导出 iam-core 的 decryptProviderApiKey（server-only）
     │   ├── sso-runtime.ts          # OIDC/SAML 客户端 service（server-only）+ provider 配置加载
@@ -77,6 +86,8 @@ apps/web-portal/
 | `/` | 服务端 redirect —— 有 session 跳 `/workspace`，否则跳 `/auth`（`src/app/page.tsx`）|
 | `/auth` | 登录 + 注册表单 + WeChat / 企业 SSO / GitHub 按钮；读 `?sso_error=` 和 `?returnTo=`（`src/app/auth/page.tsx`，410 行）|
 | `/workspace` | 鉴权后的员工 workspace —— 服务端 `getSessionFromCookies()` gate，渲染 `<WorkspaceShell userEmail userScopes/>` |
+| `/workspace/citations` | 鉴权后的引用证据 fixture 页，使用 `CitationEvidencePanel` 展示脱敏出处 |
+| `/workspace/disambiguation` | 鉴权后的运行时消歧面板，处理候选选择、信息补充与冲突裁决 |
 | `/projects` | 协作项目列表 —— `getWorkspaceSessionFromCookies()` gate，未登录跳 `/auth`，须改密跳 `/auth/change-password`，渲染 `<ProjectListView/>` |
 | `/projects/[projectId]` | 单项目详情 —— 同上 gate，渲染 `<ProjectDetailView/>` |
 
@@ -90,6 +101,7 @@ apps/web-portal/
 - `session` —— 当前 session 探测（GET）
 - `sso/oidc/start` & `sso/oidc/callback` —— OIDC PKCE 流程（state cookie `agenticx_oidc_state_portal`，含审计 + provider-disabled / fallback 测试）
 - `sso/saml/start` & `sso/saml/callback` —— SAML SP 流程（cookie policy + 失败审计测试）
+- 两套 SSO start/callback 在读取 provider 前均经 `assertPortalSsoStrategyProtocol()` 校验 `AuthStrategyRegistry` 解析结果，策略不存在或协议错配统一按 provider 未配置拒绝。
 
 **Chat（`/api/chat/*`）**
 - `completions` —— 转发 chat 流式响应到 gateway；含 session 归属校验 + 实时模型可见性收窄 + `provider/model` 拆分到 `x-agenticx-provider` 头；联网搜索 / 深度研究走能力包开关 + `feature-usage/gate` 计量（429/503 用户可读文案）；可注入 enterprise skill 提示与历史 feedback 召回
@@ -100,10 +112,20 @@ apps/web-portal/
 - `sessions/[sessionId]/messages` —— GET 取消息 / POST 追加或全量替换（经 `sanitizeInboundMessages` 校验）
 
 **Me（`/api/me/*`）**
-- `models` —— 可见模型子集（部门 + 用户级联收窄）+ `deptDefaultModelId`（`readDeptDefaultModelForUser`）
+- `models` —— 可见模型子集（部门 + 用户级联收窄）+ 可见 target 全部满足的已启用虚拟模型 + `deptDefaultModelId`（`readDeptDefaultModelForUser`）
 - `agents` —— 当前用户 assignment keys 下可见的企业 Agent 列表（iam-core `listAgentsVisibleToKeys`）
 - `skills` —— 能力包视图中 `kind=skill` 且扫描为 safe、state=on 的可选技能（供会话侧选用）
 - `api-tokens` —— 个人访问令牌（PAT）CRUD，委托 iam-core `createPat` / `listPats` / `revokePat`
+- `ecp/platform-introduce` —— 登录用户提交平台目录引入审批，复用 admin-console 的 `submitPlatformIntroduceRequest()`。
+
+**Desktop Agent（`/api/desktop/agents/*`）**
+- 列表与详情返回 MA 版本、路由、默认环境、执行目标、归属标记及不含 MCP URL 的 manifest 摘要；详情仍受 assignment keys 可见性约束。
+- `drafts` / `drafts/[agentId]` 仅列出和读取当前用户拥有的 employee Agent 及指定版本。
+- `publish` 将本机分身发布为 employee Agent：首次建档，后续按 manifest hash 幂等追加版本；已发布且 follow-latest 时先 pin 当前生效版本，并对并发版本冲突重读后重试一次。
+
+**运行时消歧与数据查询**
+- `/api/disambiguation/sessions*` 提供会话列表、创建、详情、回答；`/api/disambiguation/seed` 重置脱敏样例，文件存储与 admin 消歧目录隔离。
+- `/api/data-suite/query` 是带 session gate 的最小自助取数入口；`checkQueryAccess()` 按角色、数据集、看板和字段拒绝越权，`secureQueryRows()` 对 phone/email 强制脱敏。
 
 **Projects（`/api/projects/*`）**
 - `projects` —— GET 列出当前用户可见协作项目（`collab-room` `listProjects`）
@@ -132,7 +154,7 @@ apps/web-portal/
 
 ### 4. Settings (`src/components/settings/SettingsPanel.tsx`，605 行)
 
-分 tab 面板：`general` / `model-service`（provider 配置）/ `defaults` / `web-search` / `parser` / `chat`（style 变体：`im` | `terminal` | `clean`，存 `agx-enterprise-chat-style`）。含 PAT 管理（拉 `/api/me/api-tokens`，创建后展示明文一次）。
+分 tab 面板：`general` / `model-service`（provider 配置）/ `defaults` / `web-search` / `parser` / `chat`（style 变体：`im` | `terminal` | `clean`，存 `agx-enterprise-chat-style`）。含 PAT 管理（拉 `/api/me/api-tokens`，创建后展示明文一次），General 区提供 `/workspace/disambiguation` 入口。
 > **诚实标注**：此面板的 provider 配置（deepseek 等列表）目前是**前端本地 state + localStorage**，并未真正写库 —— 真正的 provider 配置由 admin-console 写 `enterprise_runtime_*` 表，portal 侧只读。portal 设置面板的 provider tab 偏「用户偏好」展示，不是写入入口。
 
 ### 5. Quota (`src/components/QuotaCard.tsx`，184 行)
@@ -164,9 +186,13 @@ apps/web-portal/
 | `chat-message-order.ts` | `normalizeChatMessageOrder` —— 修正同轮 assistant 排在 user 之前的倒挂；`pairedMessageTimestamps` —— user 时间戳在前、assistant 严格晚 1ms |
 | `chat-message-sanitize.ts` | `sanitizeInboundMessages` —— 入站消息 role 白名单、内容长度（128k）、附件数量（≤4）/ mime（image/*）/ data URL 大小（≤8MB）校验 |
 | `admin-providers-reader.ts` | 只读 admin 配置的 model providers + per-user 可见性表（PG/MySQL 双方言，`migrateLegacyUserVisibleModelsIfNeeded`），`listAvailableModelsForUser()` 做部门祖先链 + 用户级级联收窄，含 legacy admin email → user_id 映射兜底 |
+| `desktop-agent-catalog.ts` | `toDesktopAgentCard()` 合并企业 Agent、MA 版本和 active environment；`buildManifestSummary()` 容错提取模型、工具策略、技能、轮次和欢迎信息，刻意不复制 MCP URL |
+| `desktop-agent-publish.ts` | `publishEmployeeAgentVersion()` 以 owner + `localAvatarId` 定位员工 Agent，负责 slug 生成、manifest 校验、hash 幂等、路由 pin 与乐观并发重试 |
+| `disambiguation-runtime-store.ts` | runtime `sessions.json` 的 seed/list/get/create/respond；`validateRequest()` / `validateResponse()` 校验三种交互模式并把结果写入 slots |
+| `data-query-acl.ts` | `checkQueryAccess()` 与 `secureQueryRows()` 实现示例数据集的 default-deny ACL 和 phone/email 强制 masking；当前返回的是 `SAMPLE_QUERY_ROWS`，不是通用数据查询引擎 |
 | `effective-models.ts` | 可见模型级联收窄纯函数（`computeEffectiveDeptAllowed` / `mergeUserStoredSet` / `computeEffectiveUserAllowed` / `collectUserAssignmentKeys`），与 admin-console 同名文件语义一致（92 行）|
 | `provider-api-key-crypto.ts` | 从 `@agenticx/iam-core` 重导出 `decryptProviderApiKey`（仅服务端，2 行）|
-| `sso-runtime.ts` | OIDC/SAML 客户端 service（`server-only`）、discovery 降级上报、provider 配置加载、`decryptSecret`、重导出 `resolveReturnToOrDefault`（211 行）|
+| `sso-runtime.ts` | OIDC/SAML 客户端 service（`server-only`）、`AuthStrategyRegistry` 协议门禁与策略 endpoint 解析、discovery 降级上报、provider 配置加载、`decryptSecret`、重导出 `resolveReturnToOrDefault` |
 | `sso-return-to.ts` | 安全的 `returnTo` 解析（带 `SSO_RETURN_TO_ALLOWLIST` env）（12 行）|
 | `sso-provider-options.ts` | 解析 `NEXT_PUBLIC_SSO_PROVIDERS`（`id:name:protocol` 格式，protocol ∈ oidc/saml，默认 oidc）；`pickPreferredSsoProvider()` 偏好 OIDC（39 行）|
 | `portal-copy.ts` | 已废弃 `usePortalCopy()` shim（包 `useTranslations("portal")`，6 行）|
@@ -183,7 +209,7 @@ apps/web-portal/
 - **SSO**：`openid-client ^6.0.0`（OIDC PKCE）；SAML 走 `@agenticx/auth`
 - **ID**：`ulid ^2.3.0` for chat sessions
 - **服务端边界**：`server-only` 防止 secret 泄漏到 client bundle
-- **测试**：`vitest ^4.1.5`（chat-history 契约 + SSO 各路由 + quota + auth-scopes + admin-providers-reader）
+- **测试**：`vitest ^4.1.5`（chat-history 契约 + SSO 策略协议门禁 + Desktop Agent 发布/目录 + MA runtime + 消歧 + data-query ACL + quota + admin-providers-reader）
 - **Lint**：`eslint-config-next` + `eslint-plugin-i18next`（强制使用 t() 而非硬编码字符串）
 - **部署**：`vercel.json`
 
@@ -214,7 +240,10 @@ apps/web-portal/
 - **鉴权 gate 仍在服务端 page / API**（`getSessionFromCookies()` / `getWorkspaceSessionFromCookies()` → `redirect()`）；`src/middleware.ts` 仅按请求注入 HSTS（`PORTAL_HSTS_MAX_AGE` / `PORTAL_HSTS_DEFAULT_MAX_AGE` → `lib/hsts.ts`），不做登录拦截。静态安全头（CSP `frame-ancestors`、X-Frame-Options、nosniff、Referrer-Policy）在 `next.config.ts` `headers()` 全局下发
 - **Chat 数据流**：浏览器 → `/api/chat/*` → `chat-history.ts` 门面 → `SqlChatHistoryStore`（PG 或 MySQL 原始 SQL）+ ULID session ID；`normalizeChatMessageOrder` 修正同轮时间戳倒挂
 - **模型可见性**：admin-console 写 `enterprise_runtime_model_providers` + `enterprise_runtime_user_visible_models`；portal 通过 `admin-providers-reader.ts` 读 → `effective-models.ts` 做部门祖先链 + 用户级级联收窄 → `/api/me/models` → MachiChatView picker；`completions` 路由还会**实时**复算可见性，防止客户端未刷新时仍转发已失效模型
-- **SSO**：portal 只拥有 `start` / `callback` 路由 + `returnTo` 安全 + state cookie；协议逻辑全部委托 `@agenticx/auth`（OIDC PKCE / SAML SP），JIT 创建用户走 `loginWithOidcClaims` + 角色允许列表（`SSO_JIT_ROLE_ALLOWLIST` / `SSO_DEFAULT_ROLE_CODES`）
+- **SSO**：portal 拥有 `start` / `callback` 路由 + `returnTo` 安全 + state cookie，并通过 `getPortalAuthStrategy()` / `assertPortalSsoStrategyProtocol()` 把 provider 的 `STRATEGY` 与请求协议对齐；OIDC PKCE / SAML SP 协议实现委托 `@agenticx/auth`，JIT 创建用户走 `loginWithOidcClaims` + 角色允许列表（`SSO_JIT_ROLE_ALLOWLIST` / `SSO_DEFAULT_ROLE_CODES`）
+- **协作 Agent**：`agent-reply.ts` 优先把 cloud / desktop_worker Agent 交给 MA runtime；`runManagedAgentReply()` / `runManagedDesktopReply()` 负责建 session、投递上下文事件、SSE 断线续读、超时/中断、工具步骤聚合与系统提示，配置不可用或建会话/投递失败才回退原有 cloud loop / worker queue。
+- **技能完整性**：`loadSkillBody()` 仅访问 HTTPS allowlist，限制下载体积并校验可选 SHA-256 digest；能力读取只下发 active + published skill，prompt 注入也经 `skillShelfAllowsBootstrap()` 再过滤。
+- **构建边界**：`next.config.ts` 在目标提交中设置 `eslint.ignoreDuringBuilds` 与 `typescript.ignoreBuildErrors`，生产构建不会因 lint/type 错误阻断，质量检查需独立执行 `lint` / `typecheck`。
 - **dev 引导**：`ENABLE_DEV_BOOTSTRAP=true` 时创建 `admin@agenticx.local`（强密码 ≥14 位含大小写数字符号），并迁移 legacy `owner@agenticx.local`；旧 owner 密码 hash 不自动迁移
 - **服务端边界**：`sso-runtime.ts` 用 `server-only` 防止 secret 泄漏到 client bundle；`provider-api-key-crypto.ts` 仅服务端重导出解密函数
 
@@ -244,6 +273,10 @@ apps/web-portal/
 - 消息 feedback like/dislike（`/api/chat/feedback`）
 - Chat completions 转发到 gateway（能力包 + 功能计量 gate、skill/feedback 上下文、实时模型可见性、provider 拆头、SSE 透传）
 - `/api/me/models`（含 `deptDefaultModelId`）、`/api/me/agents`、`/api/me/skills`
+- Desktop employee Agent 的目录、详情、草稿版本读取与发布版本链路（`/api/desktop/agents*`）
+- MA runtime 驱动的协作房间 cloud / desktop_worker Agent 回复（带 SSE 续读、超时和原链路 fallback）
+- 运行时消歧会话 API + `/workspace/disambiguation` 交互面板；全页可配置合规水印
+- `/api/data-suite/query` 的示例 ACL + 强制脱敏链路，以及 `/workspace/citations` 脱敏 fixture 展示
 - `/api/workspace/feature-usage` 与 UI `FeatureUsageNotice` 展示计量剩余
 - PAT CRUD（iam-core `createPat` / `listPats` / `revokePat`）
 - `/api/workspace/quota/summary`（iam-core `getQuotaSummaryForSession`）
@@ -252,6 +285,8 @@ apps/web-portal/
 - Desktop 侧案例库 `/api/desktop/cases*`（iam-core `enterprise_cases`，发布态列表 + 我的提交 + 包上传）
 
 **偏 stub / 本地态 / 未上链**：
+- `/api/data-suite/query` 只查询 `SAMPLE_QUERY_ROWS`；`/workspace/citations` 只展示 `buildBrandACitationFixture()`，两者都是契约/演示入口，不是生产数据源。
+- runtime 消歧默认落本地 `.runtime/disambiguation/sessions.json` 并自动 seed 示例化工厂数据，不是 admin-console 的消歧存储，也不是数据库持久化。
 - `SettingsPanel` 的 provider 配置 tab：前端本地 state + localStorage，未真正写库（真实 provider 配置由 admin-console 负责）
 - `WorkspaceClient.tsx`：遗留 `ChatWorkspace` 包装，**未被任何页面引用**，不在主链路
 - `feature-settings` / `feature-model-service` / `feature-knowledge-base` / `feature-iam` / `feature-metering` / `feature-audit` / `feature-policy` / `feature-tools-mcp` / `feature-agents`：已在 `next.config.ts` transpile，但 portal UI 侧多由本地组件实现，这些包尚未在 portal 主链路全面接入（为后续接入预留）
@@ -266,7 +301,7 @@ apps/web-portal/
 
 - **协作房间**：`/api/rooms/**`、`/rooms` 页、`components/rooms/*`、`lib/collab-room/*`（PG/MySQL）。桌面经 `/api/desktop/rooms/**` 同源。
 - **桌面设备登录**：`/api/desktop/auth/device/{init,poll,approve,cancel}` + `/auth/desktop`；`desktop-device-auth.ts`、`desktop-token-policy.ts`。
-- **桌面 bootstrap / capabilities**：`/api/desktop/bootstrap`、`/api/desktop/capabilities`；`capability-packs-reader` / `capability-opt-outs-store`。
+- **桌面 bootstrap / capabilities**：`/api/desktop/bootstrap`、`/api/desktop/capabilities`；`capability-packs-reader` / `capability-opt-outs-store`。bootstrap 经 `desktop-agent-policy-reader` 下发 `policy.agentActions`（含 `traceContent`，读取失败或缺省为 `false`）。
 - **Deep Research**：`src/lib/deep-research/*` 编排器 + `/api/chat/deep-research/runs/**`（stream/export/resume）。
 - **Web Search**：`src/lib/web-search/*` 工具循环、page-fetch、providers、tenant-config；`/api/me/web-search`。
 - **附件 / 产物**：parse、original-store、`/api/chat/attachments/**`、`/api/chat/artifacts/**`、会话 artifacts、batch-delete。
@@ -285,5 +320,5 @@ apps/web-portal/
 - **模型默认**：`/api/me/models` 返回 `deptDefaultModelId`；`admin-providers-reader` / `dept-default-model.ts`。
 - **协作项目 UI**：`/projects`、`/projects/[projectId]`、`components/projects/*`、REST `/api/projects*`；Desktop 镜像 `/api/desktop/projects*`（成员、直聊 room）。
 - **Collab Agent**：`collab-room/agent-reply.ts` — 有在线 Desktop worker 则 `enqueueAgentTask`，否则 `runCloudAgentLoop`（MCP 经 `gateway-mcp-client`）。
-- **Desktop 扩展**：worker claim/complete/fail + heartbeat；`agent-traces`、`action-audit`；目录 `/api/desktop/directory/users`；房间 merge/sub-rooms/summarize；agents register 列表。
+- **Desktop 扩展**：worker claim/complete/fail + heartbeat；`agent-traces`（入库时按租户当前 `traceContent` 策略决定是否保留 metadata 中的 `user_text` / `reply` / `thought`，策略读取失败按不保留处理，旧客户端上传的摘录同样过滤）、`action-audit`；目录 `/api/desktop/directory/users`；房间 merge/sub-rooms/summarize；agents register 列表。
 - **品牌资源**：`public/favicon.ico`、`near-logo.png`、`near-mark.png`。

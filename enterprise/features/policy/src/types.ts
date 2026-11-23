@@ -48,6 +48,8 @@ export type PolicyRulePayload = {
   jsonPath?: string;
   target?: "request" | "response";
   fieldAction?: "allow" | "deny" | "redact";
+  /** 合规类别（politics/porn/terrorism/ad 等，SP3 合规内容审核） */
+  category?: string;
 };
 
 export type PolicyRule = {
@@ -108,6 +110,8 @@ export type PolicyTestHit = {
   message: string | null;
   matched: string;
   stage: PolicyStage;
+  /** 合规类别（SP3 合规内容审核） */
+  category?: string | null;
 };
 
 /** 与已落库规则合并后再跑样本测试（用于未保存的表单改动） */

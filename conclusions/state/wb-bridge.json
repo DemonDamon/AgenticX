@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "wb-bridge",
-  "generation": "e9ad8112e32f4f74b269ad561128897f",
+  "generation": "83b4d71e40d64e5c978a51d3859c5785",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:c5ede50c4f73433ed40108857cd7cd9145004fbe94a4716088f016a7351a211f",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:3848b07cd455a5d0a680de17aa082af92bbc6af185267f1e38aad48e22ca24dd",
   "summary_path": "conclusions/wb_bridge_module_conclusion.md",
-  "summary_sha256": "sha256:92cfdb359361d6217a9d2786202c5d187006e7791a3a892a4ff5f59d51f3d58a",
-  "updated_at": "2026-10-24T13:53:21.439748+00:00"
+  "summary_sha256": "sha256:bcf7de965965f3be4f183f0b207077ecc0c3d56089650448f3500d41eeeec770",
+  "updated_at": "2026-11-14T12:24:35.897139+00:00"
 }

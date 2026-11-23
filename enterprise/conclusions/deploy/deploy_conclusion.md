@@ -1,6 +1,6 @@
 # Enterprise deploy/ 模块总结
 
-> 结论生成时间：2026-07-21（基于当前 `enterprise/deploy/` 全量重生成）
+> 结论生成时间：2026-11-14（target cebdabd5）
 
 > 说明：本文档是 **Enterprise 部署资产目录**的结论。如实核对每个文件实际存在内容，区分「可用模板 / 覆盖层 / 冒烟样例 / 占位」，不夸大未落地的生产能力（如 PG 主从复制、TLS、MySQL 生产 profile）。
 
@@ -65,14 +65,15 @@ deploy/
 
 ### `prod.yml`（生产单机模板，仅 `postgresql` profile）
 
-8 个服务：
+8 个核心服务（另可选 profile `managed-agents` 拉起第 9 个 `agent-runtime`）：
 
 | 服务 | 镜像 | 说明 |
 |---|---|---|
 | `nginx` | `nginx:1.27-alpine` | 公网入口 80/443；挂 `gateway.conf` + `certs/`（只读） |
 | `gateway-a` + `gateway-b` | `ghcr.io/agenticx/enterprise-gateway:latest` | **双副本网关**；挂 `config/policies.yaml` + `../../plugins` 只读 + `gateway_runtime` 共享卷 |
-| `web-portal` | `ghcr.io/agenticx/enterprise-web-portal:latest` | 端口 3000（容器内）；必填 `GATEWAY_INTERNAL_TOKEN`（服务端调网关 internal API，与 gateway/admin 共用 compose 级变量） |
-| `admin-console` | `ghcr.io/agenticx/enterprise-admin-console:latest` | 端口 3001；挂 `gateway_runtime` + `../../plugins` |
+| `web-portal` | `ghcr.io/agenticx/enterprise-web-portal:latest` | 端口 3000（容器内）；必填 `GATEWAY_INTERNAL_TOKEN`；可选 `MA_RUNTIME_ENABLED`（默认 `0`）、`MA_RUNTIME_URL`、`MA_RUNTIME_SERVICE_TOKEN` 对接 Managed Agents 会话面 |
+| `admin-console` | `ghcr.io/agenticx/enterprise-admin-console:latest` | 端口 3001；挂 `gateway_runtime` + `../../plugins`；可选 `MA_INTERNAL_TOKEN`、`MA_VAULT_MASTER_KEY` / `MA_VAULT_MASTER_KEY_PREVIOUS`、`MA_VAULT_RESOLVE_ENABLED`（默认 `1`） |
+| `agent-runtime` | `ghcr.io/agenticx/enterprise-agent-runtime:latest` | **profile `managed-agents`**；`MA_RUNTIME_ADMIN_URL` / `MA_RUNTIME_GATEWAY_URL` 指 admin/gateway；`security_opt` 放开 seccomp/apparmor（bubblewrap）；卷 `agent_runtime_data:/data` |
 | `postgres-primary` | `postgres:16-alpine`（profile `postgresql`） | 主库；`pg_isready` healthcheck |
 | `postgres-replica` | `postgres:16-alpine`（profile `postgresql`） | 从库；`depends_on` primary healthy |
 | `redis` | `redis:7-alpine` | AOF 持久化（`--appendonly yes --save 900/300`） |
@@ -100,7 +101,7 @@ deploy/
 - `worker_processes auto`，`worker_connections 4096`
 - 限流：`limit_req_zone ... rate=20r/s`（zone `api_limit`）+ `limit_conn_zone`（zone `api_conn`）
 - upstream：`gateway_backend`（`least_conn`，`gateway-a:8088` / `gateway-b:8088`，`max_fails=3 fail_timeout=10s`）、`web_portal_backend`（`web-portal:3000`）、`admin_console_backend`（`admin-console:3001`）
-- server listen 80 路由：`/healthz` → gateway；`/v1/`（`burst=60 nodelay` + `limit_conn 40` + 600s 超时）→ gateway；`/api/chat/`（`burst=40` + 600s）→ gateway；`/admin/` → admin_console；`/` → web_portal
+- server listen 80 路由：`/healthz` → gateway；`/v1/`（`burst=60 nodelay` + `limit_conn 40` + 600s 超时）→ gateway；`/api/chat/`（`burst=40` + 1800s，SSE 禁缓冲）→ web_portal；**Managed Agents** `/ma/v1/*`：控制面资源（`agents`/`environments`/`vaults` 等）rewrite 到 `admin-console` `/api/ma/v1/`；`environments/.../work/` 与一般 `/ma/v1/` 经变量 `agent-runtime:8092`（`resolver 127.0.0.11`，未起 runtime 时 nginx 仍可启动、会话面 502）；`/admin/` → admin_console；`/` → web_portal
 
 > 诚实缺口：**仅 listen 80，未配置 TLS**，注释自述「生产建议开启 TLS；此处保留 HTTP 入口用于内网/反向代理上游接入」。`certs/` 目录被挂载但**仓库内未提供证书**。生产前置 TLS 终端或补 TLS server 块是客户侧责任。
 
@@ -188,3 +189,8 @@ deploy/
 - **`prod.yml`**：`web-portal` 新增 **`GATEWAY_INTERNAL_TOKEN`**（`${GATEWAY_INTERNAL_TOKEN:?...}`）；服务/端口/nginx 依赖链不变（仍 `80/443` 入口、`NEXT_PUBLIC_GATEWAY_BASE: http://nginx`）。
 - **`portal.yml`**（覆盖层，`web-portal` 宿主机 **3000:3000**）：同步必填 **`GATEWAY_INTERNAL_TOKEN`**；注释预留 **`PORTAL_HSTS_MAX_AGE`**（仅 HTTPS 且证书稳定后手动开启，默认不注入）。
 - **`gateway_test.yml`**（覆盖层，`gateway-a` **8088:8088**、`gateway-b` **8089:8088**）：`gateway-a`/`gateway-b` 各增可选 **`GATEWAY_REMOTE_BUDGET_CONFIG_URL`**、**`GATEWAY_BUDGET_BACKEND`**（`${...:-}` 空默认，不配则走网关进程内默认）；其余 remote/internal/JWT 必填项与端口映射不变。
+
+## 增量（22d051f5 → cebdabd5）
+
+- **`prod.yml`**：新增可选服务 **`agent-runtime`**（profile **`managed-agents`**，镜像 `ghcr.io/agenticx/enterprise-agent-runtime:latest`）；`web-portal` / `admin-console` 补 Managed Agents 相关 env；卷 **`agent_runtime_data`**。
+- **`nginx/gateway.conf`**：公网入口增加 **`/ma/v1/`** 分流（控制面 → admin-console，会话面 / Worker 长轮询 → agent-runtime；仍仅 listen 80）。

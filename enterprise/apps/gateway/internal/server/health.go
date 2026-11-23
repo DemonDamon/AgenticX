@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agenticx/enterprise/gateway/internal/configstatus"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 )
@@ -92,6 +93,14 @@ func (s *Server) handleInternalPolicyStatus(w http.ResponseWriter, r *http.Reque
 		"message": "ok",
 		"data":    data,
 	})
+}
+
+func (s *Server) handleInternalConfigStatus(w http.ResponseWriter, r *http.Request) {
+	if !gatewayInternalAuthorized(r) {
+		writeAPIError(w, openai.Unauthorized("unauthorized"))
+		return
+	}
+	writeJSON(w, http.StatusOK, configstatus.BuildStatus(s.configStatus, s.startedAt))
 }
 
 func policySnapshotSource(path string) string {
