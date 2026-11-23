@@ -3,7 +3,8 @@
 
 User-facing text is Chinese. This file does not read ~/.agenticx, does not
 clone repositories, and does not push to any remote. Network is used only by
-``doctor`` (a short TCP probe) and by ``submit --execute`` (GitHub CLI).
+``doctor`` (short TCP probes plus one read of the public PyPI version JSON)
+and by ``submit --execute`` (GitHub CLI).
 
 Author: Damon Li
 """
@@ -18,6 +19,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -25,6 +27,12 @@ UPSTREAM_REPO = "DemonDamon/AgenticX"
 UPSTREAM_WEB = "https://github.com/DemonDamon/AgenticX"
 PIN_EXAMPLE = "0.6.5"
 POLICY_VERSION = "v1"
+PYPI_JSON = "https://pypi.org/pypi/agenticx/json"
+SKILL_ROOT = Path(__file__).resolve().parent.parent
+CAPABILITY_PROBES = (
+    ("case", "案例库（agx case search / init / compile）"),
+    ("harness-surface", "多引擎控制面（agx harness-surface list）"),
+)
 
 KIND_ALIAS = {
     "bug": "bug",
@@ -62,6 +70,14 @@ WHERE_ALIAS = {
     "desktop": "desktop",
     "桌面": "desktop",
     "near": "desktop",
+    "client": "client",
+    "mobile": "client",
+    "移动端": "client",
+    "extension": "client",
+    "扩展": "client",
+    "浏览器扩展": "client",
+    "harness": "runtime",
+    "多引擎": "runtime",
     "docs": "docs",
     "文档位置": "docs",
 }
@@ -169,7 +185,8 @@ def normalize(raw: Mapping[str, Any]) -> Dict[str, str]:
         WHERE_ALIAS,
         str(raw.get("where", "")),
         "改动位置 --where",
-        "business/业务、runtime/运行时、protocol/协议、enterprise/企业、desktop/桌面、docs/文档位置",
+        "business/业务、runtime/运行时（含 harness/多引擎）、protocol/协议、enterprise/企业、desktop/桌面、"
+        "client/移动端或浏览器扩展、docs/文档位置",
     )
     cause = _alias(TRI_ALIAS, str(raw.get("cause_clear", "unknown")), "根因 --cause-clear", "yes/明确、no/不明确、unknown/不清楚")
     size = _alias(SIZE_ALIAS, str(raw.get("size", "small")), "范围 --size", "small/小、large/大")
@@ -188,7 +205,7 @@ def normalize(raw: Mapping[str, Any]) -> Dict[str, str]:
     agreed = _alias(
         AGREED_ALIAS,
         str(raw.get("maintainer_agreed", "no")),
-        "维护者是否同意改 enterprise --maintainer-agreed",
+        "维护者是否同意改 enterprise 或 client --maintainer-agreed",
         "yes/是、no/否",
     )
     can_fix = _alias(FIX_ALIAS, str(raw.get("can_fix", "yes")), "这边能否改代码 --can-fix", "yes/能、no/不能")
@@ -369,7 +386,7 @@ def classify(raw: Mapping[str, Any]) -> Dict[str, Any]:
             reason,
             (
                 "用 draft 写下现象、期望、合成复现步骤、版本和操作系统。",
-                "enterprise 目录（门户、管理台、网关）在维护者同意前只开 Issue。",
+                "enterprise 目录（门户、管理台、网关）与 client（mobile/、extension/）在维护者同意前只开 Issue。",
                 "提交失败就把草稿留下，告诉用户尚未提交，并写上失败原因。",
             ),
             ("不要把密钥、利用细节或客户环境写进 Issue。",),
@@ -416,7 +433,7 @@ def classify(raw: Mapping[str, Any]) -> Dict[str, Any]:
         )
 
     if can_fix == "no":
-        if kind == "feat" and others == "unknown" and where != "enterprise":
+        if kind == "feat" and others == "unknown" and where not in {"enterprise", "client"}:
             return ask(
                 "先分清：这是只给当前项目用的功能，还是不看这家客户的规则、其他 AgenticX 用户也需要？"
                 "只给当前项目用就加 --others-need no；其他用户也需要就加 --others-need yes。"
@@ -444,6 +461,16 @@ def classify(raw: Mapping[str, Any]) -> Dict[str, Any]:
         )
     if where == "enterprise" and agreed == "yes":
         return upstream_pr("维护者已经在 Issue 里同意修改 enterprise/。PR 里仍然不要写部署细节和客户信息。")
+    if where == "client" and agreed != "yes":
+        return upstream_issue(
+            "官方仓库里的 mobile/（移动端）和 extension/（浏览器扩展）还没写进贡献说明的仓库地图。"
+            "贡献说明要求改动面不清楚时先在 Issue 里确认。请先开 Issue，等维护者同意再提 PR。"
+            "这家客户自己的换皮或私有接入不在这里，用 --where business。",
+            must_check=kind in {"security", "deps"} and upstream == "unknown",
+            pr=False,
+        )
+    if where == "client" and agreed == "yes":
+        return upstream_pr("维护者已经在 Issue 里同意修改 mobile/ 或 extension/。PR 只改约定的那一处。")
 
     if kind == "style" and others != "yes":
         return local_only("文案、样式或客户规则留在当前仓库，不触发上游查阅。")
@@ -678,6 +705,31 @@ def _run(cmd: Sequence[str], timeout: int) -> Tuple[int, str]:
     return completed.returncode, output.strip()
 
 
+def pypi_latest(timeout: float = 5.0) -> Tuple[Optional[str], str]:
+    """Return (version, error) for the public agenticx release. Sends no project data."""
+    try:
+        with urllib.request.urlopen(PYPI_JSON, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, str(exc)
+    version = str((data.get("info") or {}).get("version") or "").strip()
+    return (version or None), ("" if version else "PyPI 没有返回版本号")
+
+
+def probe_capabilities(agx_path: str) -> List[str]:
+    """Check newer agx command groups by running their --help. Same version string may differ in content."""
+    lines: List[str] = []
+    for command, label in CAPABILITY_PROBES:
+        code, _ = _run([agx_path, command, "--help"], 30)
+        if code == 0:
+            lines.append(f"新能力 {label}：可用。")
+        elif code == 124:
+            lines.append(f"新能力 {label}：30 秒内没有返回，先当作未知，不要说已经可用。")
+        else:
+            lines.append(f"新能力 {label}：当前安装里没有。PyPI 发布包可能还没带上，不要照着写这条命令。")
+    return lines
+
+
 def doctor() -> Tuple[str, int]:
     """Check the local machine. Never reads ~/.agenticx or environment secrets."""
     version = sys.version_info
@@ -724,6 +776,7 @@ def doctor() -> Tuple[str, int]:
         if code == 0:
             first = output.splitlines()[0] if output else "有输出但没有版本行"
             lines.append(f"agx 命令：可用。{first}")
+            lines.extend(probe_capabilities(agx_path))
         elif code == 124:
             lines.append("agx 命令：找到了，但 20 秒内没有返回。这通常是 Python 冷启动慢，不是项目创建失败。")
             lines.append(f"下一步：再直接执行一次 \"{agx_path}\" --version。仍无输出时，把完整报错留下来。")
@@ -749,6 +802,12 @@ def doctor() -> Tuple[str, int]:
     pypi_error = _tcp("pypi.org", 443)
     if pypi_error is None:
         lines.append("连接 pypi.org:443：成功。")
+        latest, latest_error = pypi_latest()
+        if latest:
+            note = "与骨架示例版本一致。" if latest == PIN_EXAMPLE else f"骨架示例写的是 {PIN_EXAMPLE}，新项目以 {latest} 或你们验证过的版本为准。"
+            lines.append(f"PyPI 上 agenticx 的最新发布版：{latest}。{note}")
+        else:
+            lines.append(f"PyPI 版本号：没读到（{latest_error}）。安装前用 pip index versions agenticx 再看一次。")
     else:
         lines.append("连接 pypi.org:443：失败。pip 安装官方包会超时或报无法连接。")
         lines.append(f"原因：{pypi_error}")
@@ -757,7 +816,7 @@ def doctor() -> Tuple[str, int]:
         lines.append(f"{mirror_py} -m pip install agenticx -i https://pypi.tuna.tsinghua.edu.cn/simple")
 
     lines.append(other_os_hint())
-    lines.append("本检查不会读取 ~/.agenticx，也不会上传任何文件。")
+    lines.append("本检查不会读取 ~/.agenticx，也不会上传任何文件。联网只做端口探测和读取 PyPI 公开的版本号。")
     return "\n".join(lines), exit_code
 
 
@@ -1052,7 +1111,7 @@ def build_draft(
 ## 公开前确认
 
 - 没有客户名称、密钥、令牌、私钥、内网地址和真实业务数据
-- 若涉及 enterprise/（门户、管理台、网关），只开 Issue，除非维护者已经在 Issue 里同意
+- 若涉及 enterprise/（门户、管理台、网关）或 mobile/、extension/，只开 Issue，除非维护者已经在 Issue 里同意
 - 目标仓库是 {UPSTREAM_WEB} ，PR 指向 main，但不直接推送 main
 """
     return redact_private(body, hide_words)
@@ -1126,6 +1185,11 @@ def self_test() -> Tuple[str, int]:
         ({"kind": "缺陷", "where": "运行时", "cause_clear": "明确", "size": "小", "others_need": "需要"}, "local-fix", False, False),
         ({"kind": "bug", "where": "desktop", "cause_clear": "yes", "size": "small", "can_fix": "no"}, "upstream-issue", True, False),
         ({"kind": "bug", "where": "enterprise", "size": "small", "cause_clear": "yes"}, "upstream-issue", True, False),
+        ({"kind": "bug", "where": "mobile", "cause_clear": "yes", "size": "small"}, "upstream-issue", True, False),
+        ({"kind": "feat", "where": "浏览器扩展", "others_need": "yes"}, "upstream-issue", True, False),
+        ({"kind": "feat", "where": "extension", "can_fix": "no"}, "upstream-issue", True, False),
+        ({"kind": "bug", "where": "client", "maintainer_agreed": "yes"}, "upstream-pr", True, True),
+        ({"kind": "bug", "where": "harness", "cause_clear": "yes", "size": "small"}, "local-fix", False, False),
     ]
     failures: List[str] = []
     for raw, action, allow_issue, allow_pr in cases:
@@ -1225,9 +1289,38 @@ def self_test() -> Tuple[str, int]:
         if not (node_dest / "package.json").is_file():
             failures.append("Node 骨架缺少 package.json")
 
+    integrity_failures, integrity_note = skill_integrity()
+    failures.extend(integrity_failures)
+
     if failures:
         return "自检失败：\n" + "\n".join(f"- {item}" for item in failures), 1
-    return f"自检通过：{len(cases)} 条判断，外加脱敏、草稿门禁和项目骨架。没有联网，也没有提交。", 0
+    return (
+        f"自检通过：{len(cases)} 条判断，外加脱敏、草稿门禁和项目骨架。{integrity_note}没有联网，也没有提交。",
+        0,
+    )
+
+
+def skill_integrity(root: Path = SKILL_ROOT) -> Tuple[List[str], str]:
+    """Check SKILL.md against this script: versions, linked references, documented --where values."""
+    skill_file = root / "SKILL.md"
+    if not skill_file.is_file():
+        return [], "没找到同目录的 SKILL.md，跳过技能文件检查。"
+    text = skill_file.read_text(encoding="utf-8")
+    failures: List[str] = []
+    front_end = text.find("\n---\n", 4)
+    front = text[4:front_end] if text.startswith("---\n") and front_end > 0 else ""
+    versions = re.findall(r'^\s*version:\s*"?([^"\s]+)"?\s*$', front, flags=re.MULTILINE)
+    if len(versions) < 2:
+        failures.append("SKILL.md 头部应同时有顶层 version 和 metadata.version")
+    elif len(set(versions)) != 1:
+        failures.append(f"SKILL.md 头部两个版本号不一致：{', '.join(versions)}")
+    for link in sorted(set(re.findall(r"\]\((references/[^)#\s]+)\)", text))):
+        if not (root / link).is_file():
+            failures.append(f"SKILL.md 链接的 {link} 不存在")
+    for where in sorted(set(WHERE_ALIAS.values())):
+        if where != "docs" and f"--where {where}" not in text:
+            failures.append(f"脚本支持 --where {where}，但 SKILL.md 的翻译对照里没有写")
+    return failures, "技能文件（版本号、引用链接、--where 对照）一致。"
 
 
 def _print_error(exc: BaseException) -> int:
