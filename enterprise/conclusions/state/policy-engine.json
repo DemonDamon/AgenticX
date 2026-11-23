@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "policy-engine",
-  "generation": "7934e20bae064a60b21f369985f77798",
+  "generation": "b543b21e1e0c4e479ee3911f11415a13",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:d65bab9eff62b730b867ca36190f8209dc53f4b2fcba911f3a9c470d514fdc8d",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:d8ff43bc687b8536c834c2ca2812ed513ccf73516465716c533e347ff11b25ef",
   "summary_path": "enterprise/conclusions/packages/policy-engine_conclusion.md",
-  "summary_sha256": "sha256:ab6d8de4e01738b00fdb81cfe5df22c3ccffa4f52f730cd2b7d54e0c176dd866",
-  "updated_at": "2026-10-25T03:42:36.918700+00:00"
+  "summary_sha256": "sha256:f27d773d72aa256b9cd0f6b410650ddf63e2a20f573ebc96f2bb6a9287a6dc13",
+  "updated_at": "2026-11-14T12:26:54.121009+00:00"
 }

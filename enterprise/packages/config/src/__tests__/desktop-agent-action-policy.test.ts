@@ -27,6 +27,7 @@ describe("normalizeDesktopAgentActionPolicy", () => {
       deniedTools: ["bash_exec", "mcp:send_*", "git:push"],
       alwaysAskTools: ["file_write"],
       disableSessionAllow: false,
+      traceContent: false,
     });
   });
 
@@ -48,6 +49,7 @@ describe("normalizeDesktopAgentActionPolicy", () => {
       deniedTools: ["git:push", "bash_exec"],
       alwaysAskTools: ["mcp:send_*"],
       disableSessionAllow: false,
+      traceContent: false,
     });
   });
 
@@ -57,5 +59,11 @@ describe("normalizeDesktopAgentActionPolicy", () => {
     );
     expect(normalizeDesktopAgentActionPolicy({ disableSessionAllow: 1 }).disableSessionAllow).toBe(false);
     expect(normalizeDesktopAgentActionPolicy({ disableSessionAllow: true }).disableSessionAllow).toBe(true);
+  });
+
+  it("treats only a real boolean true as traceContent", () => {
+    expect(normalizeDesktopAgentActionPolicy({ traceContent: true }).traceContent).toBe(true);
+    expect(normalizeDesktopAgentActionPolicy({ traceContent: "true" }).traceContent).toBe(false);
+    expect(normalizeDesktopAgentActionPolicy({}).traceContent).toBe(false);
   });
 });

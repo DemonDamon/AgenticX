@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "core-api",
-  "generation": "70d7dbe013784855af5a45eb4a87db96",
+  "generation": "c85d0961dfb84e46abcab6025ee209dd",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:e975b5d9b7daad4a406a5d566940f4fbc93fc5b6543b119ded1cff9aa6ac9f1d",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:3979ce6ed74182a95087ac21127647a2f07d30e804a2a15f5bd1138796f9a6c7",
   "summary_path": "enterprise/conclusions/packages/core-api_conclusion.md",
-  "summary_sha256": "sha256:365e158e6a72c84fccf123b63645f10debafd8cb41573bfc1ced3929c088fec8",
-  "updated_at": "2026-10-25T03:42:35.870460+00:00"
+  "summary_sha256": "sha256:42073c17e032b02f613bc24601dfc4f08e754b44347fc7c55e0125da0245ff3f",
+  "updated_at": "2026-11-14T12:26:56.156228+00:00"
 }

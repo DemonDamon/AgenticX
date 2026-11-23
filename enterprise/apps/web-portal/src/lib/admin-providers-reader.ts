@@ -6,10 +6,12 @@
 import { enterpriseRuntimeModelProviders as pgMpTable } from "@agenticx/db-schema";
 import { enterpriseRuntimeScopeDefaultModels as pgDefaultTable } from "@agenticx/db-schema";
 import { enterpriseRuntimeUserVisibleModels as pgUvmTable } from "@agenticx/db-schema";
+import { enterpriseRuntimeVirtualModels as pgVmTable } from "@agenticx/db-schema";
 import {
   enterpriseRuntimeModelProviders as mysqlMpTable,
   enterpriseRuntimeScopeDefaultModels as mysqlDefaultTable,
   enterpriseRuntimeUserVisibleModels as mysqlUvmTable,
+  enterpriseRuntimeVirtualModels as mysqlVmTable,
 } from "@agenticx/db-schema/mysql";
 import {
   createMysqlDb,
@@ -185,6 +187,7 @@ export async function listAvailableModelsForUser(
   const userKeys = resolveUserKeys(userId, email);
   const userStored = mergeUserStoredSet(userMap, userKeys);
   const effectiveIds = new Set(computeEffectiveUserAllowed(deptEffective, userStored));
+  const virtualModels = await readEnabledVirtualModels();
 
   const out: PortalModelOption[] = [];
   for (const p of providers) {
@@ -205,7 +208,82 @@ export async function listAvailableModelsForUser(
       });
     }
   }
+  for (const vm of virtualModels) {
+    if (vm.targets.length === 0 || !vm.targets.every((target) => targetVisible(target, effectiveIds))) continue;
+    if (out.some((item) => item.id === vm.name)) continue;
+    out.push({
+      id: vm.name,
+      provider: "virtual",
+      providerLabel: vm.displayName,
+      model: vm.name,
+      label: vm.displayName,
+      route: "third-party",
+      isDefault: false,
+    });
+  }
   return out;
+}
+
+function modelSegment(value: string): string {
+  const trimmed = value.trim();
+  const slash = trimmed.lastIndexOf("/");
+  return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+}
+
+// targetVisible matches a virtual-model target to the visible model ids.
+// Visible ids are usually "provider/model" while a target is the real model name.
+// Either side may carry the provider prefix; comparison uses an exact id hit or the same model segment.
+function targetVisible(target: string, effectiveIds: Set<string>): boolean {
+  const trimmed = target.trim();
+  if (!trimmed) return false;
+  if (effectiveIds.has(trimmed)) return true;
+  const segment = modelSegment(trimmed);
+  if (!segment) return false;
+  for (const id of effectiveIds) {
+    if (modelSegment(id) === segment) return true;
+  }
+  return false;
+}
+
+async function readEnabledVirtualModels(): Promise<Array<{ name: string; displayName: string; targets: string[] }>> {
+  const tid = requiredTenant();
+  const config = resolveDatabaseConfig();
+  let rows: Array<{ name: string; displayName: string; enabled: boolean; targets: unknown }>;
+  if (config.dialect === "mysql") {
+    const { raw: db } = await createMysqlDb(config);
+    rows = await db
+      .select({
+        name: mysqlVmTable.name,
+        displayName: mysqlVmTable.displayName,
+        enabled: mysqlVmTable.enabled,
+        targets: mysqlVmTable.targets,
+      })
+      .from(mysqlVmTable)
+      .where(eq(mysqlVmTable.tenantId, tid));
+  } else {
+    const db = getIamDb();
+    rows = await db
+      .select({
+        name: pgVmTable.name,
+        displayName: pgVmTable.displayName,
+        enabled: pgVmTable.enabled,
+        targets: pgVmTable.targets,
+      })
+      .from(pgVmTable)
+      .where(eq(pgVmTable.tenantId, tid));
+  }
+  return rows
+    .filter((row) => row.enabled && row.name && !row.name.includes("/"))
+    .map((row) => ({ name: row.name, displayName: row.displayName, targets: targetNames(row.targets) }));
+}
+
+function targetNames(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const model = (item as { model?: unknown }).model;
+    return typeof model === "string" && model.trim() ? [model.trim()] : [];
+  });
 }
 
 /** 叶到根第一个仍在该用户可见集合内的部门默认模型。 */

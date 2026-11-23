@@ -92,21 +92,30 @@ describe("admin desktop-agent-policy route", () => {
     );
     expect(putResponse.status).toBe(200);
     const putBody = (await putResponse.json()) as {
-      data: { policy: { deniedTools: string[]; alwaysAskTools: string[]; disableSessionAllow: boolean } };
+      data: {
+        policy: {
+          deniedTools: string[];
+          alwaysAskTools: string[];
+          disableSessionAllow: boolean;
+          traceContent: boolean;
+        };
+      };
     };
     expect(putBody.data.policy).toMatchObject({
       deniedTools: ["bash_exec", "git:push"],
       alwaysAskTools: ["mcp:send_*"],
       disableSessionAllow: false,
+      traceContent: false,
     });
 
     const getResponse = await GET();
     expect(getResponse.status).toBe(200);
     const getBody = (await getResponse.json()) as {
-      data: { policy: { deniedTools: string[]; disableSessionAllow: boolean } };
+      data: { policy: { deniedTools: string[]; disableSessionAllow: boolean; traceContent: boolean } };
     };
     expect(getBody.data.policy.deniedTools).toEqual(["bash_exec", "git:push"]);
     expect(getBody.data.policy.disableSessionAllow).toBe(false);
+    expect(getBody.data.policy.traceContent).toBe(false);
   });
 
   it("returns 500 when the store throws", async () => {

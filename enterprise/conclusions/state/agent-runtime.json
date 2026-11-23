@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "agent-runtime",
+  "generation": "b885149da1384777a706bb78a0dfd829",
+  "mapping_revision": 1,
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:1897cc057de1e7ccd25a77e6fa4f392eff6cfdc166891afddb54463fecf778d5",
+  "summary_path": "enterprise/conclusions/apps/agent-runtime_conclusion.md",
+  "summary_sha256": "sha256:4ebbc99b868de22e0f921b5115c70b5fccc9e9758ddfd8a900c680822c716a5b",
+  "updated_at": "2026-11-14T12:24:39.099775+00:00"
+}

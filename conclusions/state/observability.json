@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "observability",
-  "generation": "c6800d3ec16f460b98ef3920b7fa0137",
+  "generation": "16678ca3f7a148189b5f2e9874729309",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
   "source_fingerprint": "sha256:605536a2365123d1e5f0c36d2c91e70b7dbd8ad28c0877bacd2c913299941698",
   "summary_path": "conclusions/observability_module_conclusion.md",
   "summary_sha256": "sha256:0e86d16c096067c506f160752ea3b162c5d3c81b711ab3b1f2247437e73dec8f",
-  "updated_at": "2026-10-24T13:53:15.296521+00:00"
+  "updated_at": "2026-11-14T12:15:46.072965+00:00"
 }

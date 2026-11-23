@@ -54,9 +54,17 @@ describe("postgresql/mysql schema parity", () => {
   const pgTables = collectTables(postgresSchema);
   const mysqlTables = collectTables(mysqlSchema);
 
-  it("mirrors all 109 PostgreSQL tables in MySQL", () => {
-    expect(pgTables.size).toBe(109);
+  it("mirrors all 115 PostgreSQL tables in MySQL", () => {
+    expect(pgTables.size).toBe(115);
     expect([...mysqlTables.keys()].sort()).toEqual([...pgTables.keys()].sort());
+  });
+
+  it("creates SP5 incident-response tables in both dialects", () => {
+    for (const dialect of [pgTables, mysqlTables]) {
+      expect(dialect.has("security_incidents")).toBe(true);
+      expect(dialect.has("security_incident_actions")).toBe(true);
+      expect(dialect.has("enterprise_runtime_session_revocation")).toBe(true);
+    }
   });
 
   it("creates enterprise_skills with scan columns in both dialects", () => {
@@ -207,6 +215,10 @@ describe("mysql baseline migration inventory", () => {
       "0046_ecp_e2_shelf_lifecycle.sql",
       "0047_ecp_e3_approval_workflow.sql",
       "0048_ecp_e4_expert_package.sql",
+      "0049_gateway_instances.sql",
+      "0050_mcp_server_versions.sql",
+      "0051_enterprise_runtime_virtual_models.sql",
+      "0052_security_incident_response.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -273,6 +285,10 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 46, tag: "0046_ecp_e2_shelf_lifecycle" }),
       expect.objectContaining({ idx: 47, tag: "0047_ecp_e3_approval_workflow" }),
       expect.objectContaining({ idx: 48, tag: "0048_ecp_e4_expert_package" }),
+      expect.objectContaining({ idx: 49, tag: "0049_gateway_instances" }),
+      expect.objectContaining({ idx: 50, tag: "0050_mcp_server_versions" }),
+      expect.objectContaining({ idx: 51, tag: "0051_enterprise_runtime_virtual_models" }),
+      expect.objectContaining({ idx: 52, tag: "0052_security_incident_response" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

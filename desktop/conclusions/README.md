@@ -2,9 +2,9 @@
 
 > **用途**：Desktop（产品名 Near）模块结论入口。文件级细节见同目录 `desktop_conclusion.md`。
 >
-> **控制面**：本目录为 `code-module-summaries` 的 `custom` layout（`registry.json` + `state/`）。根 `.gitignore` 的 `conclusions/` 规则会忽略本目录（与 `enterprise/conclusions` 一致，默认不进 git）。
+> **控制面**：本目录为 `code-module-summaries` 的 `custom` layout（`registry.json` + `state/`），随 Git 跟踪入库。
 >
-> **映射迁移**：2026-07-21 自 `code-summaries/modules/desktop.md` 迁入（`--refresh-modules`）。
+> **最近增量刷新**：2026-11-14（target `cebdabd5`，相对基线 `22d051f5`）。历史映射自 `code-summaries/modules/desktop.md` 迁入（2026-07-21，`--refresh-modules`）。
 
 ## 核心代码在哪？
 

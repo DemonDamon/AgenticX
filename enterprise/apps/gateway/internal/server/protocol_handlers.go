@@ -140,7 +140,9 @@ func (s *Server) dispatchProtocol(
 	_, derived := applyDerivedModel(req)
 	thinkingMode := transform.ThinkingModeFromEnv()
 
-	qctx := s.quotaContext(identity, req.Model)
+	requestedModel := req.Model
+	admission := s.admitVirtual(identity.TenantID, requestedModel)
+	qctx := s.quotaContext(identity, admission.quotaModel)
 	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
@@ -152,6 +154,15 @@ func (s *Server) dispatchProtocol(
 	if reqPolicy.RedactedText != latestUserText {
 		req.Messages = replaceLastUserMessageContent(req.Messages, reqPolicy.RedactedText)
 	}
+	// SP3 compliance-moderation：本地规则通过后再外呼第三方内容安全 provider。
+	if modRes := s.enforceModeration(r.Context(), identity, "request", latestUserText, req.Model, routing.Decision{Model: req.Model}, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+		if modRes.AuditFailed {
+			writeAPIError(w, openai.Internal("audit write failed"))
+			return
+		}
+		writePolicyError(w, "90001", "请求触发合规拦截", []policyengine.HitEvent{modRes.Hit})
+		return
+	}
 
 	estimatedInputTokens := estimateTextTokens(joinMessages(req.Messages))
 	reserveTokens := estimateTokensWithMax(estimatedInputTokens, maxTokensFromRequest(req))
@@ -160,6 +171,7 @@ func (s *Server) dispatchProtocol(
 	if !ok {
 		return
 	}
+	r = s.withRelayContext(r, identity.TenantID, req.Model, admission)
 
 	decision := s.decider.Decide(r, req.Model)
 	if !req.Stream && s.tryServeProtocolCache(w, cacheServeContext{
@@ -197,7 +209,7 @@ func (s *Server) protocolComplete(
 		return
 	}
 	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
-	decision := routingDecisionFromRelay(result, req.Model, s.decider.Decide(r, req.Model))
+	decision := routingDecisionFromRelay(result, relayModel(req.Model, result.ResolvedModel), s.decider.Decide(r, req.Model))
 	if err != nil {
 		s.billingService.RollbackContext(qctx, reservedTokens)
 		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
@@ -235,7 +247,11 @@ func (s *Server) protocolComplete(
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
 	actualTotal := int64(providerInputTokens + providerOutputTokens)
-	settle := s.billingService.SettleContext(qctx, reservedTokens, actualTotal)
+	actualModel := result.ResolvedModel
+	if strings.TrimSpace(actualModel) == "" {
+		actualModel = req.Model
+	}
+	settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, actualTotal, actualModel)
 	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
 		PromptText:     joinMessages(req.Messages),
@@ -249,6 +265,16 @@ func (s *Server) protocolComplete(
 	ev := s.protocolAuditEvent(identity, r, decision, req.Model, session.inbound, outboundProto, derived, thinkingMode, startedAt, result, streamResultFromComplete(result), estimatedInputTokens, providerInputTokens, providerOutputTokens, settle.Delta, responseContent, req.Messages)
 	if err := s.writeAuditEvent(ev); err != nil {
 		writeAPIError(w, openai.Internal("audit write failed"))
+		return
+	}
+
+	// SP3 compliance-moderation：非流式在终态外呼第三方内容安全 provider。
+	if modRes := s.enforceModeration(r.Context(), identity, "response", responseContent, req.Model, decision, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+		if modRes.AuditFailed {
+			writeAPIError(w, openai.Internal("audit write failed"))
+			return
+		}
+		writePolicyError(w, "90002", "响应触发合规拦截", []policyengine.HitEvent{modRes.Hit})
 		return
 	}
 
@@ -268,7 +294,13 @@ func (s *Server) protocolComplete(
 }
 
 func streamResultFromComplete(result relay.CompleteResult) relay.StreamResult {
-	return relay.StreamResult{Channel: result.Channel, KeyRef: result.KeyRef, Attempts: result.Attempts}
+	return relay.StreamResult{
+		Channel:       result.Channel,
+		KeyRef:        result.KeyRef,
+		Attempts:      result.Attempts,
+		ResolvedModel: result.ResolvedModel,
+		VirtualName:   result.VirtualName,
+	}
 }
 
 func (s *Server) protocolStream(
@@ -377,7 +409,7 @@ func (s *Server) protocolStream(
 	}
 
 	streamResult, streamErr := s.relayExecutor.Stream(r.Context(), req, req.Model, channelIdentity(identity), push)
-	decision := routingDecisionFromStream(streamResult, req.Model, s.decider.Decide(r, req.Model))
+	decision := routingDecisionFromStream(streamResult, relayModel(req.Model, streamResult.ResolvedModel), s.decider.Decide(r, req.Model))
 	requestTimedOut := errors.Is(r.Context().Err(), context.DeadlineExceeded)
 	if requestTimedOut {
 		streamErr = fmt.Errorf("stream:request_timeout: %w", r.Context().Err())
@@ -413,13 +445,24 @@ func (s *Server) protocolStream(
 	if tail := reasoningState.CloseOpenReasoning(); tail != "" {
 		responseText += tail
 	}
+	// SP3 compliance-moderation：流式在流尾外呼第三方内容安全 provider。
+	if modRes := s.enforceModeration(r.Context(), identity, "response", responseText, req.Model, decision, r.RemoteAddr, startedAt); modRes.Blocked || modRes.AuditFailed {
+		s.billingService.RollbackContext(qctx, reservedTokens)
+		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
+		if modRes.AuditFailed {
+			writeStreamError(w, flusher, "audit write failed")
+			return
+		}
+		writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", []policyengine.HitEvent{modRes.Hit})
+		return
+	}
 	inputTokens := estimatedInputTokens
 	outputTokens := estimateTextTokens(responseText)
-	settle := s.billingService.SettleContext(
-		qctx,
-		reservedTokens,
-		int64(inputTokens+outputTokens),
-	)
+	actualModel := streamResult.ResolvedModel
+	if strings.TrimSpace(actualModel) == "" {
+		actualModel = req.Model
+	}
+	settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, int64(inputTokens+outputTokens), actualModel)
 	s.reportUsageDetailed(identity, decision, openai.Usage{
 		PromptTokens: inputTokens, CompletionTokens: outputTokens, TotalTokens: inputTokens + outputTokens,
 	}, &budgetCheck, spanMeta{
@@ -520,5 +563,6 @@ func (s *Server) protocolAuditEvent(
 	}
 	enrichAuditFromAttempts(&ev, streamResult.Attempts)
 	enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
+	annotateVirtualModelAudit(&ev, streamResult.VirtualName, streamResult.ResolvedModel)
 	return ev
 }

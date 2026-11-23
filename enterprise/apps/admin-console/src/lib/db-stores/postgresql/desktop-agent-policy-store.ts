@@ -27,6 +27,7 @@ function recordFrom(policy: DesktopAgentActionPolicy, updatedAt: string | null):
     deniedTools: policy.deniedTools,
     alwaysAskTools: policy.alwaysAskTools,
     disableSessionAllow: policy.disableSessionAllow,
+    traceContent: policy.traceContent,
     updatedAt,
   };
 }
@@ -50,6 +51,7 @@ export async function setDesktopAgentPolicy(input: unknown): Promise<DesktopAgen
     deniedTools: policy.deniedTools,
     alwaysAskTools: policy.alwaysAskTools,
     disableSessionAllow: policy.disableSessionAllow,
+    traceContent: policy.traceContent,
   };
   const db = getIamDb();
   await db

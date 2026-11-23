@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
   "module_id": "billing",
-  "generation": "54c4b006886d4f5fa2e50a39a836e5fd",
+  "generation": "f309470f961e41dbae6924113b9b58a3",
   "mapping_revision": 1,
-  "baseline_commit": "22d051f5d18ad83a4c6083683342ab41d7850149",
-  "baseline_tree": "a54f25ef19899f9244042de5dc867a6556eb8c32",
-  "source_fingerprint": "sha256:06aa3858dc0dcee2525aa2b55a27412544f0fdc0cf221508764ebed83e05200e",
+  "baseline_commit": "cebdabd5883de1d5a62c96ae4084de6ad036b32f",
+  "baseline_tree": "21b071bac30fd6fa90bc9c24432b8dfdfbc859d6",
+  "source_fingerprint": "sha256:52af19676e1de6451bceb973cda6ee89b226f9ceb44beee04535e19d92f6a284",
   "summary_path": "enterprise/conclusions/features/billing_conclusion.md",
   "summary_sha256": "sha256:c2e38fa091d3ac02c2ebc84547a78aa51caca5f7fc77219fcb21fcca88cad4e5",
-  "updated_at": "2026-10-24T13:52:52.547096+00:00"
+  "updated_at": "2026-11-14T12:24:37.303262+00:00",
+  "summary_review": "unchanged-after-review"
 }

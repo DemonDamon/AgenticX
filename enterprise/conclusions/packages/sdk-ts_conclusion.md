@@ -1,20 +1,20 @@
 # @agenticx/sdk-ts 模块总结
 
-> 结论生成时间：2026-07-21（基于源码核验重写）
+> 结论生成时间：2026-11-14（target cebdabd5，基于源码核验重写）
 
 ## 模块概述
 
-`@agenticx/sdk-ts` 是**真实可用**的轻量 TypeScript 客户端 SDK（`package.json` description："TypeScript 客户端 SDK（给 Machi 接）"），非 stub。暴露 `ChatClient` 接口与 `MockChatClient` / `HttpChatClient` 两种实现，支持 SSE 流式输出、附件多模态、用户主动中断。web-portal 已在 `WorkspaceClient.tsx` 中真实消费。
+`@agenticx/sdk-ts` 是**真实可用**的轻量 TypeScript 客户端 SDK（`package.json` description："TypeScript 客户端 SDK（给 Machi 接）"），非 stub。暴露 `ChatClient` 接口与 `MockChatClient` / `HttpChatClient` 两种实现，支持 SSE 流式输出、附件多模态、用户主动中断；另增 `ManagedAgentsClient`，对接 enterprise **Managed Agents**（`/ma/v1`）控制面与会话面。web-portal 已在 `WorkspaceClient.tsx` 中真实消费聊天客户端。
 
 ## 目录结构
 
 ```
 packages/sdk-ts/
-├── package.json             # @agenticx/sdk-ts，private，main/types → ./src/index.ts
-├── README.md                 # 一行说明
+├── package.json             # @agenticx/sdk-ts，private，依赖 @agenticx/core-api，main/types → ./src/index.ts
+├── README.md                 # 聊天 SDK + Managed Agents 用法示例
 ├── tsconfig.json
 └── src/
-    ├── index.ts              # 透传 types + chat/{client,mock,http}
+    ├── index.ts              # 透传 types、chat、deep-research、trace、managed
     ├── types.ts              # ChatRole/ChatMessage/ChatRequest/ChatUsage/ChatChunk/SendMessageResult/ChatMessageAttachment
     └── chat/
         ├── client.ts         # ChatClient 接口
@@ -22,6 +22,14 @@ packages/sdk-ts/
         ├── http.ts           # HttpChatClient（fetch + SSE 解析 + AbortController）
         ├── multimodal.ts     # buildOpenAIMessageContent / toGatewayMessage（图片→image_url）
         └── http.test.ts      # vitest：中断时 yield cancelled chunk 不带 error
+    └── managed/              # Managed Agents HTTP + SSE 客户端
+        ├── client.ts         # ManagedAgentsClient（agents/versions/environments/sessions/events）
+        ├── client.test.ts    # 路由拆分、MaApiError、Last-Event-ID 续流、重连上限
+        ├── errors.ts         # MaApiError
+        ├── sse.ts            # parseSse（text/event-stream 帧解析）
+        ├── sse.test.ts       # 分片/CRLF/多行 data
+        ├── types.ts          # MaAgentEnvelope、MaStreamItem 等（部分 re-export core-api）
+        └── index.ts          # barrel
 ```
 
 ## 关键导出
@@ -38,6 +46,8 @@ ChatClient {
 ```
 
 **实现**：`MockChatClient`、`HttpChatClient`、`buildOpenAIMessageContent`、`toGatewayMessage`
+
+**Managed Agents**（`managed/`）：`ManagedAgentsClient`、`ManagedAgentsClientOptions`、`StreamOptions`、`MaApiError`、`parseSse`、`SseFrame`；类型含 `MaAgentEnvelope`、`MaStoredEvent`、`MaStreamItem`、`CreateAgentInput`、`CreateSessionInput`、`UpdateAgentPatch` 等（`AgentRecord` / `SessionRecord` 等自 `@agenticx/core-api` re-export）
 
 ## 显著模式
 
@@ -59,7 +69,7 @@ ChatClient {
 |---|---|---|
 | `apps/web-portal` | 直接消费 | `WorkspaceClient.tsx` import `HttpChatClient`/`MockChatClient`，endpoint `/api/chat/completions` |
 | `apps/gateway` | 被调用方 | HttpChatClient POST 到 gateway 的 `/v1/chat/completions`（web-portal 经 next 代理） |
-| `packages/core-api` | 类型契约源 | 错误码 / chat 类型源头；本 SDK 是其窄化客户端视图 |
+| `packages/core-api` | 类型契约源 + 依赖 | 聊天错误码与窄化类型；`managed/types` re-export Agent/Session/Environment 等 Managed 契约 |
 | Machi 桌面（主仓） | 目标消费者 | description 标注"给 Machi 接"，预留桌面端接 enterprise gateway |
 
 
@@ -76,3 +86,11 @@ ChatClient {
 - **`HttpChatClient`（`chat/http.ts`）**：请求体在 `skillId` 存在时附加 `agenticx_skill_id`；SSE 解析记录 `sawDone`，只在收到 `[DONE]` 时正常 `{ done: true }`，否则 EOF 走 transport 错误；非空 `finish_reason` 以非终止 chunk 透出；用户 `cancel` 中途 abort 仍 yield `{ done: true, cancelled: true }` 且无 `error`。
 - **`DeepResearchEventPayload`（`deep-research.ts`）**：新增联合成员 `report_resume_available`（`runId` / `nextRunId` / `completedSections` / `totalSections`），报告提前结束时表示可续写章节。
 - **`http.test.ts`**：覆盖 `[DONE]` 正常结束、`finish_reason: length` 透出、无 `[DONE]` 的 EOF transport 错误、以及 mid-stream cancel 语义。
+
+## 增量（22d051f5 → cebdabd5）
+
+- **`src/managed/`**：新增 `ManagedAgentsClient`，命名空间 `agents` / `versions` / `environments` / `sessions` / `events`；生产默认 `{baseUrl}/ma/v1`，本地可拆 `controlBaseUrl`（控制面）与 `runtimeBaseUrl`（会话面）；`token` 须 `agx-pat-` 前缀，否则构造期 `MaApiError`（`invalid_token`）；`onBehalfOf` 经 `x-agenticx-on-behalf-of` 注入（会话创建等）。
+- **`events.stream()`**：SSE 经 `parseSse` 解析；`id` 为序号时产出 `{ kind: "event", event }`，无 `id` 且 `includePreviews` 时产出 preview 帧；断线以 `Last-Event-ID` 续流并跳过已见 `seq`；`untilIdle` 遇 `session.status_idle` / `session.status_terminated` 结束；可配置 `maxReconnects`，反复失败抛 `stream_disconnected`，4xx 不重试。
+- **`MaApiError`**：映射 gateway `{ error: { code, message, details? } }`；网络异常 `network_error`，响应文案对 token 做 redact。
+- **`package.json`**：workspace 依赖 `@agenticx/core-api`；`vitest` 升至 `^5.0.5`。
+- **`src/index.ts`**：`export * from "./managed"`；**`README.md`** 补充 Managed Agents 示例；**`tsconfig.json`** 移除 `rootDir` 限制。

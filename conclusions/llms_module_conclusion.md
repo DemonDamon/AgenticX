@@ -1,6 +1,6 @@
 # AgenticX LLM 模块（agenticx/llms）完整结构分析
 
-> 结论更新时间：2026-10-25（覆盖至 `22d051f5d18ad83a4c6083683342ab41d7850149`）
+> 结论更新时间：2026-11-14（覆盖至 `cebdabd5883de1d5a62c96ae4084de6ad036b32f`）
 
 ## 目录路径
 `d:\myWorks\AgenticX\agenticx\llms`
@@ -15,6 +15,7 @@
 ├── deepseek_provider.py     [新增：DeepSeek 官方 OpenAI 兼容 Provider（openai/ 前缀 + api.deepseek.com）]
 ├── failover.py              [新增：LLM 主备故障转移与冷却（内化自 IronClaw）]
 ├── kimi_provider.py
+├── known_base_urls.py       [新增：内置厂商官方默认 API 根地址；与 Desktop KNOWN_BASE_URLS 对齐，冲突时以 Python Provider 默认值为准]
 ├── litellm_provider.py
 ├── llm_factory.py           [Provider 工厂 / 路由；create 前 `resolve_model_alias`；deepseek / mimo 分支，与 knowledge.graphers 解耦]
 ├── mimo_provider.py         [新增：小米 MiMo 官方 OpenAI 兼容 Provider（openai/ 前缀 + api.xiaomimimo.com）]
@@ -109,6 +110,12 @@
 - `astream` 签名按 base.py 新契约修正为普通 `def` 直接返回异步生成器。
 
 **温度约束（当前实现）**：`_is_k2_series_model()` 覆盖 `kimi-k2.5` / `kimi-k2.6` / `kimi-k2.7` 前缀；`_requires_fixed_temperature_one()` 对 K3 系与 K2.7 系（含 `kimi-k2.7-code`）返回真，`_resolve_temperature` 此时无视 thinking 模式强制 `1.0`（Moonshot 报 `only 1 is allowed for this model`）；其余 K2.x 仍按 thinking 开启 `1.0` / 关闭 `0.6`。
+
+### known_base_urls.py (新增)
+**文件功能**：集中维护各内置厂商 Provider 的官方默认 API 根 URL，供 Codex 网关解析等非 Provider 调用链复用，避免与 Desktop `KNOWN_BASE_URLS` 各写一份后漂移。  
+**技术实现**：`KNOWN_PROVIDER_BASE_URLS` 映射官方 id（含 `ark`/`volcengine`、`xiaomi`/`mimo` 等等价键）到默认根；`_ALIASES` 将 `moonshot` 规范为 `kimi`；`default_provider_base_url(provider_name)` 经 `_canonical_provider_id()` 查表，未知或空 id 返回 `""`。与 Desktop 不一致时以本模块及对应 `*_provider.py` 内 `_DEFAULT_*_BASE_URL` 为准（当前典型为千帆：Desktop 仍可能列旧 RPC 根，`qianfan_provider.py` 实际走 `https://qianfan.baidubce.com/v2`）。  
+**Codex 兼容判定**：`CODEX_NON_OPENAI_COMPAT_PROVIDERS` 与 `is_codex_non_openai_compat_provider()` 标记非 OpenAI 兼容官方 API（当前仅 `anthropic`），供 Codex 0.167 自定义 Provider 同步时拒绝 `wire_api=responses` 不支持的厂商。  
+**依赖关系**：不经 `__init__.py` 导出；被 `agenticx.harness.codex_settings`（如 `resolve_codex_gateway_base_url`）按子模块直接导入。
 
 ### litellm_provider.py
 **文件功能**：实现基于第三方库 `litellm` 的通用 Provider `LiteLLMProvider`，可同时支持 OpenAI、Anthropic、Ollama 等多后端。  

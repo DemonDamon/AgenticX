@@ -36,6 +36,17 @@ go run ./cmd/gateway
 
 - `GATEWAY_HTTP_ADDR`：监听地址，默认 `:8088`
 - `GATEWAY_CONFIG_PATH`：外部 YAML 配置文件路径
+- `GATEWAY_TRUSTED_PROXY_CIDRS`：逗号分隔的可信入口代理 IP/CIDR，默认不信任任何转发头；覆盖 YAML 的 `trusted_proxy_cidrs` 列表，显式空值可关闭信任。无效地址和 `/0` 会阻止启动。
+
+### 客户端来源地址
+
+默认以 TCP 连接来源作为策略与审计的客户端地址。只有来源命中可信代理列表，才解析 `X-Forwarded-For`（从右向左停在第一个不可信地址）；不存在 XFF 时才使用单个 `X-Real-IP`。无效链条保留连接来源。入口代理须覆盖或正确追加客户端来源，且只配置实际受控的代理地址，不要把所有用户所在网段都列为可信代理。
+
+```yaml
+trusted_proxy_cidrs:
+  - "192.0.2.10/32"
+  - "2001:db8:1::/48"
+```
 
 ## 接入真实模型 Key
 
@@ -82,6 +93,7 @@ docker build -f apps/gateway/Dockerfile -t agenticx-gateway:latest .
 | `GATEWAY_REMOTE_QUOTA_CONFIG_URL` | HTTPS URL（JSON 等价于 `quotas.json`），约 **10 秒** 本地缓存 |
 | `GATEWAY_REMOTE_PRICING_CONFIG_URL` | admin `GET /api/internal/pricing-snapshot`（JSON 计价快照），约 **10 秒** 本地缓存；失败回落 `GATEWAY_PRICING_FILE` / 默认 `pricing.yaml` |
 | `GATEWAY_REMOTE_BUDGET_CONFIG_URL` | admin `GET /api/internal/budget-snapshot`（JSON 成本/词元预算快照），约 **10 秒** 本地缓存；失败回落 `GATEWAY_BUDGET_CONFIG_FILE` |
+| `GATEWAY_REMOTE_VIRTUAL_MODELS_URL` | admin `GET /api/internal/virtual-models`（虚拟模型快照），约 5 秒轮询；未配置时虚拟模型不可用 |
 | `GATEWAY_BUDGET_CONFIG_FILE` | 本地预算配置路径（默认 `../../.runtime/admin/budgets.json`） |
 | `GATEWAY_BUDGET_USAGE_FILE` | 本地预算累计用量路径（默认 `../../.runtime/gateway/budget-usage.json`） |
 | `GATEWAY_PAT_CACHE_TTL` | PAT 校验内存缓存 TTL（默认 `5s`） |

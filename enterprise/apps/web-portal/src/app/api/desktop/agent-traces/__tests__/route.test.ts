@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const resolveDesktopIdentity = vi.fn();
 const insertDesktopAgentTraces = vi.fn();
+const loadDesktopAgentPolicy = vi.fn();
 
 vi.mock("../../../../../lib/desktop-auth", () => ({
   resolveDesktopIdentity: (...args: unknown[]) => resolveDesktopIdentity(...args),
@@ -9,6 +10,10 @@ vi.mock("../../../../../lib/desktop-auth", () => ({
 
 vi.mock("../../../../../lib/desktop-agent-traces", () => ({
   insertDesktopAgentTraces: (...args: unknown[]) => insertDesktopAgentTraces(...args),
+}));
+
+vi.mock("../../../../../lib/desktop-agent-policy-reader", () => ({
+  loadDesktopAgentPolicy: (...args: unknown[]) => loadDesktopAgentPolicy(...args),
 }));
 
 const IDENTITY = {
@@ -51,6 +56,13 @@ describe("POST /api/desktop/agent-traces", () => {
   beforeEach(() => {
     resolveDesktopIdentity.mockReset();
     insertDesktopAgentTraces.mockReset();
+    loadDesktopAgentPolicy.mockReset();
+    loadDesktopAgentPolicy.mockResolvedValue({
+      deniedTools: [],
+      alwaysAskTools: [],
+      disableSessionAllow: false,
+      traceContent: false,
+    });
   });
 
   it("returns 401 without a desktop token", async () => {
@@ -110,5 +122,83 @@ describe("POST /api/desktop/agent-traces", () => {
       round: 1,
     });
     expect(second?.metadata).toEqual({ user_id: "u1", source: "near" });
+  });
+
+  it("strips content excerpts by default", async () => {
+    resolveDesktopIdentity.mockResolvedValue(IDENTITY);
+    insertDesktopAgentTraces.mockImplementation(async (input: { spans: unknown[] }) => input.spans.length);
+    const { POST } = await import("../route");
+    const res = await POST(
+      post({
+        spans: [span({ metadata: { user_text: "u", reply: "r", thought: "t", tool_name: "x" } })],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const call = insertDesktopAgentTraces.mock.calls[0];
+    expect(call).toBeDefined();
+    const arg = call?.[0] as {
+      spans: Array<{ metadata: Record<string, unknown> }>;
+    };
+    expect(arg.spans[0]?.metadata).toEqual({
+      tool_name: "x",
+      user_id: "u1",
+      source: "near",
+    });
+    expect(loadDesktopAgentPolicy).toHaveBeenCalledWith("t1");
+  });
+
+  it("keeps excerpts when tenant allows", async () => {
+    resolveDesktopIdentity.mockResolvedValue(IDENTITY);
+    loadDesktopAgentPolicy.mockResolvedValue({
+      deniedTools: [],
+      alwaysAskTools: [],
+      disableSessionAllow: false,
+      traceContent: true,
+    });
+    insertDesktopAgentTraces.mockImplementation(async (input: { spans: unknown[] }) => input.spans.length);
+    const { POST } = await import("../route");
+    const res = await POST(
+      post({
+        spans: [span({ metadata: { user_text: "u", reply: "r", thought: "t", tool_name: "x" } })],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const call = insertDesktopAgentTraces.mock.calls[0];
+    expect(call).toBeDefined();
+    const arg = call?.[0] as {
+      spans: Array<{ metadata: Record<string, unknown> }>;
+    };
+    expect(arg.spans[0]?.metadata.reply).toBe("r");
+    expect(arg.spans[0]?.metadata).toMatchObject({
+      user_text: "u",
+      reply: "r",
+      thought: "t",
+      tool_name: "x",
+      user_id: "u1",
+      source: "near",
+    });
+  });
+
+  it("strips when policy lookup fails", async () => {
+    resolveDesktopIdentity.mockResolvedValue(IDENTITY);
+    loadDesktopAgentPolicy.mockRejectedValue(new Error("policy unavailable"));
+    insertDesktopAgentTraces.mockImplementation(async (input: { spans: unknown[] }) => input.spans.length);
+    const { POST } = await import("../route");
+    const res = await POST(
+      post({
+        spans: [span({ metadata: { user_text: "u", reply: "r", thought: "t", tool_name: "x" } })],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const call = insertDesktopAgentTraces.mock.calls[0];
+    expect(call).toBeDefined();
+    const arg = call?.[0] as {
+      spans: Array<{ metadata: Record<string, unknown> }>;
+    };
+    expect(arg.spans[0]?.metadata).toEqual({
+      tool_name: "x",
+      user_id: "u1",
+      source: "near",
+    });
   });
 });
