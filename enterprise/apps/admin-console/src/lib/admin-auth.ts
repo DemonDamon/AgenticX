@@ -1,4 +1,4 @@
-import { hasEveryScope, hasSomeScope, aggregateScopesForUser } from "@agenticx/iam-core";
+import { hasEveryScope, hasSomeScope, getAdminUser } from "@agenticx/iam-core";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { ADMIN_SESSION_COOKIE, verifyAdminSessionToken } from "./admin-session";
@@ -28,7 +28,7 @@ export async function requireAdminSession() {
   return { ok: true as const, session };
 }
 
-/** 基于 PG 角色聚合 scopes 的守卫；缺权 403 */
+/** 当前账号必须仍有效，再以数据库聚合权限校验；缺权或停用返回 403。 */
 export async function requireAdminScope(required: string[]) {
   const session = await getAdminSession();
   if (!session) {
@@ -37,7 +37,14 @@ export async function requireAdminScope(required: string[]) {
       response: NextResponse.json({ code: "40101", message: "unauthorized" }, { status: 401 }),
     };
   }
-  const scopes = await aggregateScopesForUser(session.tenantId, session.userId);
+  const current = await getAdminUser(session.tenantId, session.userId);
+  if (!current || current.status !== "active") {
+    return {
+      ok: false as const,
+      response: NextResponse.json({ code: "40300", message: "forbidden" }, { status: 403 }),
+    };
+  }
+  const scopes = current.scopes;
   if (!hasEveryScope(scopes, required)) {
     return {
       ok: false as const,
@@ -56,7 +63,14 @@ export async function requireAdminSomeScope(candidates: string[]) {
       response: NextResponse.json({ code: "40101", message: "unauthorized" }, { status: 401 }),
     };
   }
-  const scopes = await aggregateScopesForUser(session.tenantId, session.userId);
+  const current = await getAdminUser(session.tenantId, session.userId);
+  if (!current || current.status !== "active") {
+    return {
+      ok: false as const,
+      response: NextResponse.json({ code: "40300", message: "forbidden" }, { status: 403 }),
+    };
+  }
+  const scopes = current.scopes;
   if (!hasSomeScope(scopes, candidates)) {
     return {
       ok: false as const,
