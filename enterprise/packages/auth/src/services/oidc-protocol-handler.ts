@@ -1,4 +1,4 @@
-import { mapClaimsToAuthUser, type OidcMappedUser } from "./oidc-claims";
+import { mapClaimsToAuthUser, resolveOidcIdentitySubject, type OidcMappedUser } from "./oidc-claims";
 import {
   OidcCallbackError,
   OidcClientService,
@@ -115,8 +115,9 @@ function mapToExternalIdentity(
   rawTokens: unknown
 ): SsoExternalIdentity {
   return {
-    externalSubject: mapped.externalId ?? "",
+    externalSubject: resolveOidcIdentitySubject(claims),
     email: mapped.email,
+    emailVerified: mapped.emailVerified,
     displayName: mapped.displayName,
     deptHint: mapped.deptHint ?? null,
     roleCodeHints: mapped.roleCodeHints,

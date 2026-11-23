@@ -133,6 +133,7 @@ export function getAdminSsoProviderConfig(providerId: string): OidcProviderConfi
     scopes,
     claimMapping: {
       email: optionalEnv(providerId, "CLAIM_EMAIL") ?? "email",
+      emailVerified: optionalEnv(providerId, "CLAIM_EMAIL_VERIFIED"),
       name: optionalEnv(providerId, "CLAIM_NAME") ?? "name",
       dept: optionalEnv(providerId, "CLAIM_DEPT") ?? "department",
       roles: optionalEnv(providerId, "CLAIM_ROLES") ?? "roles",
@@ -172,6 +173,7 @@ export async function getAdminSsoProviderConfigServer(providerId: string): Promi
         scopes: dbProvider.scopes,
         claimMapping: {
           email: asClaimString(dbProvider.claimMapping.email, "email"),
+          emailVerified: typeof dbProvider.claimMapping.emailVerified === "string" ? dbProvider.claimMapping.emailVerified : undefined,
           name: asClaimString(dbProvider.claimMapping.name, "name"),
           dept: asClaimString(dbProvider.claimMapping.dept, "department"),
           roles: asClaimString(dbProvider.claimMapping.roles, "roles"),

@@ -1,4 +1,5 @@
 import { resolveDatabaseConfig } from "../../database/config";
+import { getTenantIamTransaction } from "../../database/tenant-iam-transaction";
 import {
   createMysqlDb,
   getMysqlDrizzle,
@@ -10,5 +11,5 @@ export async function getMysqlRepositoryDb(): Promise<MySqlDrizzleDb> {
   if (config.dialect !== "mysql") {
     throw new Error(`MySQL repository requested for dialect=${config.dialect}`);
   }
-  return getMysqlDrizzle(await createMysqlDb(config));
+  return (getTenantIamTransaction("mysql") as MySqlDrizzleDb | null) ?? getMysqlDrizzle(await createMysqlDb(config));
 }
