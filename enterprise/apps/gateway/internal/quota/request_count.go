@@ -47,9 +47,12 @@ func newRequestCountCounter(handle *database.Handle, poolUsagePath string) *Requ
 		local:     map[string]int64{},
 		usagePath: poolUsagePath,
 	}
-	if requestCountBackend() == "pg" && handle != nil && handle.DB != nil {
-		c.pgCounter = &PGPoolCounter{database: handle}
+	if requestCountBackend() == "pg" {
 		c.usePG = true
+		c.pgCounter = unavailablePoolCounter{}
+		if handle != nil && handle.DB != nil {
+			c.pgCounter = &PGPoolCounter{database: handle}
+		}
 	}
 	return c
 }

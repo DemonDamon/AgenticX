@@ -18,13 +18,15 @@
 cd enterprise/deploy/docker-compose
 POSTGRES_PASSWORD=replace-me \
 ADMIN_CONSOLE_LOGIN_PASSWORD=replace-me \
+AGX_PROVIDER_SECRET_KEY=replace-me \
+SSO_PROVIDER_SECRET_KEY=replace-me \
 JWT_PUBLIC_KEY="$(cat /path/to/jwt.pub)" \
 JWT_PRIVATE_KEY="$(cat /path/to/jwt.key)" \
 DATABASE_URL="postgresql://agenticx:replace-me@postgres-primary:5432/agenticx?sslmode=disable" \
 docker compose -f prod.yml --profile postgresql up -d
 ```
 
-（`prod.yml` 会通过 `${ADMIN_CONSOLE_LOGIN_PASSWORD?...}` / `${DATABASE_URL?...}` 强制要求相关变量已导出；内置 Postgres 需加 `--profile postgresql`。）
+（`prod.yml` 会通过 `${ADMIN_CONSOLE_LOGIN_PASSWORD?...}` / `${DATABASE_URL?...}` / `${AGX_PROVIDER_SECRET_KEY?...}` / `${SSO_PROVIDER_SECRET_KEY?...}` 强制要求相关变量已导出；内置 Postgres 需加 `--profile postgresql`。`AGX_PROVIDER_SECRET_KEY` 用于加密模型厂商 API Key、`SSO_PROVIDER_SECRET_KEY` 用于加密 SSO client_secret，生产环境缺失任一都会直接启动失败；两者须分别生成强随机值（如各自执行 `openssl rand -hex 32`），勿复用同一值、勿写入仓库。）
 
 ### 容器部署的两个坑（每套环境都要确认）
 
@@ -117,6 +119,8 @@ ENTERPRISE_IMAGE_TAG=2026.07.16-gitsha
 
 POSTGRES_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
 ADMIN_CONSOLE_LOGIN_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
+AGX_PROVIDER_SECRET_KEY=REPLACE_WITH_STRONG_RANDOM_SECRET
+SSO_PROVIDER_SECRET_KEY=REPLACE_WITH_STRONG_RANDOM_SECRET
 DATABASE_URL=postgresql://agenticx:REPLACE_WITH_URL_ENCODED_PASSWORD@postgres-primary:5432/agenticx?sslmode=disable
 ```
 
@@ -228,6 +232,8 @@ ENTERPRISE_IMAGE_TAG=2026.07.16-gitsha
 
 POSTGRES_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
 ADMIN_CONSOLE_LOGIN_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
+AGX_PROVIDER_SECRET_KEY=REPLACE_WITH_STRONG_RANDOM_SECRET
+SSO_PROVIDER_SECRET_KEY=REPLACE_WITH_STRONG_RANDOM_SECRET
 DATABASE_URL=postgresql://agenticx:REPLACE_WITH_URL_ENCODED_PASSWORD@postgres-primary:5432/agenticx?sslmode=disable
 ```
 

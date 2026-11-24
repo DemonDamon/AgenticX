@@ -1,0 +1,71 @@
+name: Python regressions
+
+on:
+  pull_request:
+    paths:
+      - "agenticx/**/*.py"
+      - "tests/**"
+      - "pyproject.toml"
+      - "requirements.txt"
+      - "requirements.lock"
+      - "packaging/**/*.py"
+      - "packaging/**/*.spec"
+      - "packaging/build_backend.sh"
+      - "packaging/build_windows_installer.ps1"
+      - "scripts/ci/python-regressions.py"
+      - ".github/workflows/python-regressions.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "agenticx/**/*.py"
+      - "tests/**"
+      - "pyproject.toml"
+      - "requirements.txt"
+      - "requirements.lock"
+      - "packaging/**/*.py"
+      - "packaging/**/*.spec"
+      - "packaging/build_backend.sh"
+      - "packaging/build_windows_installer.ps1"
+      - "scripts/ci/python-regressions.py"
+      - ".github/workflows/python-regressions.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-regressions-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regressions:
+    name: Python 3.12 focused regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      LITELLM_LOCAL_MODEL_COST_MAP: "true"
+      HF_HUB_OFFLINE: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      AWS_EC2_METADATA_DISABLED: "true"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Install the branch's locked runtime and test tools
+        run: >-
+          python -m pip install -r requirements.lock -c requirements.lock
+          "pytest==8.4.2" "pytest-asyncio==0.26.0"
+      - name: Run the available regression contracts
+        run: python scripts/ci/python-regressions.py
+      - name: Upload the executed test report
+        if: always() && hashFiles('test-results/python-regressions.xml') != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: python-regressions
+          path: test-results/python-regressions.xml
+          retention-days: 7

@@ -17,29 +17,37 @@ import re
 import time
 from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
 
+from agenticx.llms.http_status import exception_chain, exception_text, http_status_code
+
 _log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
 _RATE_LIMIT_PATTERNS = re.compile(
-    r"429|rate.?limit|too many requests|quota exceeded|resource_exhausted",
+    r"rate.?limit|too many requests|quota exceeded|resource_exhausted",
     re.IGNORECASE,
 )
 _SERVER_ERROR_PATTERNS = re.compile(
-    r"50[0-9]|internal.?server.?error|service.?unavailable|bad.?gateway|overloaded",
+    r"internal.?server.?error|service.?unavailable|bad.?gateway|overloaded",
     re.IGNORECASE,
 )
 
 
 def _classify_error(exc: BaseException) -> str:
     """Classify an LLM error into rate_limit / server_error / timeout / unknown."""
-    if isinstance(exc, asyncio.TimeoutError):
+    status_code = http_status_code(exc)
+    if status_code is not None:
+        if status_code == 429:
+            return "rate_limit"
+        if 500 <= status_code < 600:
+            return "server_error"
+        return "unknown"
+    if any(isinstance(item, asyncio.TimeoutError) for item in exception_chain(exc)):
         return "timeout"
-    msg = str(exc)
-    status_code = getattr(exc, "status_code", None)
-    if status_code == 429 or _RATE_LIMIT_PATTERNS.search(msg):
+    msg = exception_text(exc)
+    if _RATE_LIMIT_PATTERNS.search(msg):
         return "rate_limit"
-    if (isinstance(status_code, int) and 500 <= status_code < 600) or _SERVER_ERROR_PATTERNS.search(msg):
+    if _SERVER_ERROR_PATTERNS.search(msg):
         return "server_error"
     return "unknown"
 

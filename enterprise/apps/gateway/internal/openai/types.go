@@ -1,6 +1,9 @@
 package openai
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 type ToolFunction struct {
 	Name        string `json:"name"`
@@ -19,29 +22,29 @@ type ChatMessage struct {
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
 	// ToolCalls is kept verbatim so a relayed tool-call turn is not stripped.
 	// The gateway does not run tools itself.
-	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
-	ToolCallID       string          `json:"tool_call_id,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	CacheControl     json.RawMessage `json:"__cache_control,omitempty"`
+	ToolCalls    json.RawMessage `json:"tool_calls,omitempty"`
+	ToolCallID   string          `json:"tool_call_id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	CacheControl json.RawMessage `json:"__cache_control,omitempty"`
 }
 
 type ChatCompletionRequest struct {
-	Model               string        `json:"model"`
-	Messages            []ChatMessage `json:"messages"`
+	Model               string          `json:"model"`
+	Messages            []ChatMessage   `json:"messages"`
 	System              string          `json:"system,omitempty"`
 	SystemCacheControl  json.RawMessage `json:"-"`
-	Temperature         float64       `json:"temperature,omitempty"`
-	Stream              bool          `json:"stream,omitempty"`
-	MaxCompletionTokens int           `json:"max_completion_tokens,omitempty"`
-	MaxTokens           int           `json:"max_tokens,omitempty"`
-	TopP                float64       `json:"top_p,omitempty"`
-	Stop                []string      `json:"stop,omitempty"`
-	Tools               []Tool        `json:"tools,omitempty"`
-	ToolChoice          any           `json:"tool_choice,omitempty"`
-	ReasoningEffort     string        `json:"reasoning_effort,omitempty"`
+	Temperature         float64         `json:"temperature,omitempty"`
+	Stream              bool            `json:"stream,omitempty"`
+	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"`
+	MaxTokens           int             `json:"max_tokens,omitempty"`
+	TopP                float64         `json:"top_p,omitempty"`
+	Stop                []string        `json:"stop,omitempty"`
+	Tools               []Tool          `json:"tools,omitempty"`
+	ToolChoice          any             `json:"tool_choice,omitempty"`
+	ReasoningEffort     string          `json:"reasoning_effort,omitempty"`
 	// ThinkingBudget tokens for Anthropic/Gemini thinking models (internal pivot field).
-	ThinkingBudget int `json:"-"`
-	PolicyContext *PolicyContext `json:"__policy_context,omitempty"`
+	ThinkingBudget int            `json:"-"`
+	PolicyContext  *PolicyContext `json:"__policy_context,omitempty"`
 }
 
 // PolicyContext is a server-signed provenance assertion, stripped before relay.
@@ -101,6 +104,7 @@ type StreamChunk struct {
 	Created int64          `json:"created"`
 	Model   string         `json:"model"`
 	Choices []StreamChoice `json:"choices"`
+	Usage   *Usage         `json:"usage,omitempty"`
 }
 
 type EmbeddingRequest struct {
@@ -115,8 +119,27 @@ type EmbeddingDatum struct {
 }
 
 type EmbeddingResponse struct {
-	Object string          `json:"object"`
-	Model  string          `json:"model"`
+	Object string           `json:"object"`
+	Model  string           `json:"model"`
 	Data   []EmbeddingDatum `json:"data"`
-	Usage  Usage           `json:"usage"`
+	Usage  Usage            `json:"usage"`
+}
+
+// HasContentDelta distinguishes emitted model output from role/usage metadata.
+// The raw tool-call bytes are inspected without parsing or allocating per token.
+func (c StreamChunk) HasContentDelta() bool {
+	for _, choice := range c.Choices {
+		delta := choice.Delta
+		if delta.Content != "" || delta.ReasoningContent != "" {
+			return true
+		}
+		tool := bytes.TrimSpace(delta.ToolCalls)
+		if len(tool) > 0 && tool[0] == '[' {
+			tool = bytes.TrimSpace(tool[1:])
+			if len(tool) > 0 && tool[0] != ']' {
+				return true
+			}
+		}
+	}
+	return false
 }

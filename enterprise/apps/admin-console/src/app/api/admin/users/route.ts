@@ -92,6 +92,7 @@ export async function POST(request: Request) {
       initialPassword: password ?? null,
       defaultOrgId,
       actorUserId: auth.session.userId,
+      actor: { kind: "user", tenantId: auth.session.tenantId, userId: auth.session.userId, scopes: auth.scopes },
     });
 
     return NextResponse.json({
@@ -105,10 +106,10 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        code: "40000",
+        code: error instanceof Error && error.name === "PrivilegeEscalationError" ? "40300" : "40000",
         message: error instanceof Error ? error.message : "invalid request",
       },
-      { status: 400 }
+      { status: error instanceof Error && error.name === "PrivilegeEscalationError" ? 403 : 400 }
     );
   }
 }
