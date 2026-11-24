@@ -109,7 +109,9 @@ function reactNodeToPlainText(node: ReactNode): string {
   if (node == null || typeof node === "boolean") return "";
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(reactNodeToPlainText).join("");
-  if (isValidElement(node)) return reactNodeToPlainText(node.props.children);
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return reactNodeToPlainText(node.props.children);
+  }
   return "";
 }
 
