@@ -1,4 +1,20 @@
-export {};
+import type * as ReactNS from "react";
+
+/**
+ * @types/react 19 moved the JSX namespace onto React.JSX and removed the
+ * global one. The ambient `namespace React` below does not merge with that
+ * module, so alias the module types here. This keeps existing `JSX.Element`
+ * return types and dependency .d.ts (dnd-kit, monaco) resolving.
+ */
+declare global {
+  namespace JSX {
+    type Element = ReactNS.JSX.Element;
+    type ElementType = ReactNS.JSX.ElementType;
+    type ElementClass = ReactNS.JSX.ElementClass;
+    interface IntrinsicAttributes extends ReactNS.JSX.IntrinsicAttributes {}
+    interface IntrinsicElements extends ReactNS.JSX.IntrinsicElements {}
+  }
+}
 
 /** Electron <webview> in renderer (requires webPreferences.webviewTag). */
 type NearElectronWebview = HTMLElement & {
