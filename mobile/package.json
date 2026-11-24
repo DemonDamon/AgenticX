@@ -18,14 +18,14 @@
     "react-dom": "19.2.3",
     "react-native": "0.88.1",
     "react-native-markdown-display": "^7.0.2",
-    "react-native-safe-area-context": "~5.10.1",
+    "react-native-safe-area-context": "~5.11.1",
     "react-native-screens": "~4.30.1",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
     "@types/react": "~19.3.0",
     "typescript": "~6.0.3",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   },
   "scripts": {
     "start": "expo start",

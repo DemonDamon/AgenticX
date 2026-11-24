@@ -250,3 +250,40 @@ python3 scripts/custom_project.py classify --kind style --where business
 结论是留在业务仓，不提上游 PR，也不改官方仓库。
 
 这个案例的要点：框架只做依赖；存储、规则、桥接、闭环脚本和 UI 全部在业务仓自研，Issue / PR 一条都不用提。
+
+## 13. 照着旧案例起新项目，交付后沉淀
+
+用户说：上次那个审批助手做得不错，这次换一家客户，照着它起一个项目；做完也沉淀成案例。
+
+先看 `doctor` 里「新能力 案例库」是不是「可用」。可用时：
+
+```bash
+agx case search "审批 助手"
+agx case init --case <上一步返回的 case_id> --target ./approval-helper-2
+```
+
+`--target` 必须是空目录或还不存在。业务代码照常写在这个新仓库，框架仍走依赖。
+
+交付结束后：
+
+```bash
+agx case compile --plan ./approval-helper-2/plan.mdc
+```
+
+条目默认写到本地 `./cases`。用户明确同意上报、并确认条目里没有客户名称和真实数据之后，才在同一条命令后加 `--push`。没同意就告诉用户「已在本地生成，尚未上报」。
+
+若 `doctor` 显示「当前安装里没有」，不要照写这些命令。告诉用户发布包还没带案例库，先按案例 1 手工起项目。
+
+## 14. 浏览器扩展里的问题
+
+用户说：浏览器扩展把整页发给会话时漏了表格，我看了代码，知道是哪一行，直接提个 PR 吧。
+
+```bash
+python3 scripts/custom_project.py classify --kind bug --where extension --cause-clear yes --size small
+```
+
+```text
+结论：给官方开 Issue。现在不要提 PR。
+```
+
+官方的 `extension/` 和 `mobile/` 还没写进贡献说明的仓库地图，先在 Issue 里确认。维护者同意后，加 `--maintainer-agreed yes` 再判断一次，那时才允许 PR。复现用合成网页，不要贴客户内网页面。

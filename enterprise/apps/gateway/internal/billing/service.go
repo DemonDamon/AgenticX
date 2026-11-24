@@ -2,6 +2,7 @@ package billing
 
 import (
 	"github.com/agenticx/enterprise/gateway/internal/quota"
+	"log"
 )
 
 // Reservation 预扣结果。
@@ -18,6 +19,7 @@ type SettleResult struct {
 	Reserved int64
 	Actual   int64
 	Delta    int64
+	Error    error
 }
 
 // Service 在 quotaTracker 之上提供 Reserve / Settle 语义（FR-5）。
@@ -73,6 +75,10 @@ func (s *Service) SettleContext(ctx quota.RequestContext, reserved, actual int64
 	if s == nil || s.tracker == nil {
 		return result
 	}
+	if ctx.Reservation != nil {
+		result.Error = s.tracker.FinishReservationTokens(ctx.Reservation, actual)
+		return result
+	}
 	if result.Delta == 0 {
 		return result
 	}
@@ -88,6 +94,10 @@ func (s *Service) ReleaseContext(ctx quota.RequestContext) {
 	if s == nil || s.tracker == nil {
 		return
 	}
+	if ctx.Reservation != nil {
+		s.tracker.ReleaseReservation(ctx.Reservation)
+		return
+	}
 	s.tracker.ReleaseConcurrency(ctx)
 }
 
@@ -97,6 +107,12 @@ func (s *Service) Rollback(userID string, reserved int64) {
 
 func (s *Service) RollbackContext(ctx quota.RequestContext, reserved int64) {
 	if s == nil || s.tracker == nil || reserved <= 0 {
+		return
+	}
+	if ctx.Reservation != nil {
+		if err := s.tracker.FinishReservation(ctx.Reservation, 0, 0); err != nil {
+			log.Printf("[quota] reservation rollback failed: %v", err)
+		}
 		return
 	}
 	s.tracker.RollbackContext(ctx, reserved)

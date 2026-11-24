@@ -2,6 +2,8 @@
  * 集中维护 admin / portal 可授予的 scope 清单。
  * 角色表存 string[]；支持特殊值 "*" 表示该角色拥有全部注册 scope。
  */
+import { PAT_SCOPES } from "@agenticx/core-api";
+
 export const SCOPE_REGISTRY: Record<string, readonly string[]> = {
   admin: ["enter"],
   user: ["read", "create", "update", "delete", "manage"],
@@ -19,9 +21,10 @@ export const SCOPE_REGISTRY: Record<string, readonly string[]> = {
   sso: ["read", "create", "update", "delete", "manage"],
 } as const;
 
-export const ALL_REGISTERED_SCOPES: string[] = Object.entries(SCOPE_REGISTRY).flatMap(([resource, verbs]) =>
-  verbs.map((v) => `${resource}:${v}`)
-);
+export const ALL_REGISTERED_SCOPES: string[] = [...new Set([
+  ...Object.entries(SCOPE_REGISTRY).flatMap(([resource, verbs]) => verbs.map((v) => `${resource}:${v}`)),
+  ...PAT_SCOPES,
+])];
 
 export function isRegisteredScope(scope: string): boolean {
   return scope === "*" || ALL_REGISTERED_SCOPES.includes(scope);
@@ -30,7 +33,7 @@ export function isRegisteredScope(scope: string): boolean {
 /** 展开角色 scopes（含 "*" → 全部注册 scope） */
 export function expandRoleScopes(scopes: string[] | null | undefined): string[] {
   if (!scopes?.length) return [];
-  if (scopes.includes("*")) return [...ALL_REGISTERED_SCOPES];
+  if (scopes.includes("*")) return ["*", ...ALL_REGISTERED_SCOPES];
   return [...new Set(scopes.filter((s) => typeof s === "string" && isRegisteredScope(s)))];
 }
 

@@ -1,3 +1,4 @@
+import { assertActorHasScope, assertActorMayGrantRoles, assertActorMayManageUser, assertDepartmentBelongsToTenant } from "../privilege-guard";
 import type { AuthUser } from "@agenticx/auth";
 import { hashPassword } from "@agenticx/auth";
 import { departments, roles, userRoles, users } from "@agenticx/db-schema/mysql";
@@ -327,6 +328,10 @@ export const mysqlUsersRepository: UsersRepository = {
   },
   getAdminUser: getAdminUserInternal,
   async createAdminUser(input) {
+    assertActorHasScope(input.actor, input.tenantId, "user:create");
+    await assertDepartmentBelongsToTenant(input.tenantId, input.deptId);
+    const codes = input.roleCodes?.length ? input.roleCodes : ["member"];
+    await assertActorMayGrantRoles(input.tenantId, input.actor, codes);
     const db = await getMysqlRepositoryDb();
     const email = input.email.trim().toLowerCase();
     if (!email) throw new Error("email is required");
@@ -334,6 +339,10 @@ export const mysqlUsersRepository: UsersRepository = {
     const existing = await findUserRowByTenantEmail(db, input.tenantId, email);
     if (existing && isActiveUserRow(existing)) {
       throw new Error("email already exists");
+    }
+    if (existing) {
+      assertActorHasScope(input.actor, input.tenantId, "user:update");
+      await assertActorMayManageUser(input.tenantId, input.actor, existing.id);
     }
 
     const suppliedInitialPassword = Boolean(input.initialPassword?.trim());
@@ -371,10 +380,10 @@ export const mysqlUsersRepository: UsersRepository = {
       });
     }
 
-    const codes = input.roleCodes?.length ? input.roleCodes : ["member"];
     const idMap = await mysqlRolesRepository.resolveRoleIdsFromCodes(input.tenantId, codes);
     const roleIds = codes.map((c) => idMap.get(c)).filter((x): x is string => Boolean(x));
     if (roleIds.length === 0) {
+      await assertActorMayGrantRoles(input.tenantId, input.actor, ["member"]);
       const member = await mysqlRolesRepository.getRoleByCode(input.tenantId, "member");
       if (member) roleIds.push(member.id);
     }
@@ -388,7 +397,7 @@ export const mysqlUsersRepository: UsersRepository = {
 
     await insertMysqlAuditEvent({
       tenantId: input.tenantId,
-      actorUserId: input.actorUserId ?? null,
+      actorUserId: input.actor.kind === "user" ? input.actor.userId : null,
       eventType: restored ? "iam.user.restore" : "iam.user.create",
       targetKind: "user",
       targetId: id,
@@ -400,6 +409,10 @@ export const mysqlUsersRepository: UsersRepository = {
     return { user, initialPassword };
   },
   async updateAdminUser(tenantId, id, patch, ctx) {
+    assertActorHasScope(ctx.actor, tenantId, "user:update");
+    await assertDepartmentBelongsToTenant(tenantId, patch.deptId);
+    await assertActorMayManageUser(tenantId, ctx.actor, id);
+    if (patch.roleCodes) await assertActorMayGrantRoles(tenantId, ctx.actor, patch.roleCodes);
     const db = await getMysqlRepositoryDb();
     const [row] = await db
       .select()
@@ -445,7 +458,7 @@ export const mysqlUsersRepository: UsersRepository = {
 
     await insertMysqlAuditEvent({
       tenantId,
-      actorUserId: ctx.actorUserId ?? null,
+      actorUserId: ctx.actor.kind === "user" ? ctx.actor.userId : null,
       eventType: "iam.user.update",
       targetKind: "user",
       targetId: id,
@@ -456,7 +469,9 @@ export const mysqlUsersRepository: UsersRepository = {
     if (!updated) throw new Error("user update failed");
     return updated;
   },
-  async softDeleteUser(tenantId, id, actorUserId) {
+  async softDeleteUser(tenantId, id, actor) {
+    assertActorHasScope(actor, tenantId, "user:delete");
+    await assertActorMayManageUser(tenantId, actor, id);
     const db = await getMysqlRepositoryDb();
     const [row] = await db
       .select({ email: users.email, displayName: users.displayName })
@@ -477,7 +492,7 @@ export const mysqlUsersRepository: UsersRepository = {
 
     await insertMysqlAuditEvent({
       tenantId,
-      actorUserId: actorUserId ?? null,
+      actorUserId: actor.kind === "user" ? actor.userId : null,
       eventType: "iam.user.delete",
       targetKind: "user",
       targetId: id,
@@ -489,6 +504,8 @@ export const mysqlUsersRepository: UsersRepository = {
     });
   },
   async resetUserPassword(input) {
+    assertActorHasScope(input.actor, input.tenantId, "user:update");
+    await assertActorMayManageUser(input.tenantId, input.actor, input.userId);
     const initialPassword = generateInitialPassword();
     const passwordHash = await hashPassword(initialPassword);
     const db = await getMysqlRepositoryDb();
@@ -508,7 +525,7 @@ export const mysqlUsersRepository: UsersRepository = {
 
     await insertMysqlAuditEvent({
       tenantId: input.tenantId,
-      actorUserId: input.actorUserId ?? null,
+      actorUserId: input.actor.kind === "user" ? input.actor.userId : null,
       eventType: "iam.user.reset_password",
       targetKind: "user",
       targetId: input.userId,
@@ -569,6 +586,9 @@ export const mysqlUsersRepository: UsersRepository = {
       });
   },
   async assignRolesIfNone(input) {
+    assertActorHasScope(input.actor, input.tenantId, "user:update");
+    await assertDepartmentBelongsToTenant(input.tenantId, input.defaultDeptId);
+    await assertActorMayGrantRoles(input.tenantId, input.actor, input.roleCodes);
     const db = await getMysqlRepositoryDb();
     const [existing] = await db
       .select({ r: userRoles.roleId })
@@ -588,9 +608,16 @@ export const mysqlUsersRepository: UsersRepository = {
     });
   },
   async upsertUserByEmail(input) {
+    assertActorHasScope(input.actor, input.tenantId, "user:create");
+    await assertDepartmentBelongsToTenant(input.tenantId, input.deptId);
+    await assertActorMayGrantRoles(input.tenantId, input.actor, input.roleCodes);
     const db = await getMysqlRepositoryDb();
     const email = input.email.trim().toLowerCase();
     const existing = await findUserRowByTenantEmail(db, input.tenantId, email);
+    if (existing) {
+      assertActorHasScope(input.actor, input.tenantId, "user:update");
+      await assertActorMayManageUser(input.tenantId, input.actor, existing.id);
+    }
     const now = new Date();
     let userId: string;
 
@@ -659,7 +686,7 @@ export const mysqlUsersRepository: UsersRepository = {
 
     await insertMysqlAuditEvent({
       tenantId: input.tenantId,
-      actorUserId: input.actorUserId ?? null,
+      actorUserId: input.actor.kind === "user" ? input.actor.userId : null,
       eventType: "iam.bulk_import.user_upsert",
       targetKind: "user",
       targetId: userId,
@@ -671,6 +698,10 @@ export const mysqlUsersRepository: UsersRepository = {
     return user;
   },
   async replaceUserRoleAssignments(input) {
+    assertActorHasScope(input.actor, input.tenantId, "user:update");
+    await assertDepartmentBelongsToTenant(input.tenantId, input.defaultDeptId);
+    await assertActorMayManageUser(input.tenantId, input.actor, input.userId);
+    await assertActorMayGrantRoles(input.tenantId, input.actor, input.roleCodes);
     const db = await getMysqlRepositoryDb();
     const idMap = await mysqlRolesRepository.resolveRoleIdsFromCodes(input.tenantId, input.roleCodes);
     const roleIds = input.roleCodes.map((c) => idMap.get(c)).filter((x): x is string => Boolean(x));
