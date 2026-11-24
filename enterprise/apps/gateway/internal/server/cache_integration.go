@@ -11,6 +11,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/inbound"
 	"github.com/agenticx/enterprise/gateway/internal/metering"
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/outbound"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
@@ -97,7 +98,7 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 		OutputTokens:       usage.CompletionTokens,
 		TotalTokens:        usage.TotalTokens,
 	}
-	_ = s.writeAuditEvent(ev)
+	recordDiagnosticFailure(ctx.r.Context(), s.writeAuditEvent(ev), observability.ReasonInternalError)
 
 	if s.refuseCachedRequest(ctx.w, ctx.r, ctx.identity) {
 		return true
@@ -125,6 +126,7 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 			err = writer.err
 		}
 		if err != nil {
+			recordDiagnosticFailure(ctx.r.Context(), err, observability.ReasonDownstreamError)
 			partial := accounting.usage(ctx.estimatedInputTokens, true)
 			if partial.TotalTokens > 0 {
 				s.settleCachedUsage(ctx, partial, spanMeta{Status: "error", ErrorMessage: "cached stream interrupted"})
@@ -141,6 +143,7 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 	resp.Usage = usage
 	cache.WriteJSONResponse(writer, cache.Entry{Response: resp})
 	if writer.err != nil {
+		recordDiagnosticFailure(ctx.r.Context(), writer.err, observability.ReasonDownstreamError)
 		if errors.Is(writer.err, quota.ErrConcurrencyLeaseLost) {
 			writeAPIError(ctx.w, leaseAwareAPIError(writer.err))
 		}
@@ -213,6 +216,9 @@ func (s *Server) reportUsageDetailed(
 	})
 	if s.traceReporter != nil && strings.TrimSpace(identity.TraceID) != "" && identity.TraceStep > 0 {
 		meta := map[string]any{}
+		if identity.diagnostics != nil {
+			meta["request_phases"] = identity.diagnostics.Snapshot().TraceMetadata()
+		}
 		if stage := strings.TrimSpace(firstNonEmpty(span.Stage, identity.TraceStage)); stage != "" {
 			meta["stage"] = stage
 		}
