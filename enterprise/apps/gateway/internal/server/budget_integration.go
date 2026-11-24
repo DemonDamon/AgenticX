@@ -8,6 +8,7 @@ import (
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
 	"github.com/agenticx/enterprise/gateway/internal/billing"
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
@@ -43,6 +44,12 @@ func (s *Server) applyBudgetFallback(req *openai.ChatCompletionRequest, decision
 
 func (s *Server) rollbackBudgetReservation(identity requestIdentity, model string, check quota.CheckResult) {
 	if s.quotaTracker == nil {
+		return
+	}
+	if check.Reservation != nil {
+		if err := s.quotaTracker.FinishReservation(check.Reservation, 0, 0); err != nil {
+			s.logger.Error("quota reservation rollback failed", "error", err)
+		}
 		return
 	}
 	if check.BudgetReceipt != nil {
@@ -110,6 +117,12 @@ func (s *Server) runChatQuotaGate(
 	estimatedInputTokens int,
 	reserveTokens int64,
 ) (quota.CheckResult, billing.Reservation, bool) {
+	phases := observability.PhasesFromContext(r.Context())
+	if phases != nil {
+		started := time.Now()
+		defer func() { phases.ObserveAdmission(time.Since(started)) }()
+	}
+	qctx.Context = r.Context()
 	costModel := req.Model
 	if strings.TrimSpace(qctx.Model) != "" {
 		costModel = qctx.Model
@@ -118,6 +131,8 @@ func (s *Server) runChatQuotaGate(
 	if s.useChannelRelay() {
 		reservation := s.billingService.ReserveContext(qctx, reserveTokens, estimatedCost)
 		if !reservation.Allowed {
+			s.finishChatReservation(reservation.Check.Reservation)
+			phases.SetReason(observability.ReasonQuotaDenied)
 			s.writeQuotaError(w, reservation.Check)
 			return reservation.Check, reservation, false
 		}
@@ -128,6 +143,8 @@ func (s *Server) runChatQuotaGate(
 	}
 	check := s.quotaTracker.CheckRequest(qctx, int64(estimatedInputTokens), estimatedCost)
 	if !check.Allowed {
+		s.finishChatReservation(check.Reservation)
+		phases.SetReason(observability.ReasonQuotaDenied)
 		s.writeQuotaError(w, check)
 		return check, billing.Reservation{}, false
 	}
@@ -138,6 +155,22 @@ func (s *Server) runChatQuotaGate(
 }
 
 func (s *Server) rollbackChatQuotaAndBudget(identity requestIdentity, model string, tokens int, check quota.CheckResult) {
+	if check.Reservation != nil {
+		s.rollbackBudgetReservation(identity, model, check)
+		return
+	}
 	s.rollbackQuotaReservation(s.quotaContext(identity, model), tokens)
 	s.rollbackBudgetReservation(identity, model, check)
+}
+
+// finishChatReservation catches every early return after admission. A selected
+// successful/partial outcome is immutable, so it cannot refund consumed output.
+func (s *Server) finishChatReservation(receipt *quota.ReservationReceipt) {
+	if s.quotaTracker == nil || receipt == nil {
+		return
+	}
+	if err := s.quotaTracker.FinishReservation(receipt, 0, 0); err != nil {
+		s.logger.Error("quota reservation finalization failed", "error", err)
+	}
+	s.quotaTracker.ReleaseReservation(receipt)
 }

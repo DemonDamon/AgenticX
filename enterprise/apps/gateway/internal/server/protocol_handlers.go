@@ -14,6 +14,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/inbound"
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/outbound"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
@@ -173,6 +174,12 @@ func (s *Server) dispatchProtocol(
 	}
 	r = s.withRelayContext(r, identity.TenantID, req.Model, admission)
 
+	identity.quotaReservation = budgetCheck.Reservation
+	qctx.Reservation = budgetCheck.Reservation
+	defer s.finishChatReservation(budgetCheck.Reservation)
+	r, cancelLease := s.bindChatLease(r, budgetCheck.Reservation)
+	defer cancelLease()
+
 	decision := s.decider.Decide(r, req.Model)
 	if !req.Stream && s.tryServeProtocolCache(w, cacheServeContext{
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
@@ -209,6 +216,9 @@ func (s *Server) protocolComplete(
 		return
 	}
 	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
+	if concurrencyLeaseLost(identity) {
+		err = quota.ErrConcurrencyLeaseLost
+	}
 	decision := routingDecisionFromRelay(result, relayModel(req.Model, result.ResolvedModel), s.decider.Decide(r, req.Model))
 	if err != nil {
 		s.billingService.RollbackContext(qctx, reservedTokens)
@@ -223,7 +233,7 @@ func (s *Server) protocolComplete(
 			writeAPIError(w, adaptor.MapUpstreamError(up.StatusCode, up.Body, session.inbound))
 			return
 		}
-		writeAPIError(w, openai.Internal(err.Error()))
+		writeAPIError(w, leaseAwareAPIError(err))
 		return
 	}
 	resp := result.Response
@@ -246,10 +256,18 @@ func (s *Server) protocolComplete(
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
-	actualTotal := int64(providerInputTokens + providerOutputTokens)
+	actualTotal := int64(resp.Usage.TotalTokens)
+	if actualTotal <= 0 {
+		actualTotal = int64(providerInputTokens + providerOutputTokens)
+	}
 	actualModel := result.ResolvedModel
 	if strings.TrimSpace(actualModel) == "" {
 		actualModel = req.Model
+	}
+	resp.Usage.PromptTokens = providerInputTokens
+	resp.Usage.CompletionTokens = providerOutputTokens
+	if resp.Usage.TotalTokens == 0 {
+		resp.Usage.TotalTokens = providerInputTokens + providerOutputTokens
 	}
 	settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, actualTotal, actualModel)
 	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
@@ -278,6 +296,10 @@ func (s *Server) protocolComplete(
 		return
 	}
 
+	if concurrencyLeaseLost(identity) {
+		writeAPIError(w, leaseAwareAPIError(quota.ErrConcurrencyLeaseLost))
+		return
+	}
 	switch session.outbound {
 	case inbound.ProtocolClaude:
 		enc := outbound.NewClaudeStreamEncoder(req.Model)
@@ -333,13 +355,15 @@ func (s *Server) protocolStream(
 	case inbound.ProtocolClaude:
 		claudeEnc = outbound.NewClaudeStreamEncoder(req.Model)
 		if line := claudeEnc.MessageStart(); len(line) > 0 {
-			_, _ = w.Write(line)
+			_, writeErr := w.Write(line)
+			recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 			flusher.Flush()
 		}
 	case inbound.ProtocolResponses:
 		responsesEnc = outbound.NewResponsesStreamEncoder(req.Model)
 		if line := responsesEnc.Created(); len(line) > 0 {
-			_, _ = w.Write(line)
+			_, writeErr := w.Write(line)
+			recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 			flusher.Flush()
 		}
 	case inbound.ProtocolGemini:
@@ -347,10 +371,15 @@ func (s *Server) protocolStream(
 	}
 
 	var responseBuilder strings.Builder
+	var accounting streamAccounting
 	var reasoningState openai.StreamReasoningState
 	var blockedHits []policyengine.HitEvent
 
 	push := func(chunk openai.StreamChunk) error {
+		if concurrencyLeaseLost(identity) {
+			return quota.ErrConcurrencyLeaseLost
+		}
+		accounting.observe(chunk)
 		transform.ApplyStreamDelta(&chunk, thinkingMode)
 		if len(chunk.Choices) > 0 {
 			delta := &chunk.Choices[0].Delta
@@ -380,18 +409,21 @@ func (s *Server) protocolStream(
 		case inbound.ProtocolClaude:
 			for _, line := range claudeEnc.EncodeChunk(chunk) {
 				if _, err := w.Write(line); err != nil {
+					recordDiagnosticFailure(r.Context(), err, observability.ReasonDownstreamError)
 					return err
 				}
 			}
 		case inbound.ProtocolGemini:
 			for _, line := range geminiEnc.EncodeChunk(chunk) {
 				if _, err := w.Write(line); err != nil {
+					recordDiagnosticFailure(r.Context(), err, observability.ReasonDownstreamError)
 					return err
 				}
 			}
 		case inbound.ProtocolResponses:
 			for _, line := range responsesEnc.EncodeChunk(chunk) {
 				if _, err := w.Write(line); err != nil {
+					recordDiagnosticFailure(r.Context(), err, observability.ReasonDownstreamError)
 					return err
 				}
 			}
@@ -401,6 +433,7 @@ func (s *Server) protocolStream(
 				return err
 			}
 			if _, err := w.Write([]byte("data: " + string(payload) + "\n\n")); err != nil {
+				recordDiagnosticFailure(r.Context(), err, observability.ReasonDownstreamError)
 				return err
 			}
 		}
@@ -410,20 +443,29 @@ func (s *Server) protocolStream(
 
 	streamResult, streamErr := s.relayExecutor.Stream(r.Context(), req, req.Model, channelIdentity(identity), push)
 	decision := routingDecisionFromStream(streamResult, relayModel(req.Model, streamResult.ResolvedModel), s.decider.Decide(r, req.Model))
+	if concurrencyLeaseLost(identity) {
+		streamErr = quota.ErrConcurrencyLeaseLost
+	}
 	requestTimedOut := errors.Is(r.Context().Err(), context.DeadlineExceeded)
 	if requestTimedOut {
 		streamErr = fmt.Errorf("stream:request_timeout: %w", r.Context().Err())
 	}
 
+	recordStreamDiagnostic(r.Context(), streamErr, len(blockedHits) > 0)
+
 	if streamErr != nil {
 		if requestTimedOut {
 			defer func() {
-				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+				_, writeErr := w.Write([]byte("data: [DONE]\n\n"))
+				recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 				flusher.Flush()
 			}()
 		}
-		s.billingService.RollbackContext(qctx, reservedTokens)
-		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
+		s.settleInterruptedStreamObservedUsage(accounting.usage(estimatedInputTokens, true), identity, decision, estimatedInputTokens, estimateTextTokens(responseBuilder.String()), reservedTokens, &budgetCheck, qctx, spanMeta{Status: "error", ErrorMessage: sanitizeTraceError(formatStreamError(streamErr)), PromptText: joinMessages(req.Messages), CompletionText: responseBuilder.String(), DurationMS: durationMSSince(startedAt)})
+		if errors.Is(streamErr, quota.ErrConcurrencyLeaseLost) {
+			writeStreamAPIError(w, flusher, leaseAwareAPIError(streamErr))
+			return
+		}
 		if len(blockedHits) > 0 {
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			return
@@ -456,39 +498,45 @@ func (s *Server) protocolStream(
 		writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", []policyengine.HitEvent{modRes.Hit})
 		return
 	}
-	inputTokens := estimatedInputTokens
-	outputTokens := estimateTextTokens(responseText)
+	streamUsage := accounting.usage(estimatedInputTokens, false)
+	inputTokens := streamUsage.PromptTokens
+	outputTokens := streamUsage.CompletionTokens
 	actualModel := streamResult.ResolvedModel
 	if strings.TrimSpace(actualModel) == "" {
 		actualModel = req.Model
 	}
-	settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, int64(inputTokens+outputTokens), actualModel)
-	s.reportUsageDetailed(identity, decision, openai.Usage{
-		PromptTokens: inputTokens, CompletionTokens: outputTokens, TotalTokens: inputTokens + outputTokens,
-	}, &budgetCheck, spanMeta{
+	settle := s.settleRelayQuota(r.Context(), identity, qctx, reservedTokens, int64(streamUsage.TotalTokens), actualModel)
+	s.reportUsageDetailed(identity, decision, streamUsage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
 		PromptText:     joinMessages(req.Messages),
 		CompletionText: responseText,
 	})
 
-	usage := openai.Usage{PromptTokens: inputTokens, CompletionTokens: outputTokens, TotalTokens: inputTokens + outputTokens}
+	if concurrencyLeaseLost(identity) {
+		writeStreamPolicyError(w, flusher, "50302", formatStreamError(quota.ErrConcurrencyLeaseLost), nil)
+		return
+	}
+	usage := streamUsage
 	switch session.outbound {
 	case inbound.ProtocolClaude:
 		for _, line := range claudeEnc.Final(usage) {
-			_, _ = w.Write(line)
+			_, writeErr := w.Write(line)
+			recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 		}
 	case inbound.ProtocolGemini:
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		_, writeErr := w.Write([]byte("data: [DONE]\n\n"))
+		recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 	case inbound.ProtocolResponses:
 		if line := responsesEnc.Done(usage); len(line) > 0 {
-			_, _ = w.Write(line)
+			_, writeErr := w.Write(line)
+			recordDiagnosticFailure(r.Context(), writeErr, observability.ReasonDownstreamError)
 		}
 	}
 	flusher.Flush()
 
 	outboundProto := outboundProtocolForChannel(streamResult.Channel, session.outbound)
 	ev := s.protocolAuditEvent(identity, r, decision, req.Model, session.inbound, outboundProto, derived, thinkingMode, startedAt, relay.CompleteResult{Channel: streamResult.Channel, KeyRef: streamResult.KeyRef}, streamResult, estimatedInputTokens, inputTokens, outputTokens, settle.Delta, responseText, req.Messages)
-	_ = s.writeAuditEvent(ev)
+	recordDiagnosticFailure(r.Context(), s.writeAuditEvent(ev), observability.ReasonInternalError)
 }
 
 func outboundProtocolForChannel(ch channel.Channel, clientProtocol string) string {
