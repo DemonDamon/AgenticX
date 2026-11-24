@@ -1,0 +1,56 @@
+name: Gateway Shared Concurrency
+
+on:
+  pull_request:
+    paths:
+      - "enterprise/apps/gateway/**"
+      - ".github/workflows/gateway-shared-concurrency.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-shared-concurrency-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shared-concurrency:
+    name: Shared leases and independent gateway processes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: enterprise/apps/gateway/go.mod
+          cache-dependency-path: |
+            enterprise/apps/gateway/go.sum
+            enterprise/packages/policy-engine/go.sum
+            connector-runtime/go.sum
+      - name: Run lease and receipt regressions with race detection
+        working-directory: enterprise/apps/gateway
+        run: go test -count=1 -race ./internal/quota ./internal/billing ./internal/server
+      - name: Verify real shared storage and two gateway processes
+        working-directory: enterprise/apps/gateway
+        env:
+          GATEWAY_LEASE_TEST_REDIS_URL: redis://127.0.0.1:6379/15
+          GATEWAY_LEASE_TEST_ALLOW_PAUSE: "1"
+        run: |
+          set -euo pipefail
+          go test -count=1 -p 1 -race -json ./internal/quota ./internal/server -run '^(TestSharedConcurrencyRealRedis|TestSharedConcurrencyAcrossGatewayProcessesRealRedis|TestConcurrencyHTTPStreamPauseAndLossRealRedis)$' | tee shared-result.jsonl
+          python3 - <<'PY_GATE'
+          import json
+          events = [json.loads(line) for line in open("shared-result.jsonl")]
+          for name in ("TestSharedConcurrencyRealRedis", "TestSharedConcurrencyAcrossGatewayProcessesRealRedis", "TestConcurrencyHTTPStreamPauseAndLossRealRedis"):
+              selected = [e for e in events if e.get("Test") == name or e.get("Test", "").startswith(name + "/")]
+              assert any(e.get("Action") == "pass" for e in selected), f"{name} did not pass"
+              assert not any(e.get("Action") == "skip" for e in selected), f"{name} skipped"
+          PY_GATE

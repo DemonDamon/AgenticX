@@ -35,39 +35,42 @@ func tokenWindowPoolKey(kind string, ctx RequestContext, period string) PoolKey 
 	}
 }
 
-// checkTokenWindowLimits enforces day/week token ceilings with approximate counters.
-func (t *Tracker) checkTokenWindowLimits(ctx RequestContext, rule Rule, tokens int64) (CheckResult, bool) {
+// reserveTokenWindowReceipt records successful precharges before checking later windows.
+func (t *Tracker) reserveTokenWindowReceipt(ctx RequestContext, rule Rule, tokens int64, receipt *ReservationReceipt) (CheckResult, bool) {
 	if t == nil || t.poolCounter == nil || !tokenWindowFeatureEnabled() || tokens <= 0 {
 		return CheckResult{}, false
 	}
-	checks := []struct {
+	var warning CheckResult
+	for _, c := range []struct {
 		kind  string
 		limit int64
-	}{
-		{"day", rule.DailyTokens},
-		{"week", rule.WeeklyTokens},
-	}
-	now := requestCountNow()
-	for _, c := range checks {
+	}{{"day", rule.DailyTokens}, {"week", rule.WeeklyTokens}} {
 		if c.limit <= 0 {
 			continue
 		}
-		period := requestWindowPeriod(c.kind, now)
+		period := requestWindowPeriod(c.kind, requestCountNow())
 		key := tokenWindowPoolKey(c.kind, ctx, period)
 		current, err := t.poolCounter.Current(key)
-		if err != nil && rule.Action == ActionBlock {
-			return blockedResult("token_"+c.kind, rule, current, c.limit), true
+		if err != nil {
+			return CheckResult{Allowed: false, StorageError: true, Kind: "token_" + c.kind, Rule: rule, Description: "quota window storage failed"}, true
 		}
 		if current+tokens > c.limit {
 			if rule.Action == ActionBlock {
 				return blockedResult("token_"+c.kind, rule, current, c.limit), true
 			}
-			_, _ = t.poolCounter.Add(key, tokens, LedgerEventReserve, "")
-			return warnResult("token_"+c.kind, rule), true
+			warning = warnResult("token_"+c.kind, rule)
 		}
-		if _, addErr := t.poolCounter.Add(key, tokens, LedgerEventReserve, ""); addErr != nil && rule.Action == ActionBlock {
-			return blockedResult("token_"+c.kind, rule, current, c.limit), true
+		line := ReservationLine{Kind: c.kind, Key: key, Period: period, Rule: rule, Reserved: tokens, ReserveID: receipt.ID + "/reserve/" + c.kind}
+		_, databaseCounter := t.poolCounter.(*PGPoolCounter)
+		if databaseCounter {
+			receipt.Lines = append(receipt.Lines, line)
+		}
+		if _, err = t.poolCounter.Add(key, tokens, LedgerEventReserve, line.ReserveID); err != nil {
+			return CheckResult{Allowed: false, StorageError: true, Kind: "token_" + c.kind, Rule: rule, Description: "quota window storage failed"}, true
+		}
+		if !databaseCounter {
+			receipt.Lines = append(receipt.Lines, line)
 		}
 	}
-	return CheckResult{}, false
+	return warning, warning.Warn
 }

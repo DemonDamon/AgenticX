@@ -12,6 +12,7 @@ import (
 
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
+	"github.com/agenticx/enterprise/gateway/internal/streamio"
 )
 
 // AzureAdaptor calls Azure OpenAI deployment endpoints with api-key auth.
@@ -109,9 +110,7 @@ func (a *AzureAdaptor) Stream(
 	}
 	setAzureHeaders(httpReq, apiKey)
 	httpReq.Header.Set("Accept", "text/event-stream")
-	streamClient := *a.httpClient
-	streamClient.Timeout = 0
-	resp, err := streamClient.Do(httpReq)
+	resp, err := streamio.DoStream(a.httpClient, httpReq, a.streamCfg)
 	if err != nil {
 		return fmt.Errorf("azure stream failed: %w", err)
 	}
@@ -119,7 +118,7 @@ func (a *AzureAdaptor) Stream(
 	if resp.StatusCode >= 400 {
 		return readUpstreamError(resp)
 	}
-	return parseSSEStream(resp.Body, a.streamCfg, push)
+	return openai.ReadSSE(ctx, resp.Body, a.streamCfg, push)
 }
 
 func (a *AzureAdaptor) Embeddings(

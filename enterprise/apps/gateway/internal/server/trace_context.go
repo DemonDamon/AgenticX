@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 )
 
 const (
@@ -35,6 +36,7 @@ func enrichTraceFromRequest(identity requestIdentity, r *http.Request) requestId
 	if r == nil {
 		return identity
 	}
+	identity.diagnostics = observability.PhasesFromContext(r.Context())
 	identity.TraceID = strings.TrimSpace(r.Header.Get(headerTraceID))
 	identity.TraceStep = parseTraceStep(r.Header.Get(headerTraceStep))
 	identity.TraceStage = sanitizeStage(r.Header.Get(headerTraceStage))
