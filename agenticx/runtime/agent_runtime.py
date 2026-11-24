@@ -3010,11 +3010,11 @@ def _tool_result_ok_flag(result: Any) -> Optional[bool]:
     """
     if not isinstance(result, str):
         return None
-    head = result.lstrip()[:4000]
-    if not head.startswith("{"):
+    text = result.lstrip()
+    if not text.startswith("{"):
         return None
     try:
-        parsed = json.loads(head)
+        parsed = json.loads(text)
     except Exception:
         return None
     if not isinstance(parsed, dict):
@@ -3375,7 +3375,10 @@ def _prepare_tool_result_for_context(
     raw_result: str,
     budget_cfg: ToolResultBudgetConfig,
 ) -> ToolResultObservation:
-    compacted = runtime.compactor.micro_compact_tool_result(tool_name, raw_result)
+    if tool_name in getattr(runtime, "_preserve_tool_results", ()):
+        compacted = raw_result
+    else:
+        compacted = runtime.compactor.micro_compact_tool_result(tool_name, raw_result)
     try:
         observation = prepare_tool_result_observation(
             session,
@@ -3596,11 +3599,15 @@ class AgentRuntime:
         mid_turn_persist: Optional[Callable[[], None]] = None,
         clarify_gate: Optional[Any] = None,
         is_unattended: bool = False,
+        preserve_tool_results: Optional[set[str]] = None,
         llm_factory: Optional[Callable[[], Any]] = None,
         checkpoint_store: Optional[Any] = None,
         run_recorder: Optional[Any] = None,
     ) -> None:
         self.llm = llm
+        # Trusted integrations may preserve structured protocol results intact.
+        # Context pressure and turn compaction still follow the existing budget.
+        self._preserve_tool_results = frozenset(preserve_tool_results or ())
         self._llm_factory = llm_factory
         self.confirm_gate = confirm_gate
         self._checkpoint_store = checkpoint_store
@@ -8011,7 +8018,7 @@ class AgentRuntime:
                 }
                 # schema 探索：同一工具连续失败但 error 内容不同，认知上仍在推进
                 EXPLORATORY_TOOLS = {"mcp_call", "list_mcps", "mcp_connect"}
-                result_status = _tool_result_status(result)
+                result_status = _tool_result_status(raw_result)
                 is_error_result = result_status == "error"
                 logical_progress = (
                     tool_name in PROGRESS_TOOLS
@@ -8032,7 +8039,9 @@ class AgentRuntime:
                         ):
                             duplicate_evidence = True
                             logical_progress = False
-                ok_flag = _tool_result_ok_flag(result)
+                # Success is execution metadata, so read the complete result
+                # before its model-facing projection can truncate the JSON.
+                ok_flag = _tool_result_ok_flag(raw_result)
                 if ok_flag is True:
                     # Meta tools (create_avatar, delegate_to_avatar, ...) return
                     # {"ok": true}; a confirmed success must count as progress.
