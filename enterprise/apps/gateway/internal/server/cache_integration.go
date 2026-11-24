@@ -65,19 +65,24 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 	if hit.Layer == cache.LayerL1 || hit.Layer == cache.LayerL2 {
 		usage = s.cacheService.GatewayCacheUsage(hit.Entry, s.cacheService.Config().CacheDiscountRatio)
 	}
+	qctx := s.quotaContext(ctx.identity, ctx.req.Model)
+	if ctx.identity.quotaReservation != nil {
+		qctx.Reservation = ctx.identity.quotaReservation
+	} else if ctx.budgetCheck != nil {
+		qctx.Reservation = ctx.budgetCheck.Reservation
+	}
+	actual := int64(usage.TotalTokens)
+	if actual <= 0 {
+		actual = int64(usage.PromptTokens + usage.CompletionTokens)
+	}
+	if s.useChannelRelay() {
+		s.billingService.SettleContext(qctx, ctx.reservedTokens, actual)
+	} else {
+		s.reconcileQuotaUsage(ctx.identity, ctx.req.Model, ctx.estimatedInputTokens, int(actual))
+	}
 	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck, spanMeta{
 		DurationMS: durationMSSince(ctx.startedAt),
 	})
-	if s.useChannelRelay() {
-		actual := int64(usage.PromptTokens + usage.CompletionTokens)
-		s.billingService.SettleContext(
-			s.quotaContext(ctx.identity, ctx.req.Model),
-			ctx.reservedTokens,
-			actual,
-		)
-	} else {
-		s.reconcileQuotaUsage(ctx.identity, ctx.req.Model, ctx.estimatedInputTokens, usage.PromptTokens+usage.CompletionTokens)
-	}
 
 	latencyTotal := time.Since(ctx.startedAt).Milliseconds()
 	ev := audit.Event{
@@ -144,7 +149,15 @@ func (s *Server) reportUsageDetailed(
 		cost = result.CostUSD
 		pricingVersion = result.PricingVersion
 	}
-	if budgetCheck != nil && s.quotaTracker != nil {
+	receipt := identity.quotaReservation
+	if receipt == nil && budgetCheck != nil {
+		receipt = budgetCheck.Reservation
+	}
+	if receipt != nil && s.quotaTracker != nil {
+		if err := s.quotaTracker.FinishReservation(receipt, int64(n.TotalTokens), cost); err != nil {
+			s.logger.Error("quota reservation settlement failed", "error", err)
+		}
+	} else if budgetCheck != nil && s.quotaTracker != nil {
 		s.quotaTracker.SettleCheckedBudget(
 			s.quotaContext(identity, decision.Model),
 			*budgetCheck,
@@ -307,19 +320,24 @@ func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeCont
 	if hit.Layer == cache.LayerL1 || hit.Layer == cache.LayerL2 {
 		usage = s.cacheService.GatewayCacheUsage(hit.Entry, s.cacheService.Config().CacheDiscountRatio)
 	}
+	qctx := s.quotaContext(ctx.identity, ctx.req.Model)
+	if ctx.identity.quotaReservation != nil {
+		qctx.Reservation = ctx.identity.quotaReservation
+	} else if ctx.budgetCheck != nil {
+		qctx.Reservation = ctx.budgetCheck.Reservation
+	}
+	actual := int64(usage.TotalTokens)
+	if actual <= 0 {
+		actual = int64(usage.PromptTokens + usage.CompletionTokens)
+	}
+	if s.useChannelRelay() {
+		s.billingService.SettleContext(qctx, ctx.reservedTokens, actual)
+	} else {
+		s.reconcileQuotaUsage(ctx.identity, ctx.req.Model, ctx.estimatedInputTokens, int(actual))
+	}
 	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck, spanMeta{
 		DurationMS: durationMSSince(ctx.startedAt),
 	})
-	if s.useChannelRelay() {
-		actual := int64(usage.PromptTokens + usage.CompletionTokens)
-		s.billingService.SettleContext(
-			s.quotaContext(ctx.identity, ctx.req.Model),
-			ctx.reservedTokens,
-			actual,
-		)
-	} else {
-		s.reconcileQuotaUsage(ctx.identity, ctx.req.Model, ctx.estimatedInputTokens, usage.PromptTokens+usage.CompletionTokens)
-	}
 	resp := hit.Entry.Response
 	resp.Usage = usage
 	_ = s.writeAuditEvent(audit.Event{
