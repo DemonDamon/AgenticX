@@ -1,6 +1,7 @@
 package quota
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ func sharedLimiter() *RateLimiter {
 
 // RequestContext carries identity dimensions for quota evaluation.
 type RequestContext struct {
+	Context     context.Context
 	TenantID    string
 	UserID      string
 	DeptID      string
@@ -49,7 +51,7 @@ type CheckResult struct {
 func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64) (result CheckResult) {
 	cfg := t.loadConfig()
 	rule := selectRuleExtended(cfg, ctx)
-	lim := sharedLimiter()
+	lim := t.rateLimiter()
 	receipt := &ReservationReceipt{ID: newLedgerID()}
 	defer func() {
 		result.Reservation = receipt
@@ -99,15 +101,22 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 		}
 	}
 	if rule.MaxConcurrency > 0 {
-		key := rateKey("concurrency", ctx)
-		ok, used := lim.AcquireConcurrency(key, rule.MaxConcurrency)
-		if !ok {
+		parent := ctx.Context
+		if parent == nil {
+			parent = context.Background()
+		}
+		lease, used, err := lim.AcquireConcurrencyLease(parent, concurrencyKey(ctx), rule.MaxConcurrency)
+		if err != nil {
+			return CheckResult{Allowed: false, StorageError: true, Kind: "concurrency", Rule: rule, Description: "concurrency storage unavailable"}
+		}
+		if lease == nil {
 			if rule.Action == ActionBlock {
 				return blockedResult("concurrency", rule, int64(used), int64(rule.MaxConcurrency))
 			}
 			remember(warnResult("concurrency", rule))
 		} else {
-			receipt.release = func() { lim.ReleaseConcurrency(key) }
+			receipt.Lease = lease
+			receipt.release = lease.Release
 		}
 	}
 	monthly := t.reserveMonthlyReceipt(ctx, cfg, tokens, receipt)

@@ -943,6 +943,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	identity.quotaReservation = budgetCheck.Reservation
 	qctx.Reservation = budgetCheck.Reservation
 	defer s.finishChatReservation(budgetCheck.Reservation)
+	r, cancelLease := s.bindChatLease(r, budgetCheck.Reservation)
+	defer cancelLease()
 
 	cacheCtx := cacheServeContext{
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
@@ -965,6 +967,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := s.provider.Complete(r.Context(), req, decision)
+	if concurrencyLeaseLost(identity) {
+		err = quota.ErrConcurrencyLeaseLost
+	}
 	if err != nil {
 		rollbackModel := req.Model
 		if admission.virtualName != "" {
@@ -977,7 +982,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			ErrorMessage: sanitizeTraceError(err.Error()),
 			PromptText:   joinMessages(req.Messages),
 		})
-		writeAPIError(w, openai.Internal(err.Error()))
+		writeAPIError(w, leaseAwareAPIError(err))
 		return
 	}
 	responseContent := ""
@@ -1111,6 +1116,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, openai.Internal("audit write failed"))
 		return
 	}
+	if concurrencyLeaseLost(identity) {
+		writeAPIError(w, leaseAwareAPIError(quota.ErrConcurrencyLeaseLost))
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1215,7 +1224,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.provider.Embeddings(r.Context(), req, decision)
 	if err != nil {
 		s.rollbackQuotaReservation(s.quotaContext(identity, req.Model), estimatedInputTokens)
-		writeAPIError(w, openai.Internal(err.Error()))
+		writeAPIError(w, leaseAwareAPIError(err))
 		return
 	}
 	inputTokens := resp.Usage.PromptTokens
@@ -1293,6 +1302,9 @@ func (s *Server) handleStream(
 	}
 
 	push := func(chunk openai.StreamChunk) error {
+		if concurrencyLeaseLost(identity) {
+			return quota.ErrConcurrencyLeaseLost
+		}
 		accounting.observe(chunk)
 		if firstTokenAt.IsZero() {
 			firstTokenAt = time.Now()
@@ -1336,6 +1348,9 @@ func (s *Server) handleStream(
 		decision = routingDecisionFromStream(streamResult, relayModel(req.Model, streamResult.ResolvedModel), decision)
 	} else {
 		streamErr = s.provider.Stream(r.Context(), req, decision, push)
+	}
+	if concurrencyLeaseLost(identity) {
+		streamErr = quota.ErrConcurrencyLeaseLost
 	}
 	requestTimedOut := errors.Is(r.Context().Err(), context.DeadlineExceeded)
 	if requestTimedOut {
@@ -1539,6 +1554,10 @@ func (s *Server) handleStream(
 		return
 	}
 
+	if concurrencyLeaseLost(identity) {
+		writeStreamPolicyError(w, flusher, "50302", formatStreamError(quota.ErrConcurrencyLeaseLost), nil)
+		return
+	}
 	usagePayload, _ := json.Marshal(map[string]any{
 		"agenticx_usage": map[string]any{
 			"input_tokens":  inputTokens,
@@ -1698,6 +1717,10 @@ func (s *Server) applyQuotaHeaders(w http.ResponseWriter, check quota.CheckResul
 }
 
 func (s *Server) writeQuotaError(w http.ResponseWriter, check quota.CheckResult) {
+	if check.StorageError && check.Kind == "concurrency" {
+		writeAPIError(w, openai.APIError{Code: "50301", Message: "并发控制暂时不可用，请稍后重试。", HTTPStatus: http.StatusServiceUnavailable})
+		return
+	}
 	if check.StorageError {
 		writeAPIError(w, openai.Internal("quota storage unavailable"))
 		return

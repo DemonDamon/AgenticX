@@ -116,6 +116,7 @@ func (s *Server) runChatQuotaGate(
 	estimatedInputTokens int,
 	reserveTokens int64,
 ) (quota.CheckResult, billing.Reservation, bool) {
+	qctx.Context = r.Context()
 	costModel := req.Model
 	if strings.TrimSpace(qctx.Model) != "" {
 		costModel = qctx.Model

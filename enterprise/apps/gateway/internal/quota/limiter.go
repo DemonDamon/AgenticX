@@ -7,9 +7,13 @@ import (
 
 // RateLimiter provides TPM/RPM windows via a pluggable backend and in-process concurrency semaphores.
 type RateLimiter struct {
-	backend     limiterBackend
-	mu          sync.Mutex
-	concurrency map[string]int
+	concurrencyWarn  sync.Once
+	concurrencyStore concurrencyStore
+	concurrencyErr   error
+	leaseConfig      leaseSettings
+	backend          limiterBackend
+	mu               sync.Mutex
+	concurrency      map[string]int
 }
 
 func NewRateLimiter() *RateLimiter {
@@ -20,7 +24,7 @@ func NewRateLimiterWithBackend(backend limiterBackend) *RateLimiter {
 	if backend == nil {
 		backend = newInProcessBackend()
 	}
-	return &RateLimiter{
+	return &RateLimiter{concurrencyStore: &localConcurrencyStore{}, leaseConfig: defaultLeaseSettings(),
 		backend:     backend,
 		concurrency: map[string]int{},
 	}
@@ -80,4 +84,14 @@ type windowCount struct {
 	times  []time.Time
 	limit  int
 	window time.Duration
+}
+
+// Close releases the shared client's socket pool after its requests have ended.
+func (l *RateLimiter) Close() error {
+	if l != nil {
+		if backend, ok := l.backend.(*redisLimiterBackend); ok {
+			return backend.client.Close()
+		}
+	}
+	return nil
 }
