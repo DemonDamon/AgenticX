@@ -1,0 +1,297 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 2600" font-family="Noto Sans SC, PingFang SC, sans-serif">
+  <defs>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#2B2F36" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <!-- ======== background ======== -->
+  <rect x="0" y="0" width="1560" height="2600" fill="#FFFFFF"/>
+
+  <!-- ======== header ======== -->
+  <rect x="60" y="52" width="8" height="60" rx="4" fill="#2B2F36"/>
+  <text x="84" y="86" font-size="30" font-weight="bold" fill="#2B2F36">实验图解：给知识上户口，治好裸 RAG 的过期知识病</text>
+  <text x="84" y="118" font-size="14" fill="#6B7280">一个技术实验的四张图：问题 → 解法 → 消融对比 → 跨模型反应</text>
+
+  <!-- ============================================================ -->
+  <!-- 分区 1：裸 RAG 的问题 -->
+  <!-- ============================================================ -->
+  <circle cx="70" cy="190" r="18" fill="#2B2F36"/>
+  <text x="70" y="196" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">1</text>
+  <text x="100" y="197" font-size="22" font-weight="bold" fill="#2B2F36">裸 RAG 的问题：过期知识混进答案</text>
+  <line x1="60" y1="222" x2="1500" y2="222" stroke="#E5E7EB" stroke-width="1"/>
+  <text x="60" y="250" font-size="13" fill="#6B7280">知识库没有元信息，检索只看文本相似度，过期知识照样挤进前 10 名</text>
+
+  <!-- A 用户提问 -->
+  <rect x="60" y="300" width="250" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <circle cx="100" cy="336" r="9" fill="none" stroke="#2B2F36" stroke-width="2"/>
+  <path d="M87 362 Q100 346 113 362" fill="none" stroke="#2B2F36" stroke-width="2"/>
+  <text x="125" y="341" font-size="13" fill="#6B7280">用户提问</text>
+  <text x="185" y="392" font-size="17" font-weight="bold" fill="#2B2F36" text-anchor="middle">「配送时效多少小时？」</text>
+
+  <!-- arrow A -> B -->
+  <line x1="310" y1="375" x2="350" y2="375" stroke="#9CA3AF" stroke-width="2"/>
+  <polygon points="350,375 342,371 342,379" fill="#9CA3AF"/>
+
+  <!-- B 知识库 -->
+  <rect x="350" y="270" width="430" height="210" rx="12" fill="#FFFFFF" stroke="#D0D5DD" stroke-width="1.5" filter="url(#softShadow)"/>
+  <text x="565" y="300" font-size="15" font-weight="bold" fill="#2B2F36" text-anchor="middle">知识库文本块（检索 Top 10）</text>
+  <!-- chunks row 1 -->
+  <rect x="360" y="316" width="95" height="56" rx="6" fill="#F3F4F6" stroke="#D0D5DD"/>
+  <text x="407" y="348" font-size="11" fill="#6B7280" text-anchor="middle">文本块1</text>
+  <rect x="465" y="316" width="95" height="56" rx="6" fill="#FCEBE9" stroke="#D93025" stroke-width="1.5"/>
+  <text x="512" y="348" font-size="12" font-weight="bold" fill="#D93025" text-anchor="middle">过期知识</text>
+  <rect x="570" y="316" width="95" height="56" rx="6" fill="#F3F4F6" stroke="#D0D5DD"/>
+  <text x="617" y="348" font-size="11" fill="#6B7280" text-anchor="middle">文本块3</text>
+  <rect x="675" y="316" width="95" height="56" rx="6" fill="#F3F4F6" stroke="#D0D5DD"/>
+  <text x="722" y="348" font-size="11" fill="#6B7280" text-anchor="middle">文本块4</text>
+  <!-- chunks row 2 -->
+  <rect x="360" y="382" width="95" height="56" rx="6" fill="#F3F4F6" stroke="#D0D5DD"/>
+  <text x="407" y="414" font-size="11" fill="#6B7280" text-anchor="middle">文本块5</text>
+  <rect x="465" y="382" width="95" height="56" rx="6" fill="#F3F4F6" stroke="#D0D5DD"/>
+  <text x="512" y="414" font-size="11" fill="#6B7280" text-anchor="middle">文本块6</text>
+  <rect x="570" y="382" width="95" height="56" rx="6" fill="#F3F4F6" stroke="#D0D5DD"/>
+  <text x="617" y="414" font-size="11" fill="#6B7280" text-anchor="middle">文本块7</text>
+  <rect x="675" y="382" width="95" height="56" rx="6" fill="#FCEBE9" stroke="#D93025" stroke-width="1.5"/>
+  <text x="722" y="414" font-size="12" font-weight="bold" fill="#D93025" text-anchor="middle">废弃知识</text>
+  <text x="565" y="462" font-size="11" fill="#6B7280" text-anchor="middle">仅按文本相似度排序，不认识新旧</text>
+
+  <!-- red arrow B -> C with pill -->
+  <line x1="780" y1="375" x2="980" y2="375" stroke="#D93025" stroke-width="2.5"/>
+  <polygon points="980,375 968,370 968,380" fill="#D93025"/>
+  <rect x="792" y="343" width="176" height="64" rx="10" fill="#D93025"/>
+  <text x="880" y="368" font-size="12.5" font-weight="bold" fill="#FFFFFF" text-anchor="middle">过期知识混进前 10 名</text>
+  <text x="880" y="390" font-size="14" font-weight="bold" fill="#FFFFFF" text-anchor="middle">混入比例 100%</text>
+
+  <!-- C 模型照着答 -->
+  <rect x="980" y="300" width="210" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <rect x="1050" y="325" width="70" height="26" rx="5" fill="#2B2F36"/>
+  <text x="1085" y="343" font-size="13" font-weight="bold" fill="#FFFFFF" text-anchor="middle">LLM</text>
+  <line x1="1038" y1="330" x2="1050" y2="330" stroke="#2B2F36" stroke-width="2"/>
+  <line x1="1038" y1="338" x2="1050" y2="338" stroke="#2B2F36" stroke-width="2"/>
+  <line x1="1038" y1="346" x2="1050" y2="346" stroke="#2B2F36" stroke-width="2"/>
+  <line x1="1120" y1="330" x2="1132" y2="330" stroke="#2B2F36" stroke-width="2"/>
+  <line x1="1120" y1="338" x2="1132" y2="338" stroke="#2B2F36" stroke-width="2"/>
+  <line x1="1120" y1="346" x2="1132" y2="346" stroke="#2B2F36" stroke-width="2"/>
+  <text x="1085" y="386" font-size="15" font-weight="bold" fill="#2B2F36" text-anchor="middle">模型照着答</text>
+  <text x="1085" y="410" font-size="12" fill="#6B7280" text-anchor="middle">检索到什么就用什么</text>
+
+  <!-- arrow C -> D -->
+  <line x1="1190" y1="375" x2="1230" y2="375" stroke="#9CA3AF" stroke-width="2"/>
+  <polygon points="1230,375 1222,371 1222,379" fill="#9CA3AF"/>
+
+  <!-- D 结果（红） -->
+  <rect x="1230" y="300" width="270" height="150" rx="12" fill="#FCEBE9" stroke="#D93025" stroke-width="1.5"/>
+  <circle cx="1268" cy="338" r="11" fill="#D93025"/>
+  <line x1="1262" y1="332" x2="1274" y2="344" stroke="#FFFFFF" stroke-width="2.5"/>
+  <line x1="1274" y1="332" x2="1262" y2="344" stroke="#FFFFFF" stroke-width="2.5"/>
+  <text x="1290" y="343" font-size="12" fill="#D93025">结果</text>
+  <text x="1365" y="392" font-size="17" font-weight="bold" fill="#D93025" text-anchor="middle">答错：用了过期口径</text>
+  <text x="1365" y="416" font-size="11.5" fill="#C5221F" text-anchor="middle">模型无法区分新旧知识</text>
+
+  <!-- ============================================================ -->
+  <!-- 分区 2：OKF 的解法 -->
+  <!-- ============================================================ -->
+  <circle cx="70" cy="560" r="18" fill="#2B2F36"/>
+  <text x="70" y="566" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">2</text>
+  <text x="100" y="567" font-size="22" font-weight="bold" fill="#2B2F36">OKF 的解法：给知识上户口</text>
+  <line x1="60" y1="594" x2="1500" y2="594" stroke="#E5E7EB" stroke-width="1"/>
+  <text x="60" y="622" font-size="13" fill="#6B7280">每个知识文件多一段「户口」元信息，检索时先读户口，再决定放行</text>
+
+  <!-- 左：Markdown 知识文件 -->
+  <rect x="60" y="660" width="400" height="444" rx="12" fill="#FFFFFF" stroke="#D0D5DD" stroke-width="1.5" filter="url(#softShadow)"/>
+  <path d="M76 672 h10 l6 6 v12 h-16 z" fill="#FFFFFF" stroke="#2B2F36" stroke-width="1.5"/>
+  <path d="M86 672 v6 h6" fill="none" stroke="#2B2F36" stroke-width="1.5"/>
+  <text x="104" y="690" font-size="15" font-weight="bold" fill="#2B2F36">配送时效.md</text>
+  <text x="444" y="690" font-size="11" fill="#6B7280" text-anchor="end">Markdown 知识文件</text>
+  <line x1="76" y1="708" x2="444" y2="708" stroke="#E5E7EB" stroke-width="1"/>
+
+  <!-- 户口 frontmatter -->
+  <rect x="84" y="724" width="352" height="150" rx="8" fill="#F3F4F6" stroke="#9CA3AF" stroke-width="1"/>
+  <path d="M84 758 v-26 q0 -8 8 -8 h336 q8 0 8 8 v26 z" fill="#2B2F36"/>
+  <path d="M94 744 v-7 l6 -5 l6 5 v7 z" fill="#FFFFFF"/>
+  <text x="114" y="746" font-size="13" font-weight="bold" fill="#FFFFFF">户口 (frontmatter)</text>
+  <text x="104" y="782" font-size="13"><tspan fill="#6B7280">status:</tspan> <tspan fill="#D93025" font-weight="bold">deprecated</tspan></text>
+  <text x="104" y="806" font-size="13"><tspan fill="#6B7280">stale_after:</tspan> <tspan fill="#2B2F36">2026-10-01</tspan></text>
+  <text x="104" y="830" font-size="13"><tspan fill="#6B7280">verified:</tspan> <tspan fill="#2B2F36">true</tspan></text>
+  <text x="104" y="854" font-size="13"><tspan fill="#6B7280">title:</tspan> <tspan fill="#2B2F36">配送时效</tspan></text>
+
+  <!-- 正文 -->
+  <text x="104" y="906" font-size="12" fill="#6B7280">正文 body</text>
+  <line x1="104" y1="916" x2="416" y2="916" stroke="#E5E7EB" stroke-width="1"/>
+  <rect x="104" y="928" width="332" height="10" rx="5" fill="#E5E7EB"/>
+  <rect x="104" y="950" width="308" height="10" rx="5" fill="#E5E7EB"/>
+  <rect x="104" y="972" width="320" height="10" rx="5" fill="#E5E7EB"/>
+  <rect x="104" y="994" width="286" height="10" rx="5" fill="#E5E7EB"/>
+  <rect x="84" y="1052" width="352" height="40" rx="8" fill="#F3F4F6" stroke="#D0D5DD"/>
+  <text x="260" y="1077" font-size="14" font-weight="bold" fill="#2B2F36" text-anchor="middle">一个知识 = 户口 + 正文</text>
+
+  <!-- 虚线：户口 -> 检索流程 -->
+  <polyline points="460,799 490,799 490,835 512,835" fill="none" stroke="#9CA3AF" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <polygon points="520,835 512,831 512,839" fill="#9CA3AF"/>
+
+  <!-- 右：流程 -->
+  <!-- Stage1 -->
+  <rect x="520" y="760" width="250" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <rect x="620" y="778" width="26" height="34" rx="3" fill="#FFFFFF" stroke="#2B2F36" stroke-width="1.5"/>
+  <line x1="626" y1="788" x2="640" y2="788" stroke="#C4C9CF" stroke-width="1.5"/>
+  <line x1="626" y1="795" x2="640" y2="795" stroke="#C4C9CF" stroke-width="1.5"/>
+  <line x1="626" y1="802" x2="640" y2="802" stroke="#C4C9CF" stroke-width="1.5"/>
+  <circle cx="652" cy="812" r="11" fill="none" stroke="#2B2F36" stroke-width="2"/>
+  <line x1="660" y1="820" x2="668" y2="828" stroke="#2B2F36" stroke-width="2.5"/>
+  <text x="645" y="852" font-size="15" font-weight="bold" fill="#2B2F36" text-anchor="middle">检索时：先读户口</text>
+  <text x="645" y="874" font-size="12" fill="#6B7280" text-anchor="middle">机器先看元信息，再检索</text>
+
+  <line x1="770" y1="835" x2="810" y2="835" stroke="#9CA3AF" stroke-width="2"/>
+  <polygon points="810,835 802,831 802,839" fill="#9CA3AF"/>
+
+  <!-- Stage2 -->
+  <rect x="810" y="760" width="190" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <polygon points="910,783 921,795 910,807 899,795" fill="#2B2F36"/>
+  <text x="910" y="845" font-size="15" font-weight="bold" fill="#2B2F36" text-anchor="middle">判定：过期 / 废弃？</text>
+  <text x="910" y="867" font-size="12" fill="#6B7280" text-anchor="middle">读户口字段</text>
+
+  <line x1="1000" y1="835" x2="1050" y2="835" stroke="#D93025" stroke-width="2.5"/>
+  <polygon points="1050,835 1042,831 1042,839" fill="#D93025"/>
+
+  <!-- Stage3 过滤器闸门 -->
+  <rect x="1050" y="760" width="220" height="150" rx="12" fill="#FCEBE9" stroke="#D93025" stroke-width="1.5"/>
+  <text x="1160" y="790" font-size="15" font-weight="bold" fill="#D93025" text-anchor="middle">挡掉：过滤器闸门</text>
+  <polygon points="1100,806 1220,806 1174,842 1146,842" fill="#FFFFFF" stroke="#D93025" stroke-width="1.5"/>
+  <rect x="1127" y="850" width="66" height="22" rx="5" fill="#D93025"/>
+  <text x="1160" y="866" font-size="12" font-weight="bold" fill="#FFFFFF" text-anchor="middle">过期块</text>
+
+  <line x1="1270" y1="835" x2="1310" y2="835" stroke="#1E8E3E" stroke-width="2.5"/>
+  <polygon points="1310,835 1302,831 1302,839" fill="#1E8E3E"/>
+
+  <!-- Stage4 -->
+  <rect x="1310" y="760" width="190" height="150" rx="12" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
+  <circle cx="1405" cy="788" r="11" fill="#1E8E3E"/>
+  <polyline points="1399,788 1403,792 1411,784" fill="none" stroke="#FFFFFF" stroke-width="2.5"/>
+  <text x="1405" y="830" font-size="14" font-weight="bold" fill="#2B2F36" text-anchor="middle">有效知识进入前 10 名</text>
+  <rect x="1330" y="848" width="150" height="30" rx="15" fill="#1E8E3E"/>
+  <text x="1405" y="868" font-size="13" font-weight="bold" fill="#FFFFFF" text-anchor="middle">混入比例 0%</text>
+
+  <!-- 结论 banner -->
+  <rect x="520" y="960" width="980" height="60" rx="12" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
+  <circle cx="556" cy="990" r="13" fill="#1E8E3E"/>
+  <polyline points="550,990 554,994 562,986" fill="none" stroke="#FFFFFF" stroke-width="2.5"/>
+  <text x="580" y="996" font-size="16" font-weight="bold" fill="#2B2F36">挡掉过期知识 100% → 0%，且不误伤正确知识</text>
+
+  <!-- ============================================================ -->
+  <!-- 分区 3：四档功能对比 -->
+  <!-- ============================================================ -->
+  <circle cx="70" cy="1190" r="18" fill="#2B2F36"/>
+  <text x="70" y="1196" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">3</text>
+  <text x="100" y="1197" font-size="22" font-weight="bold" fill="#2B2F36">四档功能对比（消融实验）</text>
+  <line x1="60" y1="1224" x2="1500" y2="1224" stroke="#E5E7EB" stroke-width="1"/>
+  <text x="60" y="1252" font-size="13" fill="#6B7280">每档只加一个能力，隔离出每一步的增益</text>
+
+  <!-- V0 -->
+  <rect x="60" y="1290" width="900" height="92" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <rect x="76" y="1306" width="88" height="60" rx="10" fill="#2B2F36"/>
+  <text x="120" y="1326" font-size="11" fill="#C9CDD4" text-anchor="middle">版本</text>
+  <text x="120" y="1355" font-size="24" font-weight="bold" fill="#FFFFFF" text-anchor="middle">0</text>
+  <text x="190" y="1330" font-size="16" font-weight="bold" fill="#2B2F36">裸 RAG（切碎文本）</text>
+  <text x="190" y="1356" font-size="12.5" fill="#6B7280">文本切碎入库，检索拼回上下文</text>
+  <rect x="696" y="1320" width="110" height="32" rx="16" fill="#FCEBE9" stroke="#D93025" stroke-width="1.5"/>
+  <text x="751" y="1341" font-size="13" font-weight="bold" fill="#D93025" text-anchor="middle">陷阱混入 100%</text>
+  <rect x="816" y="1320" width="128" height="32" rx="16" fill="#2B2F36"/>
+  <text x="880" y="1341" font-size="13" font-weight="bold" fill="#FFFFFF" text-anchor="middle">上下文 501 字/次</text>
+
+  <!-- V1 -->
+  <rect x="105" y="1404" width="900" height="92" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <rect x="121" y="1420" width="88" height="60" rx="10" fill="#2B2F36"/>
+  <text x="165" y="1440" font-size="11" fill="#C9CDD4" text-anchor="middle">版本</text>
+  <text x="165" y="1469" font-size="24" font-weight="bold" fill="#FFFFFF" text-anchor="middle">1</text>
+  <text x="235" y="1444" font-size="16" font-weight="bold" fill="#2B2F36">整知识单元</text>
+  <text x="235" y="1470" font-size="12.5" fill="#6B7280">整篇知识作为一个检索单元</text>
+  <rect x="839" y="1434" width="150" height="32" rx="16" fill="#2B2F36"/>
+  <text x="914" y="1455" font-size="13" font-weight="bold" fill="#FFFFFF" text-anchor="middle">上下文降到 135 字/次</text>
+
+  <!-- V2 -->
+  <rect x="150" y="1518" width="900" height="92" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <rect x="166" y="1534" width="88" height="60" rx="10" fill="#2B2F36"/>
+  <text x="210" y="1554" font-size="11" fill="#C9CDD4" text-anchor="middle">版本</text>
+  <text x="210" y="1583" font-size="24" font-weight="bold" fill="#FFFFFF" text-anchor="middle">2</text>
+  <text x="280" y="1558" font-size="16" font-weight="bold" fill="#2B2F36">+ 户口过滤</text>
+  <text x="280" y="1584" font-size="12.5" fill="#6B7280">检索前先读户口，过期 / 废弃挡掉</text>
+  <rect x="924" y="1548" width="110" height="32" rx="16" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
+  <text x="979" y="1569" font-size="13" font-weight="bold" fill="#1E8E3E" text-anchor="middle">陷阱混入 0%</text>
+
+  <!-- V3 -->
+  <rect x="195" y="1632" width="900" height="92" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <rect x="211" y="1648" width="88" height="60" rx="10" fill="#2B2F36"/>
+  <text x="255" y="1668" font-size="11" fill="#C9CDD4" text-anchor="middle">版本</text>
+  <text x="255" y="1697" font-size="24" font-weight="bold" fill="#FFFFFF" text-anchor="middle">3</text>
+  <text x="325" y="1672" font-size="16" font-weight="bold" fill="#2B2F36">+ 溯源信息</text>
+  <text x="325" y="1698" font-size="12.5" fill="#6B7280">每条知识带来源信息，可追溯</text>
+  <text x="941" y="1678" font-size="12.5" font-weight="bold" fill="#2B2F36" text-anchor="end">比 501 省 58%</text>
+  <rect x="951" y="1646" width="128" height="32" rx="16" fill="#2B2F36"/>
+  <text x="1015" y="1667" font-size="13" font-weight="bold" fill="#FFFFFF" text-anchor="middle">上下文 208 字/次</text>
+
+  <!-- 右侧结论框 + mini MRR 图 -->
+  <rect x="1150" y="1290" width="350" height="190" rx="12" fill="#FFFFFF" stroke="#2B2F36" stroke-width="1.5" filter="url(#softShadow)"/>
+  <text x="1325" y="1322" font-size="15" font-weight="bold" fill="#2B2F36" text-anchor="middle">库越大，优势越大</text>
+  <text x="1325" y="1346" font-size="11.5" fill="#6B7280" text-anchor="middle">600 个知识时 · 第 1 名命中率（MRR）</text>
+  <text x="1170" y="1383" font-size="12" fill="#6B7280">切碎检索</text>
+  <rect x="1226" y="1370" width="95" height="16" rx="4" fill="#C4C9CF"/>
+  <text x="1329" y="1383" font-size="13" font-weight="bold" fill="#6B7280">0.38</text>
+  <text x="1170" y="1419" font-size="12" fill="#6B7280">整单元</text>
+  <rect x="1226" y="1406" width="132" height="16" rx="4" fill="#2B2F36"/>
+  <text x="1366" y="1419" font-size="13" font-weight="bold" fill="#2B2F36">0.53</text>
+  <text x="1325" y="1462" font-size="11" fill="#6B7280" text-anchor="middle">知识越多，整单元检索越占优</text>
+
+  <text x="60" y="1756" font-size="12" fill="#6B7280">阶梯 = 逐档叠加能力，隔离每个增益（消融实验）</text>
+
+  <!-- ============================================================ -->
+  <!-- 分区 4：三个模型的反应 -->
+  <!-- ============================================================ -->
+  <circle cx="70" cy="1815" r="18" fill="#2B2F36"/>
+  <text x="70" y="1821" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">4</text>
+  <text x="100" y="1822" font-size="22" font-weight="bold" fill="#2B2F36">三个模型读同一份知识的反应（跨模型实验）</text>
+  <line x1="60" y1="1849" x2="1500" y2="1849" stroke="#E5E7EB" stroke-width="1"/>
+  <text x="60" y="1877" font-size="13" fill="#6B7280">同一份带户口的知识，分别喂给三个模型，看行为差异</text>
+
+  <!-- Card 1 -->
+  <rect x="60" y="1920" width="1440" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <circle cx="130" cy="1995" r="22" fill="#2B2F36"/>
+  <text x="130" y="2001" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">G</text>
+  <text x="165" y="2001" font-size="17" font-weight="bold" fill="#2B2F36">glm-5.3-flash</text>
+  <text x="360" y="1980" font-size="15" font-weight="bold" fill="#2B2F36">跟着户口走</text>
+  <text x="360" y="2008" font-size="13" fill="#6B7280">读到 status: deprecated 就按过期口径处理</text>
+  <rect x="1185" y="1973" width="130" height="44" rx="22" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
+  <text x="1250" y="2001" font-size="15" font-weight="bold" fill="#1E8E3E" text-anchor="middle">部分纠偏</text>
+  <text x="1250" y="2038" font-size="12" fill="#6B7280" text-anchor="middle">（跟着户口走）</text>
+
+  <!-- Card 2 -->
+  <rect x="60" y="2090" width="1440" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <circle cx="130" cy="2165" r="22" fill="#2B2F36"/>
+  <text x="130" y="2171" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">D</text>
+  <text x="165" y="2171" font-size="17" font-weight="bold" fill="#2B2F36">DeepSeek-v4.1</text>
+  <text x="360" y="2150" font-size="15" font-weight="bold" fill="#2B2F36">拿不准就拒答</text>
+  <text x="360" y="2178" font-size="13" fill="#6B7280">返回 [信息不足]，不猜答案</text>
+  <rect x="1160" y="2143" width="180" height="44" rx="22" fill="#2B2F36"/>
+  <text x="1250" y="2171" font-size="14" font-weight="bold" fill="#FFFFFF" text-anchor="middle">拒答 [信息不足]</text>
+  <text x="1250" y="2208" font-size="12" fill="#6B7280" text-anchor="middle">（户口也拦不住它拒答）</text>
+
+  <!-- Card 3 -->
+  <rect x="60" y="2260" width="1440" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <circle cx="130" cy="2335" r="22" fill="#2B2F36"/>
+  <text x="130" y="2341" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">M</text>
+  <text x="165" y="2341" font-size="17" font-weight="bold" fill="#2B2F36">MiniMax-M3</text>
+  <text x="360" y="2320" font-size="15" font-weight="bold" fill="#2B2F36">被户口纠正了一条</text>
+  <text x="360" y="2348" font-size="13" fill="#6B7280">「判废弃」被改判为「可直接使用」</text>
+  <rect x="1040" y="2318" width="96" height="34" rx="17" fill="#F3F4F6" stroke="#D0D5DD" stroke-width="1.5"/>
+  <text x="1088" y="2340" font-size="13" font-weight="bold" fill="#6B7280" text-anchor="middle">判废弃</text>
+  <text x="1196" y="2318" font-size="11" font-weight="bold" fill="#1E8E3E" text-anchor="middle">户口纠正</text>
+  <line x1="1136" y1="2335" x2="1246" y2="2335" stroke="#1E8E3E" stroke-width="2.5"/>
+  <polygon points="1256,2335 1246,2330 1246,2340" fill="#1E8E3E"/>
+  <rect x="1256" y="2318" width="110" height="34" rx="17" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
+  <text x="1311" y="2340" font-size="13" font-weight="bold" fill="#1E8E3E" text-anchor="middle">可直接使用</text>
+
+  <!-- 底部结论 -->
+  <rect x="60" y="2460" width="1440" height="84" rx="14" fill="#2B2F36"/>
+  <text x="780" y="2496" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">结论：户口对愿意读它的模型有纠偏作用；对拒答型模型无效</text>
+  <text x="780" y="2524" font-size="12.5" fill="#C9CDD4" text-anchor="middle">温度 0 也有随机性，一致率数字不作依据，只看逐条行为</text>
+</svg>
