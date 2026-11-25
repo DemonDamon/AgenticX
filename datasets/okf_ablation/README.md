@@ -33,7 +33,7 @@ python3 tests/okf_ablation/run_scale_ablation.py --from-datasets
 python3 tests/okf_ablation/run_ablation.py
 python3 tests/okf_ablation/run_scale_ablation.py
 
-# 常规测试（含判定门与恒定性断言，31 项）
+# 常规测试（含判定门与恒定性断言，37 项）
 python3 -m pytest tests/okf_reader_test.py tests/okf_export_test.py \
   tests/okf_retrieval_test.py tests/okf_ablation -q
 ```
@@ -47,11 +47,12 @@ python3 tests/okf_ablation/export_datasets.py
 ## 相关材料
 
 - 消融报告：`.cursor/plans/2026-11-25-okf-ablation-report.md`（单库）与 `.cursor/plans/2026-11-25-okf-scale-ablation-report.md`（规模化）
+- 跨模型报告：`.cursor/plans/2026-11-25-okf-cross-model-report.md`；648 次模型调用的原始回答在 `cross_model_raw.jsonl`（每行含模型原话、判定、finish_reason），不调模型即可重出：`python3 tests/okf_ablation/cross_model_consistency.py --report-only`
 - 实验驱动：`tests/okf_ablation/run_ablation.py`、`run_scale_ablation.py`
 - 适配层实现：`agenticx/knowledge/readers/okf_reader.py`、`agenticx/knowledge/okf_export.py`
 
 ## 已知局限（拿去继续实验的方向）
 
 - 打分器是词面重叠（确定性），没有用真实 embedding——换向量后端复测是最直接的增量工作
-- LLM-as-judge 盲评与跨模型一致性臂未实现（需要外部模型 API）
+- 跨模型实验只覆盖单条知识、元数据完整的干净场景（结果是 0%/100%）；多条知识混在一起、状态缺失或有歧义的场景，以及 LLM-as-judge 盲评未做
 - 规模上限 600 概念（纯 Python 打分器的性能边界），量级再往上需要向量库

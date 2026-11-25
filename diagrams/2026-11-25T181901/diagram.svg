@@ -249,49 +249,44 @@
   <!-- ============================================================ -->
   <circle cx="70" cy="1815" r="18" fill="#2B2F36"/>
   <text x="70" y="1821" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">4</text>
-  <text x="100" y="1822" font-size="22" font-weight="bold" fill="#2B2F36">三个模型读同一份知识的反应（跨模型实验）</text>
+  <text x="100" y="1822" font-size="22" font-weight="bold" fill="#2B2F36">同一条过期知识，不给户口和给户口：三个模型的判断</text>
   <line x1="60" y1="1849" x2="1500" y2="1849" stroke="#E5E7EB" stroke-width="1"/>
-  <text x="60" y="1877" font-size="13" fill="#6B7280">同一份带户口的知识，分别喂给三个模型，看行为差异</text>
+  <text x="60" y="1877" font-size="13" fill="#6B7280">12 条已过期或已废弃的知识，逐条单独给模型看，每条重复 4 次；三个模型结果完全相同</text>
 
   <!-- Card 1 -->
   <rect x="60" y="1920" width="1440" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
   <circle cx="130" cy="1995" r="22" fill="#2B2F36"/>
   <text x="130" y="2001" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">G</text>
   <text x="165" y="2001" font-size="17" font-weight="bold" fill="#2B2F36">glm-5.3-flash</text>
-  <text x="360" y="1980" font-size="15" font-weight="bold" fill="#2B2F36">跟着户口走</text>
-  <text x="360" y="2008" font-size="13" fill="#6B7280">读到 status: deprecated 就按过期口径处理</text>
-  <rect x="1185" y="1973" width="130" height="44" rx="22" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
-  <text x="1250" y="2001" font-size="15" font-weight="bold" fill="#1E8E3E" text-anchor="middle">部分纠偏</text>
-  <text x="1250" y="2038" font-size="12" fill="#6B7280" text-anchor="middle">（跟着户口走）</text>
+  <text x="360" y="1980" font-size="15" font-weight="bold" fill="#C5221F">不给户口：12 条过期知识全部当成现行答案</text>
+  <text x="360" y="2008" font-size="13" fill="#6B7280">答案照抄过期数值，如“48小时内”“30分钟”</text>
+  <rect x="1135" y="1973" width="210" height="44" rx="22" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
+  <text x="1240" y="2001" font-size="14" font-weight="bold" fill="#1E8E3E" text-anchor="middle">给户口：12 条全部识别</text>
+  <text x="1240" y="2038" font-size="12" fill="#6B7280" text-anchor="middle">（判不可用，答无法回答）</text>
 
   <!-- Card 2 -->
   <rect x="60" y="2090" width="1440" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
   <circle cx="130" cy="2165" r="22" fill="#2B2F36"/>
   <text x="130" y="2171" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">D</text>
   <text x="165" y="2171" font-size="17" font-weight="bold" fill="#2B2F36">DeepSeek-v4.1</text>
-  <text x="360" y="2150" font-size="15" font-weight="bold" fill="#2B2F36">拿不准就拒答</text>
-  <text x="360" y="2178" font-size="13" fill="#6B7280">返回 [信息不足]，不猜答案</text>
-  <rect x="1160" y="2143" width="180" height="44" rx="22" fill="#2B2F36"/>
-  <text x="1250" y="2171" font-size="14" font-weight="bold" fill="#FFFFFF" text-anchor="middle">拒答 [信息不足]</text>
-  <text x="1250" y="2208" font-size="12" fill="#6B7280" text-anchor="middle">（户口也拦不住它拒答）</text>
+  <text x="360" y="2150" font-size="15" font-weight="bold" fill="#C5221F">不给户口：12 条过期知识全部当成现行答案</text>
+  <text x="360" y="2178" font-size="13" fill="#6B7280">上一版写的“拒答”是实验脚本的 bug，并不存在</text>
+  <rect x="1135" y="2143" width="210" height="44" rx="22" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
+  <text x="1240" y="2171" font-size="14" font-weight="bold" fill="#1E8E3E" text-anchor="middle">给户口：12 条全部识别</text>
+  <text x="1240" y="2208" font-size="12" fill="#6B7280" text-anchor="middle">（和其他两个模型表现一致）</text>
 
   <!-- Card 3 -->
   <rect x="60" y="2260" width="1440" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
   <circle cx="130" cy="2335" r="22" fill="#2B2F36"/>
   <text x="130" y="2341" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">M</text>
   <text x="165" y="2341" font-size="17" font-weight="bold" fill="#2B2F36">MiniMax-M3</text>
-  <text x="360" y="2320" font-size="15" font-weight="bold" fill="#2B2F36">被户口纠正了一条</text>
-  <text x="360" y="2348" font-size="13" fill="#6B7280">「判废弃」被改判为「可直接使用」</text>
-  <rect x="1040" y="2318" width="96" height="34" rx="17" fill="#F3F4F6" stroke="#D0D5DD" stroke-width="1.5"/>
-  <text x="1088" y="2340" font-size="13" font-weight="bold" fill="#6B7280" text-anchor="middle">判废弃</text>
-  <text x="1196" y="2318" font-size="11" font-weight="bold" fill="#1E8E3E" text-anchor="middle">户口纠正</text>
-  <line x1="1136" y1="2335" x2="1246" y2="2335" stroke="#1E8E3E" stroke-width="2.5"/>
-  <polygon points="1256,2335 1246,2330 1246,2340" fill="#1E8E3E"/>
-  <rect x="1256" y="2318" width="110" height="34" rx="17" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
-  <text x="1311" y="2340" font-size="13" font-weight="bold" fill="#1E8E3E" text-anchor="middle">可直接使用</text>
+  <text x="360" y="2320" font-size="15" font-weight="bold" fill="#C5221F">不给户口：12 条过期知识全部当成现行答案</text>
+  <text x="360" y="2348" font-size="13" fill="#6B7280">6 条有效知识在三种呈现下都判“可用”，没有误伤</text>
+  <rect x="1135" y="2318" width="210" height="44" rx="22" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
+  <text x="1240" y="2346" font-size="14" font-weight="bold" fill="#1E8E3E" text-anchor="middle">给户口：12 条全部识别</text>
 
   <!-- 底部结论 -->
   <rect x="60" y="2460" width="1440" height="84" rx="14" fill="#2B2F36"/>
-  <text x="780" y="2496" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">结论：户口对愿意读它的模型有纠偏作用；对拒答型模型无效</text>
-  <text x="780" y="2524" font-size="12.5" fill="#C9CDD4" text-anchor="middle">温度 0 也有随机性，一致率数字不作依据，只看逐条行为</text>
+  <text x="780" y="2496" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">结论：三个模型没有差别，有差别的是给不给户口</text>
+  <text x="780" y="2524" font-size="12.5" fill="#C9CDD4" text-anchor="middle">不给户口识别率 0%，给户口 100%；648 次调用没有一次翻转</text>
 </svg>
