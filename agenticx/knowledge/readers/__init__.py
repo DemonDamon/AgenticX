@@ -12,6 +12,7 @@ from .json_reader import JSONReader
 from .csv_reader import CSVReader
 from .word_reader import WordReader
 from .powerpoint_reader import PowerPointReader
+from .okf_reader import OKFReader
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ READER_REGISTRY: Dict[str, Type[BaseReader]] = {
     'csv': CSVReader,
     'word': WordReader,
     'powerpoint': PowerPointReader,
+    'okf': OKFReader,
 }
 
 # File extension to reader mapping
@@ -125,6 +127,7 @@ __all__ = [
     'CSVReader',
     'WordReader',
     'PowerPointReader',
+    'OKFReader',
     'register_reader',
     'get_reader',
     'list_readers',

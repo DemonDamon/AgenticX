@@ -122,7 +122,10 @@ enterprise/.runtime/
 deploy/observability/pours/
 
 # RSI 数据飞轮产出物（数据集/轨迹库不入库，card 例外由脚本显式 add）
-datasets/
+# 注意用 datasets/* 而非 datasets/，否则子目录无法被下方否定规则放行
+datasets/*
+# OKF 消融实验数据集（开源协作者可验证性要求，小体积纯文本，显式入库）
+!datasets/okf_ablation/
 # 决策层原始轨迹/标注数据不入库（捕获的终端输出可能含环境变量与凭证；汇总报告 .md/.json 例外）
 results/**/*.jsonl
 

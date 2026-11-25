@@ -1,0 +1,12 @@
+{"query": "订单表 字段 客户订单", "relevant": ["tables/orders"], "excluded": []}
+{"query": "客户 主数据 会员等级", "relevant": ["tables/customers"], "excluded": []}
+{"query": "支付 状态 渠道 金额", "relevant": ["tables/payments"], "excluded": []}
+{"query": "物流 配送 签收 运单", "relevant": ["tables/logistics"], "excluded": ["legacy/delivery_sla_old", "legacy/delivery_eta_stale"]}
+{"query": "配送时效 超时 阈值 平均送达", "relevant": ["tables/logistics"], "excluded": ["legacy/delivery_eta_stale", "legacy/delivery_sla_old"]}
+{"query": "退款 原因 原订单号", "relevant": ["tables/refunds"], "excluded": []}
+{"query": "库存 SKU 仓库 锁定", "relevant": ["tables/inventory"], "excluded": []}
+{"query": "营收 口径 退款扣除 归因", "relevant": ["metrics/revenue"], "excluded": []}
+{"query": "周活跃 用户 活跃用户数", "relevant": ["metrics/weekly_active_users"], "excluded": []}
+{"query": "订单 税率 税费", "relevant": ["tables/orders"], "excluded": ["legacy/tax_rate_stale"]}
+{"query": "订单报表 汇总 金额", "relevant": ["tables/orders"], "excluded": ["legacy/reports_etl"]}
+{"query": "员工 排班 考勤", "relevant": ["misc/hr_policy"], "excluded": []}

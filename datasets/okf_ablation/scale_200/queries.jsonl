@@ -1,0 +1,160 @@
+{"query": "招聘 绩效 考勤", "relevant": ["hr/tables/绩效_0132"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "履约 质检 物料", "relevant": ["supply/tables/物料_0002"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "维修 工艺 设备", "relevant": ["mfg/processs/维修_0055"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "仓配 物料 采购", "relevant": ["supply/processs/物料_0082"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "培训 编制 休假", "relevant": ["hr/processs/培训_0084"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "设备 工艺 产线", "relevant": ["mfg/processs/设备_0151"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "备案 商标 诉讼", "relevant": ["legal/references/商标_0094"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "商标 备案 诉讼", "relevant": ["legal/references/商标_0094"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "视频 专栏 订阅", "relevant": ["content/metrics/订阅_0075"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "话题 文章 视频", "relevant": ["content/tables/视频_0131"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "库存 支付 客户", "relevant": ["ecom/references/支付_0152"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "设备 工单 备件", "relevant": ["mfg/references/设备_0031"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "计划 质检 物料", "relevant": ["supply/references/计划_0154"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "考勤 培训 薪酬", "relevant": ["hr/tables/考勤_0100"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "绩效 考勤 招聘", "relevant": ["hr/references/考勤_0060"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "检验 病历 挂号费", "relevant": ["med/processs/检验_0085"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "工序 备件 产线", "relevant": ["mfg/tables/工序_0103"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "招聘 考勤 编制", "relevant": ["hr/processs/考勤_0020"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "支付 退款 评价", "relevant": ["ecom/references/退款_0184"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "合规 公证 诉讼", "relevant": ["legal/metrics/诉讼_0142"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "合同 条款 合规", "relevant": ["legal/references/合同_0190"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "诉讼 公证 商标", "relevant": ["legal/metrics/商标_0014"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "考勤 薪酬 编制", "relevant": ["hr/processs/考勤_0180"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "工艺 维修 设备", "relevant": ["mfg/processs/维修_0055"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "文章 话题 视频", "relevant": ["content/tables/视频_0131"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "条款 合规 合同", "relevant": ["legal/references/合同_0190"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "商标 侵权 公证", "relevant": ["legal/processs/商标_0054"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "履约 采购 仓配", "relevant": ["supply/references/采购_0090"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "公证 商标 诉讼", "relevant": ["legal/metrics/商标_0014"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "清算 授信 交易", "relevant": ["fin/references/交易_0121"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "离职 招聘 绩效", "relevant": ["hr/metrics/绩效_0172"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "培训 调岗 绩效", "relevant": ["hr/references/培训_0124"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "库存 退款 发票", "relevant": ["ecom/processs/退款_0144"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "购物车 发票 支付", "relevant": ["ecom/processs/支付_0112"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "培训 绩效 休假", "relevant": ["hr/processs/绩效_0052"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "购物车 优惠券 退款", "relevant": ["ecom/metrics/退款_0104"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "仓配 采购 物料", "relevant": ["supply/processs/物料_0082"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "专栏 订阅 视频", "relevant": ["content/tables/订阅_0195"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "保费 交易 证券", "relevant": ["fin/tables/交易_0161"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "文章 标签 审核", "relevant": ["content/references/标签_0123"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "保费 对账 清算", "relevant": ["fin/tables/对账_0193"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "药品 挂号 随访", "relevant": ["med/tables/药品_0133"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "视频 评论 推荐", "relevant": ["content/processs/视频_0051"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "商标 侵权 公证", "relevant": ["legal/processs/商标_0054"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "保费 授信 证券", "relevant": ["fin/processs/授信_0145"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "维修 质检 备件", "relevant": ["mfg/tables/维修_0135"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "计划 物料 交货", "relevant": ["supply/tables/计划_0034"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "商标 备案 合同", "relevant": ["legal/processs/合同_0150"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "工序 产线 设备", "relevant": ["mfg/references/工序_0063"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "考勤 招聘 绩效", "relevant": ["hr/references/考勤_0060"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "推荐 文章 标签", "relevant": ["content/processs/标签_0083"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "对账 保费 清算", "relevant": ["fin/tables/对账_0193"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "推荐 文章 标签", "relevant": ["content/processs/标签_0083"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "支付 退款 评价", "relevant": ["ecom/references/退款_0184"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "质检 物料 计划", "relevant": ["supply/references/计划_0154"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "备件 设备 产线", "relevant": ["mfg/references/设备_0191"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "对账 清算 保费", "relevant": ["fin/tables/对账_0193"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "订单 优惠券 库存", "relevant": ["ecom/processs/订单_0080"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "清算 交易 授信", "relevant": ["fin/references/交易_0121"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "产线 工序 备件", "relevant": ["mfg/tables/工序_0103"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "补货 计划 调度", "relevant": ["supply/tables/计划_0194"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "保费 风控 授信", "relevant": ["fin/references/授信_0185"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "标签 订阅 审核", "relevant": ["content/metrics/标签_0043"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "优惠券 订单 发票", "relevant": ["ecom/metrics/订单_0040"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "侵权 诉讼 条款", "relevant": ["legal/processs/诉讼_0182"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "商标 公证 诉讼", "relevant": ["legal/metrics/商标_0014"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "理财 清算 交易", "relevant": ["fin/tables/交易_0001"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "视频 订阅 专栏", "relevant": ["content/metrics/订阅_0075"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "考勤 培训 离职", "relevant": ["hr/metrics/考勤_0140"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "处方 病历 床位", "relevant": ["med/processs/处方_0181"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "产线 备件 设备", "relevant": ["mfg/references/设备_0191"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "订阅 标签 文章", "relevant": ["content/tables/订阅_0035"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "专利 诉讼 合同", "relevant": ["legal/metrics/合同_0110"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "质检 维修 工序", "relevant": ["mfg/metrics/维修_0175"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "检验 病历 挂号费", "relevant": ["med/processs/检验_0085"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "病历 处方 护理", "relevant": ["med/references/处方_0061"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "证券 对账 清算", "relevant": ["fin/processs/对账_0113"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "工序 备件 产线", "relevant": ["mfg/tables/工序_0103"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "采购 仓配 质检", "relevant": ["supply/metrics/采购_0010"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "维修 工序 质检", "relevant": ["mfg/processs/工序_0023"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "质检 仓配 采购", "relevant": ["supply/metrics/采购_0010"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "质检 履约 物料", "relevant": ["supply/tables/物料_0002"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "工序 产线 能耗", "relevant": ["mfg/metrics/工序_0143"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "视频 话题 文章", "relevant": ["content/metrics/视频_0011"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "视频 审核 话题", "relevant": ["content/references/视频_0091"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "商标 专利 侵权", "relevant": ["legal/tables/商标_0134"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "质检 物料 计划", "relevant": ["supply/references/计划_0154"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "发票 优惠券 订单", "relevant": ["ecom/tables/订单_0000"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "库存 退款 发票", "relevant": ["ecom/processs/退款_0144"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "优惠券 库存 订单", "relevant": ["ecom/tables/订单_0160"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "购物车 优惠券 退款", "relevant": ["ecom/metrics/退款_0104"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "评论 推荐 视频", "relevant": ["content/processs/视频_0051"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "风控 对账 结算", "relevant": ["fin/metrics/对账_0073"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "质检 维修 工序", "relevant": ["mfg/processs/工序_0023"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "采购 仓配 履约", "relevant": ["supply/references/采购_0090"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "计划 仓配 履约", "relevant": ["supply/metrics/计划_0074"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "授信 账户 理财", "relevant": ["fin/references/授信_0025"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "发票 购物车 支付", "relevant": ["ecom/processs/支付_0112"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "采购 计划 交货", "relevant": ["supply/tables/采购_0130"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "交货 物料 计划", "relevant": ["supply/tables/计划_0034"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "随访 检验 处方", "relevant": ["med/tables/检验_0165"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "培训 考勤 调岗", "relevant": ["hr/tables/培训_0004"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "公证 商标 诉讼", "relevant": ["legal/metrics/商标_0014"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "物料 交货 计划", "relevant": ["supply/tables/计划_0034"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "合同 仲裁 侵权", "relevant": ["legal/tables/合同_0070"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "退款 支付 评价", "relevant": ["ecom/references/退款_0184"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "热度 订阅 推荐", "relevant": ["content/references/订阅_0155"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "质检 维修 备件", "relevant": ["mfg/tables/维修_0135"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "病历 处方 检查", "relevant": ["med/processs/处方_0021"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "药品 护理 检查", "relevant": ["med/metrics/药品_0013"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "绩效 招聘 考勤", "relevant": ["hr/tables/绩效_0132"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "风控 授信 保费", "relevant": ["fin/references/授信_0185"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "计划 质检 物料", "relevant": ["supply/references/计划_0154"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "评价 退款 支付", "relevant": ["ecom/references/退款_0184"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "工序 能耗 产线", "relevant": ["mfg/metrics/工序_0143"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "推荐 评论 视频", "relevant": ["content/processs/视频_0051"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "能耗 工序 产线", "relevant": ["mfg/metrics/工序_0143"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "备件 设备 产线", "relevant": ["mfg/references/设备_0191"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "授信 交易 对账", "relevant": ["fin/metrics/交易_0041"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "授信 对账 交易", "relevant": ["fin/metrics/交易_0041"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "挂号费 检验 处方", "relevant": ["med/references/检验_0125"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "护理 处方 病历", "relevant": ["med/references/处方_0061"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "理财 交易 清算", "relevant": ["fin/tables/交易_0001"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "检验 处方 随访", "relevant": ["med/tables/检验_0165"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "产线 能耗 工序", "relevant": ["mfg/metrics/工序_0143"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "交易 授信 清算", "relevant": ["fin/references/交易_0121"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "备件 产线 工序", "relevant": ["mfg/tables/工序_0103"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "备件 产线 设备", "relevant": ["mfg/references/设备_0191"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "订单 库存 优惠券", "relevant": ["ecom/tables/订单_0160"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "授信 账户 理财", "relevant": ["fin/references/授信_0025"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "理财 交易 清算", "relevant": ["fin/tables/交易_0001"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "支付 退款 评价", "relevant": ["ecom/tables/支付_0032"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "检查 护理 药品", "relevant": ["med/metrics/药品_0013"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "订单 退款 库存", "relevant": ["ecom/references/订单_0120"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "质检 物料 计划", "relevant": ["supply/references/计划_0154"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "评论 推荐 视频", "relevant": ["content/processs/视频_0051"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "质检 设备 工单", "relevant": ["mfg/metrics/设备_0111"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "保费 授信 证券", "relevant": ["fin/processs/授信_0145"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "计划 质检 物料", "relevant": ["supply/references/计划_0154"], "excluded": ["supply/processs/调度_0018", "supply/references/调度_0058"]}
+{"query": "检验 处方 挂号", "relevant": ["med/metrics/检验_0045"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "退款 评价 支付", "relevant": ["ecom/references/退款_0184"], "excluded": ["ecom/metrics/评价_0008", "ecom/processs/评价_0048"]}
+{"query": "证券 授信 风控", "relevant": ["fin/tables/授信_0065"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "审核 文章 标签", "relevant": ["content/references/标签_0123"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "处方 护理 病历", "relevant": ["med/references/处方_0061"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "编制 培训 休假", "relevant": ["hr/processs/培训_0084"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "商标 合同 专利", "relevant": ["legal/references/合同_0030"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "诉讼 公证 合规", "relevant": ["legal/metrics/诉讼_0142"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "考勤 调岗 培训", "relevant": ["hr/tables/培训_0004"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "审核 文章 标签", "relevant": ["content/references/标签_0123"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "授信 结算 交易", "relevant": ["fin/metrics/授信_0105"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "公证 商标 侵权", "relevant": ["legal/processs/商标_0054"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "专栏 视频 订阅", "relevant": ["content/processs/订阅_0115"], "excluded": ["content/processs/专栏_0019", "content/references/热度_0027", "content/references/专栏_0059"]}
+{"query": "交易 授信 对账", "relevant": ["fin/metrics/交易_0041"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "编制 培训 休假", "relevant": ["hr/processs/培训_0084"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "质检 工序 维修", "relevant": ["mfg/references/维修_0095"], "excluded": ["mfg/tables/点检_0007", "mfg/tables/能耗_0039", "mfg/metrics/点检_0047"]}
+{"query": "处方 护理 病历", "relevant": ["med/references/处方_0061"], "excluded": ["med/references/挂号费_0029", "med/tables/随访_0037", "med/tables/挂号费_0069"]}
+{"query": "对账 清算 保费", "relevant": ["fin/tables/对账_0193"], "excluded": ["fin/metrics/结算_0009", "fin/processs/保费_0017", "fin/processs/结算_0049"]}
+{"query": "合同 专利 诉讼", "relevant": ["legal/metrics/合同_0110"], "excluded": ["legal/tables/备案_0038"]}
+{"query": "考勤 调岗 培训", "relevant": ["hr/tables/培训_0004"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
+{"query": "培训 休假 编制", "relevant": ["hr/processs/培训_0084"], "excluded": ["hr/references/编制_0028", "hr/tables/编制_0068"]}
