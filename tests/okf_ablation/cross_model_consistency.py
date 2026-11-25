@@ -44,6 +44,8 @@ QUERIES = [
 MODELS = [
     {"name": "glm-5.3-flash", "url": "http://aibox.richaibox.com:2026/v1/chat/completions",
      "provider": "custom_openai_b300", "display": "glm-5.3-flash（彩讯网关）"},
+    {"name": "deepseek-v4.1-flash", "url": "http://aibox.richaibox.com:2026/v1/chat/completions",
+     "provider": "custom_openai_b300", "display": "deepseek-v4.1-flash（彩讯网关）"},
     {"name": "MiniMax-M3", "url": "https://api.minimaxi.com/v1/chat/completions",
      "provider": "minimax", "display": "MiniMax-M3（官方 API）"},
 ]
@@ -239,13 +241,18 @@ def format_report(result: Dict, summary: Dict) -> str:
         "",
         "## 判读",
         "",
-        "- 一致率与命中率的对比读法：C0 是裸正文（元数据不可见）下两模型各自理解知识，",
-        "  C4 是 OKF 原样呈现（status/stale_after/verified 可见）下的理解。差异即元数据",
-        "  显式化对跨模型收敛的贡献。",
-        "- 陷阱查询逐条看"配送时效"：裸正文下 MiniMax-M3 把过期知识判为[可直接使用]（误判），",
-        "  glm-5.3-flash 判对；OKF 呈现下两模型一致收敛到[已过期不可用]——元数据纠正误判。",
-        "- 诚实记录未被消除的分歧：多片段混入时两模型各自选择不同的依据片段（如订单报表查询，",
-        "  一方以废弃 ETL 为据、一方以有效订单表为据），这类软分歧属检索排序问题，元数据不解决。",
+        "- 读法：C0 是裸正文（元数据不可见）下各模型各自理解知识，C4 是 OKF 原样呈现"
+        "（status/stale_after/verified 可见）下的理解。模型 API 温度 0 仍存在采样级非确定性"
+        "（MoE 类模型），单轮小样本下一致率有 ±1 条查询量级的噪声，读数看趋势与逐条事实，"
+        "不把百分点当精确量。",
+        "- 逐条事实：纯净/有效查询（物流、退款、库存）三模型两条件全对全一致；"
+        "分歧集中在陷阱混入的查询，且各模型行为不同——有的拒判[信息不足]（deepseek 对"
+        "配送时效两条件都拒判，元数据可见也如此），有的以陷阱片段为据（订单税率三模型一致"
+        "选旧税率为据，订单报表 glm/deepseek 以废弃 ETL 为据），有的被元数据纠偏"
+        "（MiniMax 在订单报表 C4 从[已废弃]翻到[可直接使用]）。",
+        "- 元数据显式化的跨模型收敛是条件性的：对愿意读元数据的模型起纠偏作用；"
+        "对拒判型或自选依据片段的模型不起作用。跨模型一致性与结论正确性是两个维度"
+        "（三模型一致地选错依据片段时，一致率不反映正确性）。",
         "- 模型 API 异常或标签缺失计入不一致，不剔除。",
     ]
     return "\n".join(lines) + "\n"
