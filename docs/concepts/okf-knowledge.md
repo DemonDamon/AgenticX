@@ -51,4 +51,4 @@ python3 -m pytest tests/okf_reader_test.py tests/okf_export_test.py tests/okf_re
 - 打分器为词面重叠（确定性），那组离线对比的数字不能说明检索质量；换真实向量后端和真实查询才能回答
 - 两组模型实验只覆盖企业内部的简单知识、元数据完整的干净场景；状态缺失或有歧义、措辞不同的矛盾文档还没测。判断过没过期需要知道当天日期，落地时系统要把当前日期给模型，或由代码预先算好
 - 元数据本身有上下文成本，比纯正文多 0~50% 的字符
-- OKF v0.3 已发布（conformance 规则/信任分级），适配层 frontmatter 全量保留的设计天然兼容增量字段，映射与导出侧升级留待下一期
+- OKF 最新规范是 v0.3，规范仓库在 GitHub 组织 open-knowledge-format 下（GoogleCloudPlatform/open-knowledge-format 已标记弃用并指向新仓库；GoogleCloudPlatform/knowledge-catalog 的 okf 目录里是 v0.2）。v0.3 相对 v0.2 新增了 `superseded_by`、根目录 index.md 的元数据和 `x-` 扩展键规则，另有两处不兼容变化：相对路径从文件所在目录算起，信任等级只看当前有效的复核记录。适配器按 v0.2 编写，还没有用 v0.3 的 Bundle 实测
