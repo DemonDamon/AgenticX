@@ -10,8 +10,8 @@
 
   <!-- ======== header ======== -->
   <rect x="60" y="52" width="8" height="60" rx="4" fill="#2B2F36"/>
-  <text x="84" y="86" font-size="30" font-weight="bold" fill="#2B2F36">实验图解：给知识上户口，治好裸 RAG 的过期知识病</text>
-  <text x="84" y="118" font-size="14" fill="#6B7280">一个技术实验的四张图：问题 → 解法 → 消融对比 → 跨模型反应</text>
+  <text x="84" y="86" font-size="30" font-weight="bold" fill="#2B2F36">给知识上户口：AgenticX 接入 OKF 的做法和验证</text>
+  <text x="84" y="118" font-size="14" fill="#6B7280">四张图：现在的问题、OKF 的做法、实验怎么做、结果</text>
 
   <!-- ============================================================ -->
   <!-- 分区 1：裸 RAG 的问题 -->
@@ -179,114 +179,108 @@
   <text x="580" y="996" font-size="16" font-weight="bold" fill="#2B2F36">挡掉过期知识 100% → 0%，且不误伤正确知识</text>
 
   <!-- ============================================================ -->
-  <!-- 分区 3：四档功能对比 -->
+  <!-- 分区 3：实验怎么做 -->
   <!-- ============================================================ -->
   <circle cx="70" cy="1190" r="18" fill="#2B2F36"/>
   <text x="70" y="1196" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">3</text>
-  <text x="100" y="1197" font-size="22" font-weight="bold" fill="#2B2F36">四档功能对比（消融实验）</text>
+  <text x="100" y="1197" font-size="22" font-weight="bold" fill="#2B2F36">实验怎么做：同一条知识，两种给法，三个模型</text>
   <line x1="60" y1="1224" x2="1500" y2="1224" stroke="#E5E7EB" stroke-width="1"/>
-  <text x="60" y="1252" font-size="13" fill="#6B7280">每档只加一个能力，隔离出每一步的增益</text>
+  <text x="60" y="1252" font-size="13" fill="#6B7280">三个模型来自三家不同的厂商，每个模型看到的都是同一批内容</text>
 
-  <!-- V0 -->
-  <rect x="60" y="1290" width="900" height="92" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
-  <rect x="76" y="1306" width="88" height="60" rx="10" fill="#2B2F36"/>
-  <text x="120" y="1326" font-size="11" fill="#C9CDD4" text-anchor="middle">版本</text>
-  <text x="120" y="1355" font-size="24" font-weight="bold" fill="#FFFFFF" text-anchor="middle">0</text>
-  <text x="190" y="1330" font-size="16" font-weight="bold" fill="#2B2F36">裸 RAG（切碎文本）</text>
-  <text x="190" y="1356" font-size="12.5" fill="#6B7280">文本切碎入库，检索拼回上下文</text>
-  <rect x="696" y="1320" width="110" height="32" rx="16" fill="#FCEBE9" stroke="#D93025" stroke-width="1.5"/>
-  <text x="751" y="1341" font-size="13" font-weight="bold" fill="#D93025" text-anchor="middle">陷阱混入 100%</text>
-  <rect x="816" y="1320" width="128" height="32" rx="16" fill="#2B2F36"/>
-  <text x="880" y="1341" font-size="13" font-weight="bold" fill="#FFFFFF" text-anchor="middle">上下文 501 字/次</text>
+  <!-- 面板 A：一条知识 -->
+  <rect x="60" y="1290" width="400" height="370" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <text x="80" y="1320" font-size="15" font-weight="bold" fill="#2B2F36">一条知识</text>
+  <rect x="80" y="1338" width="360" height="200" rx="8" fill="#FFFFFF" stroke="#D0D5DD" stroke-width="1"/>
+  <text x="100" y="1370" font-size="13" font-weight="bold" fill="#9AA0A6">同城配送时效</text>
+  <text x="100" y="1404" font-size="13" fill="#2B2F36">同城配送平均 4 小时送达，</text>
+  <text x="100" y="1430" font-size="13" fill="#2B2F36">95 分位的订单在 8 小时内送达。</text>
+  <rect x="80" y="1556" width="230" height="36" rx="18" fill="#FCE8E6" stroke="#C5221F" stroke-width="1.5"/>
+  <text x="195" y="1580" font-size="13" font-weight="bold" fill="#C5221F" text-anchor="middle">这条知识已经过期了</text>
+  <text x="80" y="1628" font-size="12" fill="#6B7280">正文里不会写“已过期”，模型光看正文看不出来</text>
 
-  <!-- V1 -->
-  <rect x="105" y="1404" width="900" height="92" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
-  <rect x="121" y="1420" width="88" height="60" rx="10" fill="#2B2F36"/>
-  <text x="165" y="1440" font-size="11" fill="#C9CDD4" text-anchor="middle">版本</text>
-  <text x="165" y="1469" font-size="24" font-weight="bold" fill="#FFFFFF" text-anchor="middle">1</text>
-  <text x="235" y="1444" font-size="16" font-weight="bold" fill="#2B2F36">整知识单元</text>
-  <text x="235" y="1470" font-size="12.5" fill="#6B7280">整篇知识作为一个检索单元</text>
-  <rect x="839" y="1434" width="150" height="32" rx="16" fill="#2B2F36"/>
-  <text x="914" y="1455" font-size="13" font-weight="bold" fill="#FFFFFF" text-anchor="middle">上下文降到 135 字/次</text>
+  <!-- 箭头 A -> B -->
+  <line x1="470" y1="1475" x2="506" y2="1475" stroke="#9AA0A6" stroke-width="2.5"/>
+  <polygon points="516,1475 504,1469 504,1481" fill="#9AA0A6"/>
 
-  <!-- V2 -->
-  <rect x="150" y="1518" width="900" height="92" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
-  <rect x="166" y="1534" width="88" height="60" rx="10" fill="#2B2F36"/>
-  <text x="210" y="1554" font-size="11" fill="#C9CDD4" text-anchor="middle">版本</text>
-  <text x="210" y="1583" font-size="24" font-weight="bold" fill="#FFFFFF" text-anchor="middle">2</text>
-  <text x="280" y="1558" font-size="16" font-weight="bold" fill="#2B2F36">+ 户口过滤</text>
-  <text x="280" y="1584" font-size="12.5" fill="#6B7280">检索前先读户口，过期 / 废弃挡掉</text>
-  <rect x="924" y="1548" width="110" height="32" rx="16" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
-  <text x="979" y="1569" font-size="13" font-weight="bold" fill="#1E8E3E" text-anchor="middle">陷阱混入 0%</text>
+  <!-- 面板 B：两种给法 -->
+  <rect x="520" y="1290" width="540" height="370" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <text x="540" y="1320" font-size="15" font-weight="bold" fill="#2B2F36">两种给法（只有这里不同）</text>
+  <rect x="540" y="1338" width="500" height="132" rx="8" fill="#FFFFFF" stroke="#D0D5DD" stroke-width="1"/>
+  <text x="560" y="1366" font-size="14" font-weight="bold" fill="#C5221F">不给户口</text>
+  <text x="560" y="1394" font-size="13" fill="#2B2F36">只有标题和正文，和左边一模一样</text>
+  <text x="560" y="1420" font-size="12" fill="#6B7280">模型看不出它过期了</text>
+  <rect x="540" y="1482" width="500" height="160" rx="8" fill="#FFFFFF" stroke="#1E8E3E" stroke-width="1.5"/>
+  <text x="560" y="1510" font-size="14" font-weight="bold" fill="#1E8E3E">给户口</text>
+  <text x="560" y="1538" font-size="13" fill="#2B2F36">status: stable</text>
+  <text x="560" y="1562" font-size="13" fill="#2B2F36">stale_after: 2026-11-01</text>
+  <text x="560" y="1588" font-size="12" fill="#6B7280">正文不变。文件头写明 11 月 1 日到期，实验当天是 11 月 25 日</text>
 
-  <!-- V3 -->
-  <rect x="195" y="1632" width="900" height="92" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
-  <rect x="211" y="1648" width="88" height="60" rx="10" fill="#2B2F36"/>
-  <text x="255" y="1668" font-size="11" fill="#C9CDD4" text-anchor="middle">版本</text>
-  <text x="255" y="1697" font-size="24" font-weight="bold" fill="#FFFFFF" text-anchor="middle">3</text>
-  <text x="325" y="1672" font-size="16" font-weight="bold" fill="#2B2F36">+ 溯源信息</text>
-  <text x="325" y="1698" font-size="12.5" fill="#6B7280">每条知识带来源信息，可追溯</text>
-  <text x="941" y="1678" font-size="12.5" font-weight="bold" fill="#2B2F36" text-anchor="end">比 501 省 58%</text>
-  <rect x="951" y="1646" width="128" height="32" rx="16" fill="#2B2F36"/>
-  <text x="1015" y="1667" font-size="13" font-weight="bold" fill="#FFFFFF" text-anchor="middle">上下文 208 字/次</text>
+  <!-- 箭头 B -> C -->
+  <line x1="1070" y1="1475" x2="1106" y2="1475" stroke="#9AA0A6" stroke-width="2.5"/>
+  <polygon points="1116,1475 1104,1469 1104,1481" fill="#9AA0A6"/>
 
-  <!-- 右侧结论框 + mini MRR 图 -->
-  <rect x="1150" y="1290" width="350" height="190" rx="12" fill="#FFFFFF" stroke="#2B2F36" stroke-width="1.5" filter="url(#softShadow)"/>
-  <text x="1325" y="1322" font-size="15" font-weight="bold" fill="#2B2F36" text-anchor="middle">库越大，优势越大</text>
-  <text x="1325" y="1346" font-size="11.5" fill="#6B7280" text-anchor="middle">600 个知识时 · 第 1 名命中率（MRR）</text>
-  <text x="1170" y="1383" font-size="12" fill="#6B7280">切碎检索</text>
-  <rect x="1226" y="1370" width="95" height="16" rx="4" fill="#C4C9CF"/>
-  <text x="1329" y="1383" font-size="13" font-weight="bold" fill="#6B7280">0.38</text>
-  <text x="1170" y="1419" font-size="12" fill="#6B7280">整单元</text>
-  <rect x="1226" y="1406" width="132" height="16" rx="4" fill="#2B2F36"/>
-  <text x="1366" y="1419" font-size="13" font-weight="bold" fill="#2B2F36">0.53</text>
-  <text x="1325" y="1462" font-size="11" fill="#6B7280" text-anchor="middle">知识越多，整单元检索越占优</text>
-
-  <text x="60" y="1756" font-size="12" fill="#6B7280">阶梯 = 逐档叠加能力，隔离每个增益（消融实验）</text>
+  <!-- 面板 C：三个模型 -->
+  <rect x="1120" y="1290" width="380" height="370" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <text x="1140" y="1320" font-size="15" font-weight="bold" fill="#2B2F36">三个模型分别回答</text>
+  <rect x="1140" y="1344" width="340" height="48" rx="24" fill="#FFFFFF" stroke="#2B2F36" stroke-width="1.5"/>
+  <text x="1310" y="1373" font-size="15" fill="#2B2F36" text-anchor="middle">glm-5.3-flash</text>
+  <rect x="1140" y="1414" width="340" height="48" rx="24" fill="#FFFFFF" stroke="#2B2F36" stroke-width="1.5"/>
+  <text x="1310" y="1443" font-size="15" fill="#2B2F36" text-anchor="middle">DeepSeek-v4.1</text>
+  <rect x="1140" y="1484" width="340" height="48" rx="24" fill="#FFFFFF" stroke="#2B2F36" stroke-width="1.5"/>
+  <text x="1310" y="1513" font-size="15" fill="#2B2F36" text-anchor="middle">MiniMax-M3</text>
+  <text x="1140" y="1578" font-size="12" fill="#6B7280">每条知识重复 3 到 4 次</text>
+  <text x="1140" y="1602" font-size="12" fill="#6B7280">两组实验共 1080 次调用</text>
 
   <!-- ============================================================ -->
-  <!-- 分区 4：三个模型的反应 -->
+  <!-- 分区 4：结果 -->
   <!-- ============================================================ -->
-  <circle cx="70" cy="1815" r="18" fill="#2B2F36"/>
-  <text x="70" y="1821" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">4</text>
-  <text x="100" y="1822" font-size="22" font-weight="bold" fill="#2B2F36">同一条过期知识，不给户口和给户口：三个模型的判断</text>
-  <line x1="60" y1="1849" x2="1500" y2="1849" stroke="#E5E7EB" stroke-width="1"/>
-  <text x="60" y="1877" font-size="13" fill="#6B7280">12 条已过期或已废弃的知识，逐条单独给模型看，每条重复 4 次；三个模型结果完全相同</text>
+  <circle cx="70" cy="1710" r="18" fill="#2B2F36"/>
+  <text x="70" y="1716" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">4</text>
+  <text x="100" y="1717" font-size="22" font-weight="bold" fill="#2B2F36">结果：三个模型一模一样</text>
+  <line x1="60" y1="1744" x2="1500" y2="1744" stroke="#E5E7EB" stroke-width="1"/>
+  <text x="60" y="1772" font-size="13" fill="#6B7280">三个模型的结果完全相同，下面按情况汇总</text>
 
-  <!-- Card 1 -->
-  <rect x="60" y="1920" width="1440" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
-  <circle cx="130" cy="1995" r="22" fill="#2B2F36"/>
-  <text x="130" y="2001" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">G</text>
-  <text x="165" y="2001" font-size="17" font-weight="bold" fill="#2B2F36">glm-5.3-flash</text>
-  <text x="360" y="1980" font-size="15" font-weight="bold" fill="#C5221F">不给户口：12 条过期知识全部当成现行答案</text>
-  <text x="360" y="2008" font-size="13" fill="#6B7280">答案照抄过期数值，如“48小时内”“30分钟”</text>
-  <rect x="1135" y="1973" width="210" height="44" rx="22" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
-  <text x="1240" y="2001" font-size="14" font-weight="bold" fill="#1E8E3E" text-anchor="middle">给户口：12 条全部识别</text>
-  <text x="1240" y="2038" font-size="12" fill="#6B7280" text-anchor="middle">（判不可用，答无法回答）</text>
+  <!-- 表头 -->
+  <rect x="580" y="1798" width="450" height="46" rx="8" fill="#FCE8E6"/>
+  <text x="805" y="1828" font-size="16" font-weight="bold" fill="#C5221F" text-anchor="middle">不给户口</text>
+  <rect x="1050" y="1798" width="450" height="46" rx="8" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
+  <text x="1275" y="1828" font-size="16" font-weight="bold" fill="#1E8E3E" text-anchor="middle">给户口</text>
 
-  <!-- Card 2 -->
-  <rect x="60" y="2090" width="1440" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
-  <circle cx="130" cy="2165" r="22" fill="#2B2F36"/>
-  <text x="130" y="2171" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">D</text>
-  <text x="165" y="2171" font-size="17" font-weight="bold" fill="#2B2F36">DeepSeek-v4.1</text>
-  <text x="360" y="2150" font-size="15" font-weight="bold" fill="#C5221F">不给户口：12 条过期知识全部当成现行答案</text>
-  <text x="360" y="2178" font-size="13" fill="#6B7280">上一版写的“拒答”是实验脚本的 bug，并不存在</text>
-  <rect x="1135" y="2143" width="210" height="44" rx="22" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
-  <text x="1240" y="2171" font-size="14" font-weight="bold" fill="#1E8E3E" text-anchor="middle">给户口：12 条全部识别</text>
-  <text x="1240" y="2208" font-size="12" fill="#6B7280" text-anchor="middle">（和其他两个模型表现一致）</text>
+  <!-- 第一组 -->
+  <rect x="60" y="1870" width="490" height="280" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <text x="85" y="1906" font-size="16" font-weight="bold" fill="#2B2F36">第一组：只给一条过期知识</text>
+  <text x="85" y="1936" font-size="13" fill="#6B7280">12 条过期知识，一条一条单独给模型看</text>
+  <text x="85" y="1980" font-size="13" fill="#2B2F36">问：同城配送平均多久送达？</text>
+  <rect x="580" y="1870" width="450" height="280" rx="12" fill="#FFF7F6" stroke="#F5C6C0" stroke-width="1.5"/>
+  <text x="805" y="1916" font-size="15" font-weight="bold" fill="#C5221F" text-anchor="middle">三个模型都照着答</text>
+  <text x="805" y="1950" font-size="13" fill="#2B2F36" text-anchor="middle">“平均 4 小时送达”，用的是过期数值</text>
+  <text x="805" y="2068" font-size="40" font-weight="bold" fill="#C5221F" text-anchor="middle">0%</text>
+  <text x="805" y="2102" font-size="12" fill="#6B7280" text-anchor="middle">识别出它过期了的比例（144 次里 0 次）</text>
+  <rect x="1050" y="1870" width="450" height="280" rx="12" fill="#F4FBF5" stroke="#BFE3C6" stroke-width="1.5"/>
+  <text x="1275" y="1916" font-size="15" font-weight="bold" fill="#1E8E3E" text-anchor="middle">三个模型都判“不能用”</text>
+  <text x="1275" y="1950" font-size="13" fill="#2B2F36" text-anchor="middle">回答“无法回答”，过期知识没有进入答案</text>
+  <text x="1275" y="2068" font-size="40" font-weight="bold" fill="#1E8E3E" text-anchor="middle">100%</text>
+  <text x="1275" y="2102" font-size="12" fill="#6B7280" text-anchor="middle">识别出它过期了的比例（144 次里 144 次）</text>
 
-  <!-- Card 3 -->
-  <rect x="60" y="2260" width="1440" height="150" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
-  <circle cx="130" cy="2335" r="22" fill="#2B2F36"/>
-  <text x="130" y="2341" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">M</text>
-  <text x="165" y="2341" font-size="17" font-weight="bold" fill="#2B2F36">MiniMax-M3</text>
-  <text x="360" y="2320" font-size="15" font-weight="bold" fill="#C5221F">不给户口：12 条过期知识全部当成现行答案</text>
-  <text x="360" y="2348" font-size="13" fill="#6B7280">6 条有效知识在三种呈现下都判“可用”，没有误伤</text>
-  <rect x="1135" y="2318" width="210" height="44" rx="22" fill="#EAF5EC" stroke="#1E8E3E" stroke-width="1.5"/>
-  <text x="1240" y="2346" font-size="14" font-weight="bold" fill="#1E8E3E" text-anchor="middle">给户口：12 条全部识别</text>
+  <!-- 第二组 -->
+  <rect x="60" y="2180" width="490" height="260" rx="12" fill="#F7F8FA" stroke="#D0D5DD" stroke-width="1.5"/>
+  <text x="85" y="2216" font-size="16" font-weight="bold" fill="#2B2F36">第二组：两条知识互相矛盾</text>
+  <text x="85" y="2246" font-size="13" fill="#6B7280">一条过期、一条现行，同时给模型看</text>
+  <text x="85" y="2290" font-size="13" fill="#2B2F36">问：客服多久完成退款审核？</text>
+  <text x="85" y="2318" font-size="12" fill="#6B7280">知识 1：48 小时（过期）　知识 2：24 小时（现行）</text>
+  <rect x="580" y="2180" width="450" height="260" rx="12" fill="#FFF9EC" stroke="#EBCF8E" stroke-width="1.5"/>
+  <text x="805" y="2226" font-size="15" font-weight="bold" fill="#B26A00" text-anchor="middle">三个模型几乎都不回答</text>
+  <text x="805" y="2260" font-size="13" fill="#2B2F36" text-anchor="middle">看得出两条矛盾，但不知道哪条是现行的</text>
+  <text x="805" y="2366" font-size="40" font-weight="bold" fill="#B26A00" text-anchor="middle">213/216</text>
+  <text x="805" y="2400" font-size="12" fill="#6B7280" text-anchor="middle">216 次里 213 次答“无法回答”</text>
+  <rect x="1050" y="2180" width="450" height="260" rx="12" fill="#F4FBF5" stroke="#BFE3C6" stroke-width="1.5"/>
+  <text x="1275" y="2226" font-size="15" font-weight="bold" fill="#1E8E3E" text-anchor="middle">三个模型都答现行的那条</text>
+  <text x="1275" y="2260" font-size="13" fill="#2B2F36" text-anchor="middle">“24 小时内完成审核”，调换先后顺序结果不变</text>
+  <text x="1275" y="2366" font-size="40" font-weight="bold" fill="#1E8E3E" text-anchor="middle">216/216</text>
+  <text x="1275" y="2400" font-size="12" fill="#6B7280" text-anchor="middle">216 次全部答现行数值</text>
 
   <!-- 底部结论 -->
   <rect x="60" y="2460" width="1440" height="84" rx="14" fill="#2B2F36"/>
-  <text x="780" y="2496" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">结论：三个模型没有差别，有差别的是给不给户口</text>
-  <text x="780" y="2524" font-size="12.5" fill="#C9CDD4" text-anchor="middle">不给户口识别率 0%，给户口 100%；648 次调用没有一次翻转</text>
+  <text x="780" y="2496" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">结论：三个模型结果完全一样，户口的作用不挑模型</text>
+  <text x="780" y="2524" font-size="12.5" fill="#C9CDD4" text-anchor="middle">不给户口，三个模型一致地用错或者不答；给了户口，一致地答对</text>
 </svg>
