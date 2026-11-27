@@ -11,6 +11,7 @@ import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { fetchArtifactPreview, type ArtifactPreviewResponse } from "./subagent/run-drawer-api";
 import { previewBaseName } from "./workspace/workspace-preview-types";
 import { isSubAgentLiveStatus } from "../utils/stream-overlay-policy";
+import { isScrollNearBottom, resolvePinOnUserWheel } from "../utils/chat-scroll-pin";
 import { formatBashExecUserView } from "./messages/bash-exec-result";
 import { CitationMarkdownBody } from "./messages/CitationMarkdownBody";
 import { ProviderIcon } from "./ProviderIcon";
@@ -1146,13 +1147,37 @@ function ActivityTimeline({
 }) {
   const { t } = useTranslation("chat");
   const listRef = useRef<HTMLDivElement>(null);
+  const timelinePinnedRef = useRef(true);
+  const liveScrollRef = useRef<HTMLDivElement>(null);
+  const livePinnedRef = useRef(true);
   const visible = useMemo(() => denoiseEvents(events), [events]);
   const isLive = isSubAgentLiveStatus(agentStatus);
-  // 保持滚动到底部（最新事件可见）
+
+  // Strip <think>/<redacted_thinking> wrappers before display so raw tags never show.
+  const cleanLiveOutput = useMemo(() => {
+    if (!liveOutput?.trim()) return "";
+    return liveOutput
+      .replace(/<redacted_thinking>[\s\S]*?<\/redacted_thinking>/gi, "")
+      .replace(/<\/?think>/gi, "")
+      .trim();
+  }, [liveOutput]);
+  const showThinkingDots = !cleanLiveOutput || isThinkingPlaceholderText(cleanLiveOutput);
+
+  // Keep timeline pinned to latest event unless the user scrolled up to inspect history.
   useEffect(() => {
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && timelinePinnedRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [visible.length]);
+
+  // Keep live stream box pinned to bottom as tokens arrive unless the user scrolled up.
+  useEffect(() => {
+    const el = liveScrollRef.current;
+    if (el && livePinnedRef.current && !showThinkingDots) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [cleanLiveOutput, showThinkingDots]);
 
   return (
     <div className="mt-2 overflow-hidden rounded-lg border border-border bg-surface-card">
@@ -1180,26 +1205,41 @@ function ActivityTimeline({
             <ArcSpinner size={10} />
             <span className="text-[10px] font-medium text-[var(--kb-citation-fg)]">{t("subagent.liveStream")}</span>
           </div>
-          {(() => {
-            // Strip <think>/<redacted_thinking> wrappers before display so raw tags never show.
-            const clean = liveOutput
-              .replace(/<redacted_thinking>[\s\S]*?<\/redacted_thinking>/gi, "")
-              .replace(/<\/?think>/gi, "")
-              .trim();
-            if (!clean || isThinkingPlaceholderText(clean)) return <ThinkingDots />;
-            return (
-              <div className="max-h-28 overflow-y-auto rounded bg-[rgba(var(--theme-color-rgb),0.05)] px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-text-primary ring-1 ring-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_14%,transparent)]">
-                <pre className="whitespace-pre-wrap break-all">{clean}</pre>
-              </div>
-            );
-          })()}
+          <div
+            ref={liveScrollRef}
+            data-testid="subagent-live-stream-scroll"
+            className="max-h-28 overflow-y-auto rounded bg-[rgba(var(--theme-color-rgb),0.05)] px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-text-primary ring-1 ring-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_14%,transparent)]"
+            onScroll={(e) => {
+              livePinnedRef.current = isScrollNearBottom(e.currentTarget, 32);
+            }}
+            onWheel={(e) => {
+              if (resolvePinOnUserWheel(e.deltaY) === false) {
+                livePinnedRef.current = false;
+              }
+            }}
+          >
+            {showThinkingDots ? (
+              <ThinkingDots />
+            ) : (
+              <pre className="whitespace-pre-wrap break-all">{cleanLiveOutput}</pre>
+            )}
+          </div>
         </div>
       ) : null}
 
       {/* 事件时间线 */}
       <div
         ref={listRef}
+        data-testid="subagent-timeline-scroll"
         className="max-h-48 overflow-y-auto px-3 pt-2.5 pb-1"
+        onScroll={(e) => {
+          timelinePinnedRef.current = isScrollNearBottom(e.currentTarget, 32);
+        }}
+        onWheel={(e) => {
+          if (resolvePinOnUserWheel(e.deltaY) === false) {
+            timelinePinnedRef.current = false;
+          }
+        }}
         style={{
           maskImage: "linear-gradient(to bottom, transparent 0%, black 6%, black 94%, transparent 100%)",
           WebkitMaskImage: "linear-gradient(to bottom, transparent 0%, black 6%, black 94%, transparent 100%)",

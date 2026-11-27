@@ -43,3 +43,40 @@ export function shouldPinScrollOnPresentationEnter(
 ): boolean {
   return presenting && !wasPresenting;
 }
+
+export type ScrollMetrics = {
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+};
+
+/** True when the scroll viewport is within `thresholdPx` of its bottom edge. */
+export function isScrollNearBottom(metrics: ScrollMetrics, thresholdPx = 96): boolean {
+  const remain = metrics.scrollHeight - (metrics.scrollTop + metrics.clientHeight);
+  return remain <= thresholdPx;
+}
+
+/**
+ * Upward wheel input immediately unpins auto-scroll so the user can inspect
+ * history without fighting streaming updates. Downward / zero delta returns
+ * `null` so the regular scroll handler decides pin state from geometry.
+ */
+export function resolvePinOnUserWheel(deltaY: number): boolean | null {
+  if (deltaY < 0) return false;
+  return null;
+}
+
+/**
+ * Bottom padding reserved for the floating composer when WorkPanel is expanded.
+ * Adds a small breathing gap so the final line of content clears the composer card.
+ */
+export function computeExpandedWorkBottomInset(
+  expanded: boolean,
+  composerHeightPx: number,
+  gapPx = 8,
+): number {
+  if (!expanded) return 0;
+  const h = Number.isFinite(composerHeightPx) ? Math.ceil(composerHeightPx) : 0;
+  if (h <= 0) return 0;
+  return h + Math.max(0, gapPx);
+}
