@@ -13,13 +13,20 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+
+from agenticx.cli.studio import StudioSession
+from agenticx.runtime import AgentRuntime, ConfirmGate, EventType
 from agenticx.runtime.agent_runtime import (
     _build_loop_halt_success_digest,
+    _eager_knowledge_search_events,
     _tool_result_ok_flag,
 )
+from agenticx.runtime.hooks import HookRegistry
 from agenticx.runtime.loop_detector import LoopDetector
 
 
@@ -47,6 +54,109 @@ def test_ok_flag_none_for_non_json_and_non_boolean() -> None:
     assert _tool_result_ok_flag('[{"ok": true}]') is None
     assert _tool_result_ok_flag('{"ok": true, "unterminated":') is None
     assert _tool_result_ok_flag('  {"ok": true}') is True
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_ok_flag_reads_the_complete_long_json_result(ok) -> None:
+    result = json.dumps({"payload": "synthetic data " * 500, "ok": ok})
+    assert len(result) > 4000
+    assert _tool_result_ok_flag(result) is ok
+
+
+@pytest.mark.parametrize("ok", [True, False])
+@pytest.mark.parametrize("preserve", [True, False])
+def test_runtime_progress_and_result_preservation(ok, preserve, monkeypatch, tmp_path) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    monkeypatch.setenv("AGX_HOME", str(tmp_path))
+    from pathlib import Path
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("AGX_MICRO_COMPACT_BUDGET", "4000")
+    raw_result = json.dumps({"payload": "synthetic data " * 500, "ok": ok})
+
+    class Model:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, messages, **kwargs):
+            self.calls += 1
+            if self.calls > 1:
+                return SimpleNamespace(content="已完成本次数据查询。", tool_calls=[])
+            return SimpleNamespace(content="", tool_calls=[{
+                "id": "call-data", "type": "function",
+                "function": {"name": "read_external_record", "arguments": '{"id": 1}'},
+            }])
+
+    class Gate(ConfirmGate):
+        async def request_confirm(self, question, context=None):
+            return True
+
+    async def execute(*args, **kwargs):
+        return raw_result
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", execute)
+    runtime = AgentRuntime(Model(), Gate(),
+                           preserve_tool_results={"read_external_record"} if preserve else None)
+    runtime.hooks = HookRegistry()
+    marks = []
+    record_call = runtime.loop_detector.record_call
+
+    def capture_progress(*args, **kwargs):
+        marks.append(kwargs["has_progress"])
+        return record_call(*args, **kwargs)
+
+    monkeypatch.setattr(runtime.loop_detector, "record_call", capture_progress)
+    session = StudioSession(provider_name="openai", model_name="test-model", workspace_dir=str(tmp_path))
+    tool = {"type": "function", "function": {"name": "read_external_record",
+            "description": "Query an external record", "parameters": {"type": "object"}}}
+
+    async def collect():
+        return [event async for event in runtime.run_turn(
+            "查询这条合成数据。", session, tools=[tool], system_prompt="按需查询数据。")]
+
+    events = asyncio.run(collect())
+    results = [event.data["result"] for event in events if event.type == EventType.TOOL_RESULT.value]
+    assert len(results) == 1
+    if preserve:
+        assert results[0] == raw_result
+        assert json.loads(results[0])["ok"] is ok
+    else:
+        assert results[0].startswith("[micro-compact tool=read_external_record")
+        assert len(results[0]) < len(raw_result)
+    assert marks == [ok]
+
+
+@pytest.mark.parametrize("preserve", [True, False])
+def test_eager_knowledge_search_obeys_result_preservation(preserve, monkeypatch, tmp_path) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    monkeypatch.setenv("AGX_MICRO_COMPACT_BUDGET", "4000")
+    from pathlib import Path
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    raw_result = json.dumps({"schema": "synthetic schema " * 500, "ok": True})
+
+    async def execute(*args, **kwargs):
+        return raw_result
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", execute)
+    runtime = AgentRuntime(SimpleNamespace(), SimpleNamespace(),
+                           preserve_tool_results={"knowledge_search"} if preserve else None)
+    runtime.hooks = HookRegistry()
+    session = SimpleNamespace(agent_messages=[], chat_history=[])
+    messages = []
+
+    async def collect():
+        return [event async for event in _eager_knowledge_search_events(
+            runtime=runtime, session=session, user_input="查合成数据", messages=messages,
+            agent_id="meta", executed_tool_names=[], is_system_trigger=False, team_manager=None)]
+
+    asyncio.run(collect())
+    result = next(message["content"] for message in messages if message["role"] == "tool")
+    if preserve:
+        assert result == raw_result
+    else:
+        assert result != raw_result
+        assert "[micro-compact tool=knowledge_search" in result
 
 
 def test_create_avatar_success_prevents_false_loop_halt() -> None:
