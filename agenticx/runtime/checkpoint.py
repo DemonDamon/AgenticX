@@ -25,10 +25,12 @@ import logging
 import os
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from agenticx.runtime.harden_flags import resume_from_ledger_enabled
 from agenticx.studio.storage.backend import SyncStorageFacade
 from agenticx.studio.storage.factory import get_sync_storage
 
@@ -141,8 +143,43 @@ def resume_interrupted_enabled() -> bool:
             return cfg
     except Exception:
         pass
-    ha_mode = os.environ.get("AGX_HA_MODE", "").strip().lower()
-    if ha_mode == "redis":
+    return _redis_ha_mode()
+
+
+def _redis_ha_mode() -> bool:
+    """Whether checkpoints are shared across replicas (same rule as ``resume_interrupted_enabled``)."""
+    if os.environ.get("AGX_HA_MODE", "").strip().lower() == "redis":
         return True
-    storage_kind = os.environ.get("AGX_STORAGE_BACKEND", "").strip().lower()
-    return storage_kind == "redis"
+    return os.environ.get("AGX_STORAGE_BACKEND", "").strip().lower() == "redis"
+
+
+def load_resume_anchor(
+    session_id: str,
+    *,
+    sessions_root: Any | None = None,
+    checkpoint_store: Optional[CheckpointStore] = None,
+) -> Optional[AgentCheckpoint]:
+    """Load the crash-resume anchor for one session (recovery layering).
+
+    - HA mode: the anchor comes from the checkpoint stored through the storage
+      backend, because the ledger only lives on the local disk of the replica
+      that hosted the turn.
+    - Standalone mode: the anchor is projected from the replay ledger; the
+      stored checkpoint is only used when the ledger yields no anchor.
+    - ``AGX_RESUME_FROM_LEDGER=0`` restores the checkpoint-only path.
+    """
+    store = checkpoint_store if checkpoint_store is not None else CheckpointStore()
+    if _redis_ha_mode() or not resume_from_ledger_enabled():
+        return store.load(session_id)
+    try:
+        from agenticx.runtime.replay_ledger.resume_anchor import project_resume_anchor
+        from agenticx.runtime.replay_ledger.store import ReplayLedgerStore
+
+        ledger = ReplayLedgerStore(Path(sessions_root)) if sessions_root is not None else ReplayLedgerStore()
+        projected = project_resume_anchor(ledger, session_id)
+    except Exception:
+        logger.warning("ledger resume anchor failed session=%s", session_id, exc_info=True)
+        projected = None
+    if projected is not None:
+        return projected
+    return store.load(session_id)

@@ -1170,7 +1170,11 @@ class SessionManager:
         ``AGX_RESUME_INTERRUPTED=0`` / ``runtime.resume_interrupted: false``
         (default off outside HA mode).
         """
-        from agenticx.runtime.checkpoint import CheckpointStore, resume_interrupted_enabled
+        from agenticx.runtime.checkpoint import (
+            CheckpointStore,
+            load_resume_anchor,
+            resume_interrupted_enabled,
+        )
 
         if not resume_interrupted_enabled():
             return []
@@ -1184,7 +1188,9 @@ class SessionManager:
         store = CheckpointStore()
         resumed: list[str] = []
         for sid in interrupted:
-            checkpoint = store.load(sid)
+            checkpoint = load_resume_anchor(
+                sid, sessions_root=self._sessions_root, checkpoint_store=store
+            )
             if checkpoint is None or checkpoint.status == "completed":
                 continue
             try:
@@ -1236,6 +1242,13 @@ class SessionManager:
                     for c in (getattr(checkpoint, "pending_tool_calls", None) or [])
                     if isinstance(c, dict) and str(c.get("id", "")).strip()
                 ]
+                # Use the persisted rows only while the in-memory copy is still
+                # the pristine cold load: sanitizing the persisted rows must
+                # reproduce it exactly. Otherwise a newer turn is in flight and
+                # its in-memory rows win.
+                persisted = self._load_agent_messages_for_context(session_id, session)
+                if persisted and _sanitize_context_messages(persisted) == raw:
+                    raw = persisted
                 raw = close_interrupted_tool_calls(raw, dispatched_call_ids=dispatched)
             session.agent_messages = _sanitize_context_messages(raw)
         except Exception:
@@ -2602,18 +2615,10 @@ class SessionManager:
             pass
 
         try:
-            raw = self._load_agent_messages_snapshot(session_id)
+            raw = self._load_agent_messages_for_context(session_id, session)
             if raw:
                 from agenticx.runtime.agent_runtime import _sanitize_context_messages
-                from agenticx.studio.chat_attachments import (
-                    materialize_message_lists_image_uploads,
-                    sync_agent_messages_attachments_from_chat_history,
-                )
 
-                materialize_message_lists_image_uploads(session_id, [raw])
-                sync_agent_messages_attachments_from_chat_history(
-                    raw, getattr(session, "chat_history", None) or []
-                )
                 session.agent_messages = _sanitize_context_messages(raw)
         except Exception:
             pass
@@ -2980,6 +2985,24 @@ class SessionManager:
 
     def _load_agent_messages_snapshot(self, session_id: str) -> list[dict]:
         return self._storage.load_agent_messages(session_id)
+
+    def _load_agent_messages_for_context(
+        self, session_id: str, session: StudioSession
+    ) -> list[dict]:
+        """Persisted agent messages with attachments resolved, before sanitizing."""
+        raw = self._load_agent_messages_snapshot(session_id)
+        if not raw:
+            return []
+        from agenticx.studio.chat_attachments import (
+            materialize_message_lists_image_uploads,
+            sync_agent_messages_attachments_from_chat_history,
+        )
+
+        materialize_message_lists_image_uploads(session_id, [raw])
+        sync_agent_messages_attachments_from_chat_history(
+            raw, getattr(session, "chat_history", None) or []
+        )
+        return raw
 
     def _context_refs_path(self, session_id: str) -> str:
         return os.path.join(self._sessions_root, session_id, "context_files_refs.json")

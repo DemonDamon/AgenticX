@@ -151,6 +151,27 @@ def cancelled_prefix_finalize_enabled() -> bool:
     )
 
 
+def resume_from_ledger_enabled() -> bool:
+    """``AGX_RESUME_FROM_LEDGER`` / ``runtime.resume_from_ledger``. Default True.
+
+    When on, standalone crash recovery projects its anchor from the replay
+    ledger and only falls back to the stored checkpoint when the ledger has no
+    open run. When off, recovery reads the checkpoint alone. HA mode always
+    reads the checkpoint and ignores this switch.
+    """
+    return _resolve_bool("AGX_RESUME_FROM_LEDGER", "runtime.resume_from_ledger", True)
+
+
+def ledger_reattach_enabled() -> bool:
+    """``AGX_LEDGER_REATTACH`` / ``runtime.ledger_reattach``. Default True.
+
+    When on, the read-only session stream falls back to the local replay
+    ledger when neither the event hub nor the coordination bus can serve a
+    reconnecting client. When off, the endpoint answers ``not_running`` as before.
+    """
+    return _resolve_bool("AGX_LEDGER_REATTACH", "runtime.ledger_reattach", True)
+
+
 def group_meta_direct_tools_enabled() -> bool:
     """``AGX_GROUP_META_DIRECT_TOOLS`` / ``group.meta_direct_tools``. Default False."""
     return _resolve_bool("AGX_GROUP_META_DIRECT_TOOLS", "group.meta_direct_tools", False)
