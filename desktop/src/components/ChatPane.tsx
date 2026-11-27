@@ -283,6 +283,8 @@ import {
 } from "../utils/streaming-stop-policy";
 import {
   chatListFollowRows,
+  computeExpandedWorkBottomInset,
+  resolvePinOnUserWheel,
   shouldApplyScrollPinFromEvent,
   shouldPinScrollOnPresentationEnter,
   shouldPinScrollOnUserSend,
@@ -3620,11 +3622,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const lastComposerEnterAtRef = useRef(0);
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const floatingComposerRef = useRef<HTMLDivElement>(null);
+  const [floatingComposerHeight, setFloatingComposerHeight] = useState(0);
   const chatFadeTopRef = useRef<HTMLDivElement>(null);
   const chatFadeBottomRef = useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = useRef(true);
-  /** >0 while we assign scrollTop; scroll events in that window must not unpin. */
+  /** >0 while we assign scrollTop; async scroll events in that frame must not unpin. */
   const programmaticScrollRef = useRef(0);
+  const programmaticScrollRafRef = useRef<number | null>(null);
   const loadingOlderMessagesRef = useRef(false);
   const sessionBootstrapRef = useRef("");
   const freshlyCreatedSessionRef = useRef("");
@@ -4261,12 +4266,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     syncJumpToBottomFab();
   }, [syncJumpToBottomFab]);
 
+  const clearProgrammaticScrollGuard = useCallback(() => {
+    if (programmaticScrollRafRef.current != null) {
+      cancelAnimationFrame(programmaticScrollRafRef.current);
+      programmaticScrollRafRef.current = null;
+    }
+    programmaticScrollRef.current = 0;
+  }, []);
+
   const scrollListToBottom = useCallback(() => {
     const el = listRef.current;
     if (!el) return;
     programmaticScrollRef.current += 1;
     el.scrollTop = el.scrollHeight;
-    programmaticScrollRef.current -= 1;
+    if (programmaticScrollRafRef.current != null) {
+      cancelAnimationFrame(programmaticScrollRafRef.current);
+    }
+    // Native scroll events fire asynchronously after scrollTop assignment; keep
+    // the guard active until the next frame so growing stream chunks do not
+    // falsely unpin before layout settles.
+    programmaticScrollRafRef.current = requestAnimationFrame(() => {
+      programmaticScrollRafRef.current = null;
+      programmaticScrollRef.current = 0;
+    });
   }, []);
 
   const pinChatListToLatestTurn = useCallback(() => {
@@ -4671,28 +4693,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     pane?.modelName,
   ]);
 
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-    // User scroll may unpin. Content-height resize must not unpin; if still
-    // pinned, keep the latest turn in view as bubbles/stream grow.
-    const onScroll = () => flushJumpToBottomFab();
-    const onResize = () => {
-      if (autoScrollPinnedRef.current) {
-        scrollListToBottom();
-      }
-      syncJumpToBottomFab();
-    };
-    flushJumpToBottomFab();
-    el.addEventListener("scroll", onScroll, { passive: true });
-    const ro = new ResizeObserver(onResize);
-    ro.observe(el);
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      ro.disconnect();
-    };
-  }, [paneId, flushJumpToBottomFab, syncJumpToBottomFab, scrollListToBottom]);
-
   const replayPresentingPrevRef = useRef(false);
   useLayoutEffect(() => {
     const wasPresenting = replayPresentingPrevRef.current;
@@ -4718,7 +4718,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     // FAB only — do not recompute pin here. Layout is often still short of the
     // true bottom when a new user bubble mounts, and that used to unpin us.
     syncJumpToBottomFab();
-  }, [listFollowRows, streamedAssistantText, scrollListToBottom, syncJumpToBottomFab]);
+  }, [
+    listFollowRows,
+    streamedAssistantText,
+    groupStreamText,
+    groupExpertActivities,
+    scrollListToBottom,
+    syncJumpToBottomFab,
+  ]);
 
   const highlightJumpKeyRef = useRef<string>("");
   useEffect(() => {
@@ -14913,6 +14920,90 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   useEffect(() => {
     const el = listRef.current;
+    if (!el) return;
+    // User scroll may unpin. Content-height resize must not unpin; if still
+    // pinned, keep the latest turn in view as bubbles/stream grow.
+    const onScroll = () => flushJumpToBottomFab();
+    const onWheel = (event: WheelEvent) => {
+      const nextPin = resolvePinOnUserWheel(event.deltaY);
+      if (nextPin === false) {
+        clearProgrammaticScrollGuard();
+        autoScrollPinnedRef.current = false;
+        syncJumpToBottomFab();
+      }
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      // Grabbing the native scrollbar thumb (common on Windows) should immediately
+      // yield control to the user instead of waiting for programmatic guard expiry.
+      const rect = el.getBoundingClientRect();
+      if (event.clientX >= rect.right - 20) {
+        clearProgrammaticScrollGuard();
+      }
+    };
+    const onResize = () => {
+      if (autoScrollPinnedRef.current) {
+        scrollListToBottom();
+      }
+      syncJumpToBottomFab();
+    };
+    flushJumpToBottomFab();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("pointerdown", onPointerDown, { passive: true });
+    const ro = new ResizeObserver(onResize);
+    ro.observe(el);
+    let observedContent: Element | null = el.firstElementChild;
+    if (observedContent) ro.observe(observedContent);
+    const mo = new MutationObserver(() => {
+      const nextContent = el.firstElementChild;
+      if (nextContent !== observedContent) {
+        if (observedContent) ro.unobserve(observedContent);
+        observedContent = nextContent;
+        if (observedContent) ro.observe(observedContent);
+      }
+    });
+    mo.observe(el, { childList: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onPointerDown);
+      ro.disconnect();
+      mo.disconnect();
+      clearProgrammaticScrollGuard();
+    };
+  }, [
+    paneId,
+    workExpandedLayout,
+    liftComposer,
+    isBrandEmptyState,
+    pane.loadingMessages,
+    flushJumpToBottomFab,
+    syncJumpToBottomFab,
+    scrollListToBottom,
+    clearProgrammaticScrollGuard,
+  ]);
+
+  useEffect(() => {
+    if (!workExpandedLayout) {
+      setFloatingComposerHeight(0);
+      return;
+    }
+    const el = floatingComposerRef.current;
+    if (!el) return;
+    const syncHeight = () => {
+      const next = Math.ceil(el.getBoundingClientRect().height);
+      setFloatingComposerHeight((prev) => (prev === next ? prev : next));
+    };
+    syncHeight();
+    const ro = new ResizeObserver(syncHeight);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+    };
+  }, [workExpandedLayout]);
+
+  useEffect(() => {
+    const el = listRef.current;
     const top = chatFadeTopRef.current;
     const bottom = chatFadeBottomRef.current;
     if (!el || !top || !bottom) return;
@@ -14977,6 +15068,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         </div>
       ) : null}
       <div
+        ref={workExpandedLayout ? floatingComposerRef : undefined}
         className={
           workExpandedLayout
             ? "pointer-events-none absolute inset-x-0 bottom-0 z-[60] flex justify-center px-3 pb-3 sm:px-6"
@@ -16333,6 +16425,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             autoRefreshKey={taskspaceAutoRefreshKey}
             onClose={closeWorkspacePanelOnly}
             expanded={workExpandedLayout}
+            bottomInsetPx={computeExpandedWorkBottomInset(workExpandedLayout, floatingComposerHeight)}
             onToggleExpand={compactSidePanels ? undefined : toggleWorkPanelExpand}
             tintColor={paneTint}
             focusRequest={workPanelFocus}

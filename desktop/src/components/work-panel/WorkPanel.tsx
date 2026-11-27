@@ -59,6 +59,7 @@ import {
 import { TerminalEmbed } from "../TerminalEmbed";
 import { SubAgentCard } from "../SubAgentCard";
 import { HoverTip } from "../ds/HoverTip";
+import { isScrollNearBottom, resolvePinOnUserWheel } from "../../utils/chat-scroll-pin";
 import { Button } from "../ds/Button";
 import { Modal } from "../ds/Modal";
 import { ScratchChatCard } from "./ScratchChatCard";
@@ -839,6 +840,8 @@ type Props = {
   onClose: () => void;
   /** Trae-style: enlarge work panel to dominate the pane (main content). */
   expanded?: boolean;
+  /** Bottom inset (px) reserved for the floating composer overlay when expanded. */
+  bottomInsetPx?: number;
   onToggleExpand?: () => void;
   /** Compact overlay already has the pane toolbar workspace toggle; hide the duplicate dock control. */
   showDockToggle?: boolean;
@@ -1003,6 +1006,7 @@ export function WorkPanel({
   tintColor,
   onClose,
   expanded = false,
+  bottomInsetPx = 0,
   onToggleExpand,
   showDockToggle = true,
   focusRequest,
@@ -1079,6 +1083,35 @@ export function WorkPanel({
 
   const [summaryTabOpen, setSummaryTabOpen] = useState(true);
   const [activeKind, setActiveKind] = useState<WorkPanelTabKind | null>("summary");
+  const summaryScrollRef = useRef<HTMLDivElement>(null);
+  const summaryContentRef = useRef<HTMLDivElement>(null);
+  const summaryPinnedRef = useRef(false);
+  const hasActiveSubAgents = useMemo(
+    () =>
+      subAgents.some(
+        (a) =>
+          a.status === "running" ||
+          a.status === "pending" ||
+          a.status === "awaiting_confirm" ||
+          a.status === "awaiting_input",
+      ),
+    [subAgents],
+  );
+  useEffect(() => {
+    const scroller = summaryScrollRef.current;
+    const content = summaryContentRef.current;
+    if (!scroller || !content) return;
+    const onResize = () => {
+      if (hasActiveSubAgents && summaryPinnedRef.current) {
+        scroller.scrollTop = scroller.scrollHeight;
+      }
+    };
+    const ro = new ResizeObserver(onResize);
+    ro.observe(content);
+    return () => {
+      ro.disconnect();
+    };
+  }, [hasActiveSubAgents, activeKind, summaryTabOpen]);
   const [activeBrowserId, setActiveBrowserId] = useState<string | null>(null);
   const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([]);
   const [chromeCookieDialogOpen, setChromeCookieDialogOpen] = useState(false);
@@ -3018,7 +3051,11 @@ export function WorkPanel({
 
       {plusMenu}
 
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div
+        className="min-h-0 flex-1 overflow-hidden"
+        data-testid="work-panel-body"
+        style={expanded && bottomInsetPx > 0 ? { paddingBottom: bottomInsetPx } : undefined}
+      >
         {!hasAnyTab ? (
           <div className="flex h-full flex-col px-8 pt-16">
             <div className="text-[15px] text-text-faint">{t("work.startHere")}</div>
@@ -3061,7 +3098,20 @@ export function WorkPanel({
         ) : null}
 
         {hasAnyTab && activeKind === "summary" && summaryTabOpen ? (
-          <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
+          <div
+            ref={summaryScrollRef}
+            data-testid="work-panel-summary-scroll"
+            className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain"
+            onScroll={(e) => {
+              summaryPinnedRef.current = isScrollNearBottom(e.currentTarget, 64);
+            }}
+            onWheel={(e) => {
+              if (resolvePinOnUserWheel(e.deltaY) === false) {
+                summaryPinnedRef.current = false;
+              }
+            }}
+          >
+            <div ref={summaryContentRef} className="flex min-w-0 flex-col">
             {hasSessionTodo && sessionTodo ? (
             <Section
               id="todo"
@@ -3385,6 +3435,7 @@ export function WorkPanel({
                 </div>
             </Section>
             ) : null}
+            </div>
           </div>
         ) : null}
 
