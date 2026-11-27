@@ -16,6 +16,7 @@ on:
       - "enterprise/pnpm-workspace.yaml"
       - "enterprise/turbo.json"
       - "enterprise/tsconfig.base.json"
+      - "connector-runtime/**"
       - "agenticx/**"
       - "pyproject.toml"
       - ".github/workflows/enterprise-images.yml"
@@ -24,6 +25,7 @@ on:
   pull_request:
     paths:
       - "enterprise/apps/gateway/Dockerfile"
+      - "enterprise/apps/gateway/Dockerfile.dockerignore"
       - "enterprise/apps/Dockerfile.next"
       - "enterprise/apps/agent-runtime/Dockerfile"
       - "enterprise/apps/agent-runtime/Dockerfile.dockerignore"
@@ -62,7 +64,7 @@ jobs:
       matrix:
         include:
           - image: enterprise-gateway
-            context: enterprise
+            context: .
             file: enterprise/apps/gateway/Dockerfile
             build_args: ""
           - image: enterprise-web-portal
