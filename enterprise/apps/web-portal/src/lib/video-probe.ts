@@ -17,12 +17,12 @@ export type VideoParseResult = {
 export type VideoProbeDeps = {
   execFile?: typeof execFile;
   access?: typeof access;
-  mkdtemp?: typeof mkdtemp;
+  mkdtemp?: (prefix: string) => Promise<string>;
   writeFile?: typeof writeFile;
-  readFile?: typeof readFile;
+  readFile?: (path: string) => Promise<Buffer | string>;
   rm?: typeof rm;
   tmpdir?: () => string;
-  env?: NodeJS.ProcessEnv;
+  env?: Record<string, string | undefined>;
 };
 
 async function whichBin(
@@ -175,9 +175,10 @@ async function maybeTranscribe(
     // whisper typically writes audio.txt beside wav
     let transcript = "";
     try {
-      transcript = (await read(join(work, "audio.txt"))).toString("utf8");
+      const content = await read(join(work, "audio.txt"));
+      transcript = typeof content === "string" ? content : content.toString("utf8");
     } catch {
-      transcript = stdout.toString("utf8");
+      transcript = typeof stdout === "string" ? stdout : Buffer.from(stdout).toString("utf8");
     }
     const trimmed = transcript.trim();
     return { text: trimmed || null, used };

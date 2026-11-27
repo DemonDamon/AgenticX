@@ -74,8 +74,8 @@ describe("probeEgress", () => {
     process.env.DEEP_RESEARCH_EGRESS_PROBE_TARGETS = "https://mirror.corp.internal";
     expect(egressProbeTargets()).toEqual(["https://mirror.corp.internal"]);
 
-    const fetchImpl = vi.fn(async () => new Response("ok", { status: 200 }));
-    await expect(probeEgress(fetchImpl as DirectFetch, () => 1_000)).resolves.toBe(true);
+    const fetchImpl = vi.fn<DirectFetch>(async () => new Response("ok", { status: 200 }));
+    await expect(probeEgress(fetchImpl, () => 1_000)).resolves.toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(String(fetchImpl.mock.calls[0]![0])).toBe("https://mirror.corp.internal");
   });

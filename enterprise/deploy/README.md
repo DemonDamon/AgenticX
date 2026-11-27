@@ -46,6 +46,8 @@ docker build -f apps/Dockerfile.next \
 
 改完环境变量必须重建容器（`docker compose up -d --force-recreate web-portal`），`restart` 不会重新读取。
 
+3. **依赖 lockfile 不入库与版本不可复现风险。** `enterprise/pnpm-lock.yaml` 按 `enterprise/.gitignore` 策略不入库（避免开源仓被本地私有扩展目录污染），因此 `enterprise/apps/Dockerfile.next` 使用 `pnpm install --no-frozen-lockfile`。不同时间点重新执行 `docker build` 可能解析到不同的依赖小版本；生产交付请始终以已构建并固化 digest 的镜像为准，如需源码级完全可复现构建，可在私有交付分支提交锁定后的 `pnpm-lock.yaml` 并将 Dockerfile 改回 `--frozen-lockfile`。
+
 ## 移动云私有镜像仓库生产部署
 
 移动云部署优先使用移动云控制台提供的私有镜像仓库访问地址，避免运行时依赖 Docker Hub、GHCR、公共代理或跨云 ACR。`prod.ecloud.yml` 不内置任何猜测的域名：不同地域、网络类型或交付环境的地址可能不同，必须从当前移动云项目的控制台复制实际 Registry 域名。

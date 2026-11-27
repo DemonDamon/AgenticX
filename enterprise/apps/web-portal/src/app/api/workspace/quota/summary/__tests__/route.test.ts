@@ -31,6 +31,7 @@ describe("GET /api/workspace/quota/summary", () => {
       scopes: [],
       deptId: "dept-a",
       sessionId: "sess-1",
+      mustChangePassword: false,
     });
     vi.mocked(getQuotaSummaryForSession).mockResolvedValueOnce({
       daily: {

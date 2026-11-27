@@ -1,8 +1,7 @@
-import { DOMParser } from "@xmldom/xmldom";
+import { DOMParser, type Element as XmlElement } from "@xmldom/xmldom";
 import type JSZip from "jszip";
 import { posix } from "node:path";
 
-type XmlElement = Element;
 type Matrix = [number, number, number, number, number, number];
 type TextBlock = { text: string; x?: number; y?: number; height?: number };
 const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
@@ -10,8 +9,11 @@ const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
 function parseXml(xml: string) {
   if (/<!DOCTYPE/i.test(xml)) throw new Error("PPTX XML must not contain a DOCTYPE");
   const fail = () => { throw new Error("Invalid PPTX XML"); };
-  return new DOMParser({ errorHandler: { warning: () => {}, error: fail, fatalError: fail } })
-    .parseFromString(xml, "application/xml");
+  return new DOMParser({
+    onError: (level) => {
+      if (level !== "warning") fail();
+    },
+  }).parseFromString(xml, "application/xml");
 }
 
 function children(node: XmlElement): XmlElement[] {

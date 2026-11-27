@@ -136,7 +136,7 @@ describe("data-suite-store", () => {
   it("seeds classification grades S/A/B/C and upserts", async () => {
     const grades = await listClassificationGrades();
     expect(grades.map((g) => g.id)).toEqual(SAMPLE_CLASSIFICATION_GRADES.map((g) => g.id));
-    expect(grades[0].rank).toBe(4);
+    expect(grades[0]?.rank).toBe(4);
 
     await upsertClassificationGrade({ id: "S", label: "Superior", rank: 5 });
     expect((await listClassificationGrades()).find((g) => g.id === "S")?.label).toBe("Superior");

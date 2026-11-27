@@ -27,13 +27,14 @@ describe("E2E: real security-eval scorecard drives admission", () => {
     process.env.ADMIN_MODEL_ADMISSION_FILE = `/tmp/admission-e2e-real-${Date.now()}.json`;
     const raw = JSON.parse(await readFile(realCardPath, "utf-8"));
     const card = parseScorecardImport(raw);
-    expect(card.models.length).toBeGreaterThanOrEqual(2);
+    const models = card.models ?? [];
+    expect(models.length).toBeGreaterThanOrEqual(2);
 
     const tenantId = "tenant-e2e";
     await importScorecard(tenantId, card);
     const admission = await readTenantAdmission(tenantId);
 
-    for (const m of card.models) {
+    for (const m of models) {
       const action = decideAdmission(admission, m.model);
       expect(isBlocked(action)).toBe(true);
       if (isBlocked(action)) {
@@ -52,7 +53,9 @@ describe("E2E: real security-eval scorecard drives admission", () => {
     await importScorecard(tenantId, card);
     const admission = await readTenantAdmission(tenantId);
 
-    const target = card.models[0];
+    const target = card.models?.[0];
+    expect(target).toBeDefined();
+    if (!target) return;
     const override = makeOverride(
       admission,
       target.model,

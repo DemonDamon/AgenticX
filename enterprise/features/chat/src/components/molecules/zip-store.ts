@@ -43,9 +43,9 @@ function u32(n: number): Uint8Array {
   return b;
 }
 
-function concat(parts: Uint8Array[]): Uint8Array {
+function concat(parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
   const total = parts.reduce((sum, p) => sum + p.length, 0);
-  const out = new Uint8Array(total);
+  const out = new Uint8Array(new ArrayBuffer(total));
   let offset = 0;
   for (const part of parts) {
     out.set(part, offset);

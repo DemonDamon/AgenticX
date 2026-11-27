@@ -179,6 +179,7 @@ describe("memory run store", () => {
             path: "research/r1/final-report.md",
             title: "终稿",
             kind: "report",
+            bytes: 128,
           },
         ],
       }),
