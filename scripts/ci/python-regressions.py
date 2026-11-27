@@ -29,6 +29,13 @@ TEST_FILES = (
     "tests/test_stream_usage_cached_tokens.py",
     "tests/tools/test_document_dependency_compatibility.py",
     "tests/test_dependency_crypto_compatibility.py",
+    "tests/test_replay_ledger_upcast.py",
+    "tests/test_replay_ledger_payload_summary.py",
+    "tests/test_replay_ledger_resume_anchor.py",
+    "tests/test_ledger_resume_recovery.py",
+    "tests/test_ledger_reattach_stream.py",
+    "tests/test_ha_checkpoint_resume.py",
+    "tests/test_ci_ratchet.py",
 )
 RUNTIME_FILE = "tests/test_agent_runtime.py"
 RUNTIME_TEST = "test_optional_tool_dispatch_requires_valid_streamed_object"
@@ -46,12 +53,23 @@ def select_tests() -> list[str]:
     return selected
 
 
+def run_ratchet() -> int:
+    # This file runs as a script, so scripts/ci is sys.path[0] and the ratchet
+    # module sits next to it.
+    import ratchet
+
+    return ratchet.main()
+
+
 def require_dependencies(selected: list[str]) -> None:
     modules = {"pytest", "pytest_asyncio"}
     if "tests/tools/test_document_dependency_compatibility.py" in selected:
         modules.update({"fitz", "pypdf", "PIL.Image", "pptx", "cryptography"})
     if "tests/test_dependency_crypto_compatibility.py" in selected:
         modules.add("cryptography")
+    if "tests/test_ha_checkpoint_resume.py" in selected:
+        # Its redis case uses importorskip, and check_report rejects any skip.
+        modules.add("fakeredis.aioredis")
     for name in sorted(modules):
         # Document tests use importorskip outside CI. Here missing/broken parser
         # packages must fail before pytest, so an optional dependency cannot
@@ -87,6 +105,10 @@ def main() -> int:
         print("Not present on this branch: " + ", ".join(missing), flush=True)
     if args.list:
         return 0
+
+    ratchet_code = run_ratchet()
+    if ratchet_code:
+        return ratchet_code
 
     for name, value in {
         "LITELLM_LOCAL_MODEL_COST_MAP": "true",

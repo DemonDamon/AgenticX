@@ -1,0 +1,25 @@
+{
+  "rules": [
+    {
+      "id": "ledger-read-bypass",
+      "description": "Replay ledger events are read only through agenticx/runtime/replay_ledger/. Lines elsewhere that open events.jsonl by path bypass the store API. Literal patterns on purpose: studio_safety.py keeps a same-named safety audit log that is not a ledger read.",
+      "exclude": ["agenticx/runtime/replay_ledger/"],
+      "patterns": ["run_dir / \"events.jsonl\"", "runs/*/events.jsonl"],
+      "baseline": 2
+    },
+    {
+      "id": "checkpoint-save-bypass",
+      "description": "save_agent_state( is called only from agenticx/runtime/checkpoint.py; agenticx/studio/storage/ holds the interface and the backend implementations.",
+      "exclude": ["agenticx/studio/storage/", "agenticx/runtime/checkpoint.py"],
+      "patterns": ["save_agent_state("],
+      "baseline": 0
+    },
+    {
+      "id": "resume-anchor-bypass",
+      "description": "The ledger-projected resume anchor is entered only through load_resume_anchor, which keeps recovery layering (HA mode reads the checkpoint store) and the AGX_RESUME_FROM_LEDGER switch. A direct project_resume_anchor( call elsewhere skips both.",
+      "exclude": ["agenticx/runtime/replay_ledger/", "agenticx/runtime/checkpoint.py"],
+      "patterns": ["project_resume_anchor("],
+      "baseline": 0
+    }
+  ]
+}
