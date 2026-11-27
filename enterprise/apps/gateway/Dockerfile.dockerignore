@@ -1,0 +1,7 @@
+# Build context is the repository root; allow-list only the Go modules needed by gateway.
+# BuildKit reads this file automatically because it sits next to the Dockerfile.
+*
+!connector-runtime/
+!enterprise/packages/policy-engine/
+!enterprise/apps/gateway/
+enterprise/apps/gateway/.runtime/

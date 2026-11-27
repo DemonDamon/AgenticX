@@ -37,8 +37,9 @@ ARG APP_PACKAGE
 ARG BUILD_DATABASE_DIALECT=postgresql
 ARG BUILD_DATABASE_URL=postgresql://agenticx:agenticx@127.0.0.1:5432/agenticx?sslmode=disable
 # 前端 NEXT_PUBLIC_* 构建期内联，必须在这里给定，运行期环境变量不会生效。
-# 管理后台入口默认走同源 /admin/（nginx 已代理），无需按客户域名单独配置。
-ARG NEXT_PUBLIC_ADMIN_CONSOLE_URL=/admin/
+# 管理后台改走独立端口（默认 HTTP :8081 / HTTPS :8443）避免与 web-portal 的 /_next/* 冲突；
+# 留空时前端在浏览器端自动按当前协议与主机推导独立端口；独立子域部署可传如 https://admin.example.com。
+ARG NEXT_PUBLIC_ADMIN_CONSOLE_URL=
 ARG NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL=
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

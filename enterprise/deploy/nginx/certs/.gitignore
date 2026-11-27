@@ -1,0 +1,8 @@
+# Ignore TLS certificates and private keys so secrets are never committed.
+*.pem
+*.key
+*.crt
+*.cer
+*.csr
+*.p12
+*.pfx

@@ -6,7 +6,10 @@
 - `docker-compose/prod.yml`：生产模板（Nginx 入口 + 双网关 + 前后台 + PostgreSQL 主从 + Redis）。
 - `docker-compose/prod.ecloud.yml`：移动云私有镜像仓库覆盖层（只改 `image`，与 `prod.yml` 叠加使用）。
 - `docker-compose/prod.aliyun.yml`：国内/阿里云镜像覆盖层（只改 `image`，与 `prod.yml` 叠加使用）。
-- `nginx/gateway.conf`：公网入口反向代理与基础限流模板。
+- `nginx/gateway.conf`：默认 HTTP 入口反向代理模板（Portal/Gateway 走 `:80`，Admin Console 走独立端口 `:8081`，避免与 Portal 的 `/_next/*` 静态资源冲突）。
+- `nginx/gateway.tls.conf`：HTTPS/TLS 入口模板（Portal/Gateway `:443` + Admin Console `:8443`，HTTP `:80`/`:8081` 自动跳转 HTTPS），配合 `nginx/certs/` 使用（详见 `nginx/certs/README.md`）。
+- `nginx/includes/`：Portal 与 Admin Console 公共路由片段（由 `gateway.conf` 与 `gateway.tls.conf` 复用）。
+- `nginx/certs/`：TLS 证书挂载目录（含 `.gitignore` 防止误提交私钥，详见 `nginx/certs/README.md`）。
 - `config/policies.yaml`：网关策略包装载清单（生产可按客户策略扩展）。
 - `gateway/`：K8s Deployment / Service / HPA、混合部署样例与 compose 冒烟（见 `gateway/README.md`）。
 
@@ -42,7 +45,20 @@ docker build -f apps/Dockerfile.next \
   -t <registry>/enterprise-admin-console:<tag> .
 ```
 
-`NEXT_PUBLIC_ADMIN_CONSOLE_URL` 默认 `/admin/`（同源，由 nginx 代理），一般无需覆盖。
+`NEXT_PUBLIC_ADMIN_CONSOLE_URL` 默认留空：浏览器侧从 Portal 点击管理后台入口时，会按当前协议和主机自动推导独立端口（HTTP → `:8081`，HTTPS → `:8443`，本地开发 `:3000` → `:3001`）；如生产环境为管理后台配置了独立子域（如 `https://admin.example.com`），可在构建 `web-portal` 镜像时显式传入 `--build-arg NEXT_PUBLIC_ADMIN_CONSOLE_URL=https://admin.example.com`。
+
+### 入口端口、TLS 与镜像发布
+
+1. **Admin Console 独立入口**：`admin-console` 不再挂载于同源 `/admin/`（Next.js 绝对路径 `/_next/*` 会与 `web-portal` 冲突）。默认端口：
+   - HTTP（`gateway.conf`）：Portal/Gateway `:80`，Admin Console `:8081`（可通过 `NGINX_HTTP_PORT` / `NGINX_ADMIN_HTTP_PORT` 覆写）。
+   - HTTPS（`gateway.tls.conf`）：Portal/Gateway `:443`，Admin Console `:8443`（可通过 `NGINX_HTTPS_PORT` / `NGINX_ADMIN_HTTPS_PORT` 覆写）。
+2. **启用 TLS**：将 `fullchain.pem` 与 `privkey.pem` 放入 `enterprise/deploy/nginx/certs/`（详见 `nginx/certs/README.md`），启动时指定：
+   ```bash
+   NGINX_CONF_FILE=../nginx/gateway.tls.conf \
+   AUTH_COOKIE_SECURE=true \
+   docker compose -f prod.yml --profile postgresql up -d
+   ```
+3. **默认镜像与发布流水线**：`prod.yml` 默认拉取 `${ENTERPRISE_IMAGE_PREFIX:-ghcr.io/demondamon}/enterprise-{gateway,web-portal,admin-console,agent-runtime}:${ENTERPRISE_IMAGE_TAG:-latest}`，由 `.github/workflows/enterprise-images.yml` 在 `main` 变更、发布 Release 或手动触发时自动构建并推送至 GHCR。若希望匿名免登录拉取，仓库管理员需在 GitHub Packages 中将对应镜像包可见性设为 Public；私有/自定义镜像仓库只需覆盖 `ENTERPRISE_IMAGE_PREFIX` 与 `ENTERPRISE_IMAGE_TAG`。
 
 改完环境变量必须重建容器（`docker compose up -d --force-recreate web-portal`），`restart` 不会重新读取。
 
@@ -81,6 +97,7 @@ unset ECLOUD_REGISTRY_PASSWORD
 export NGINX_IMAGE_TAG=1.27-alpine-20260716
 export REDIS_IMAGE_TAG=7-alpine-20260716
 export POSTGRES_IMAGE_TAG=16-alpine-20260716
+export SOURCE_IMAGE_PREFIX="${SOURCE_IMAGE_PREFIX:-ghcr.io/demondamon}"
 export SOURCE_ENTERPRISE_IMAGE_TAG="published-source-tag"
 export ENTERPRISE_IMAGE_TAG="2026.07.16-gitsha"
 
@@ -98,11 +115,11 @@ mirror_to_ecloud() {
 mirror_to_ecloud nginx:1.27-alpine nginx "$NGINX_IMAGE_TAG"
 mirror_to_ecloud redis:7-alpine redis "$REDIS_IMAGE_TAG"
 mirror_to_ecloud postgres:16-alpine postgres "$POSTGRES_IMAGE_TAG"
-mirror_to_ecloud "ghcr.io/agenticx/enterprise-gateway:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+mirror_to_ecloud "$SOURCE_IMAGE_PREFIX/enterprise-gateway:$SOURCE_ENTERPRISE_IMAGE_TAG" \
   enterprise-gateway "$ENTERPRISE_IMAGE_TAG"
-mirror_to_ecloud "ghcr.io/agenticx/enterprise-web-portal:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+mirror_to_ecloud "$SOURCE_IMAGE_PREFIX/enterprise-web-portal:$SOURCE_ENTERPRISE_IMAGE_TAG" \
   enterprise-web-portal "$ENTERPRISE_IMAGE_TAG"
-mirror_to_ecloud "ghcr.io/agenticx/enterprise-admin-console:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+mirror_to_ecloud "$SOURCE_IMAGE_PREFIX/enterprise-admin-console:$SOURCE_ENTERPRISE_IMAGE_TAG" \
   enterprise-admin-console "$ENTERPRISE_IMAGE_TAG"
 ```
 
@@ -194,6 +211,7 @@ unset ALIYUN_ACR_PASSWORD
 export NGINX_IMAGE_TAG=1.27-alpine-20260716
 export REDIS_IMAGE_TAG=7-alpine-20260716
 export POSTGRES_IMAGE_TAG=16-alpine-20260716
+export SOURCE_IMAGE_PREFIX="${SOURCE_IMAGE_PREFIX:-ghcr.io/demondamon}"
 export SOURCE_ENTERPRISE_IMAGE_TAG="published-source-tag"
 export ENTERPRISE_IMAGE_TAG="2026.07.16-gitsha"
 
@@ -211,11 +229,11 @@ mirror_image() {
 mirror_image nginx:1.27-alpine nginx "$NGINX_IMAGE_TAG"
 mirror_image redis:7-alpine redis "$REDIS_IMAGE_TAG"
 mirror_image postgres:16-alpine postgres "$POSTGRES_IMAGE_TAG"
-mirror_image "ghcr.io/agenticx/enterprise-gateway:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+mirror_image "$SOURCE_IMAGE_PREFIX/enterprise-gateway:$SOURCE_ENTERPRISE_IMAGE_TAG" \
   enterprise-gateway "$ENTERPRISE_IMAGE_TAG"
-mirror_image "ghcr.io/agenticx/enterprise-web-portal:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+mirror_image "$SOURCE_IMAGE_PREFIX/enterprise-web-portal:$SOURCE_ENTERPRISE_IMAGE_TAG" \
   enterprise-web-portal "$ENTERPRISE_IMAGE_TAG"
-mirror_image "ghcr.io/agenticx/enterprise-admin-console:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+mirror_image "$SOURCE_IMAGE_PREFIX/enterprise-admin-console:$SOURCE_ENTERPRISE_IMAGE_TAG" \
   enterprise-admin-console "$ENTERPRISE_IMAGE_TAG"
 ```
 
