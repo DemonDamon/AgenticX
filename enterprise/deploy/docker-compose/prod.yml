@@ -13,16 +13,19 @@ services:
       admin-console:
         condition: service_started
     ports:
-      - "80:80"
-      - "443:443"
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+      - "${NGINX_ADMIN_HTTP_PORT:-8081}:8081"
+      - "${NGINX_ADMIN_HTTPS_PORT:-8443}:8443"
     volumes:
-      - ../nginx/gateway.conf:/etc/nginx/nginx.conf:ro
+      - ${NGINX_CONF_FILE:-../nginx/gateway.conf}:/etc/nginx/nginx.conf:ro
+      - ../nginx/includes:/etc/nginx/includes:ro
       - ../nginx/certs:/etc/nginx/certs:ro
     networks:
       - agenticx-backbone
 
   gateway-a:
-    image: ghcr.io/agenticx/enterprise-gateway:latest
+    image: ${ENTERPRISE_IMAGE_PREFIX:-ghcr.io/demondamon}/enterprise-gateway:${ENTERPRISE_IMAGE_TAG:-latest}
     container_name: agenticx-gateway-a
     restart: unless-stopped
     environment:
@@ -48,7 +51,7 @@ services:
       - agenticx-backbone
 
   gateway-b:
-    image: ghcr.io/agenticx/enterprise-gateway:latest
+    image: ${ENTERPRISE_IMAGE_PREFIX:-ghcr.io/demondamon}/enterprise-gateway:${ENTERPRISE_IMAGE_TAG:-latest}
     container_name: agenticx-gateway-b
     restart: unless-stopped
     environment:
@@ -74,7 +77,7 @@ services:
       - agenticx-backbone
 
   web-portal:
-    image: ghcr.io/agenticx/enterprise-web-portal:latest
+    image: ${ENTERPRISE_IMAGE_PREFIX:-ghcr.io/demondamon}/enterprise-web-portal:${ENTERPRISE_IMAGE_TAG:-latest}
     container_name: agenticx-web-portal
     restart: unless-stopped
     environment:
@@ -100,7 +103,7 @@ services:
       - agenticx-backbone
 
   admin-console:
-    image: ghcr.io/agenticx/enterprise-admin-console:latest
+    image: ${ENTERPRISE_IMAGE_PREFIX:-ghcr.io/demondamon}/enterprise-admin-console:${ENTERPRISE_IMAGE_TAG:-latest}
     container_name: agenticx-admin-console
     restart: unless-stopped
     environment:
@@ -135,7 +138,7 @@ services:
 
   agent-runtime:
     profiles: ["managed-agents"]
-    image: ghcr.io/agenticx/enterprise-agent-runtime:latest
+    image: ${ENTERPRISE_IMAGE_PREFIX:-ghcr.io/demondamon}/enterprise-agent-runtime:${ENTERPRISE_IMAGE_TAG:-latest}
     container_name: agenticx-agent-runtime
     restart: unless-stopped
     environment:

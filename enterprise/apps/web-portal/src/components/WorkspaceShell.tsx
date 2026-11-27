@@ -25,6 +25,7 @@ import {
   useUiTheme,
 } from "@agenticx/ui";
 import { getEnterpriseVersionLabel } from "@agenticx/branding";
+import { resolveAdminConsoleUrl } from "../lib/admin-console-url";
 import {
   ChevronDown,
   ChevronLeft,
@@ -661,7 +662,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
                   <DropdownMenuItem
                     onClick={() =>
                       window.open(
-                        process.env.NEXT_PUBLIC_ADMIN_CONSOLE_URL ?? "http://localhost:3001",
+                        resolveAdminConsoleUrl(),
                         "_blank",
                         "noopener,noreferrer",
                       )
