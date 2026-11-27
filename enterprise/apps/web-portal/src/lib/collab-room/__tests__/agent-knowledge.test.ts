@@ -32,7 +32,7 @@ describe("knowledge search connection", () => {
   });
 
   it("asks the bound endpoint and returns the snippets", async () => {
-    const fetchImpl = vi.fn(async () =>
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       new Response(JSON.stringify({ results: [{ text: "季度结论" }] }), { status: 200 }),
     );
     const found = await searchKnowledge("https://kb.example/search", "季度", fetchImpl);

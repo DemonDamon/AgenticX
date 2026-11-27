@@ -158,8 +158,8 @@ describe("POST /api/desktop/rooms/:id/messages", () => {
     );
     expect(res.status).toBe(200);
     expect(triggerMetaReply).toHaveBeenCalledTimes(1);
-    const session = vi.mocked(triggerMetaReply).mock.calls[0][2];
-    expect(session.sessionId).toMatch(/^desktop-pat-/);
+    const session = vi.mocked(triggerMetaReply).mock.calls[0]?.[2];
+    expect(session?.sessionId).toMatch(/^desktop-pat-/);
     const overrides = vi.mocked(triggerMetaReply).mock.calls[0]?.[3];
     expect(typeof overrides?.getAccessToken).toBe("function");
   });

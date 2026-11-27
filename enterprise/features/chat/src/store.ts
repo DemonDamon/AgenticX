@@ -1378,7 +1378,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             ...message,
             deep_research: {
               ...message.deep_research,
-              status: "awaiting_clarify",
+              status: "awaiting_clarify" as const,
               events: [
                 ...(message.deep_research.events ?? []),
                 {

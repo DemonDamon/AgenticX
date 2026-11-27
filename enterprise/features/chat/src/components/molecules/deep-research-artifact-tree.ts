@@ -383,11 +383,12 @@ export function buildArtifactTree(artifacts: ArtifactListItem[]): ArtifactTreeNo
   const sorted = [...artifacts].sort((a, b) => a.path.localeCompare(b.path));
   const prefix = commonPathPrefix(sorted.map((a) => a.path));
 
+  type FileArtifactTreeNode = Extract<ArtifactTreeNode, { type: "file" }>;
   type DirDraft = {
     type: "dir";
     key: string;
     name: string;
-    children: Map<string, DirDraft | ArtifactTreeNode>;
+    children: Map<string, DirDraft | FileArtifactTreeNode>;
   };
 
   const root: DirDraft = { type: "dir", key: "", name: "", children: new Map() };

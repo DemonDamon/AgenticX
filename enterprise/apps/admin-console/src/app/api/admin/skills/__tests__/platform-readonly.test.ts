@@ -18,7 +18,7 @@ vi.mock("../../../../../lib/capability-packs-store", () => ({
   updateSkill: (...args: unknown[]) => updateSkillMock(...args),
   deleteSkill: vi.fn(),
   PlatformSkillMetadataReadonlyError: class PlatformSkillMetadataReadonlyError extends Error {
-    name = "PlatformSkillMetadataReadonlyError";
+    override name = "PlatformSkillMetadataReadonlyError";
   },
 }));
 

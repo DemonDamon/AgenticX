@@ -17,7 +17,6 @@ const config: NextConfig = {
   output: "standalone",
   // Dependabot/lock refresh left eslint-config-next peers incomplete; don't block production compile.
   eslint: { ignoreDuringBuilds: true },
-  typescript: { ignoreBuildErrors: true },
 
   env: {
     NEXT_PUBLIC_ENTERPRISE_VERSION: enterprisePkg.version,

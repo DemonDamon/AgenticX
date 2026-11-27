@@ -131,4 +131,4 @@ export function selectRelevantEvidenceExcerpt(
     .slice(0, cap);
 }
 
-export type { Citation };
+export type { Citation } from "./registry";

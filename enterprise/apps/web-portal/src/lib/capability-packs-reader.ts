@@ -20,6 +20,7 @@ import {
   resolveEffectiveCapabilities,
   type CapabilityAssignment,
   type CapabilityState,
+  type CapabilitySurface,
 } from "@agenticx/config";
 import {
   listUserOptOuts,
