@@ -65,6 +65,7 @@ class ReplayLedgerRecorder:
         model: str | None,
         resume_run_id: str | None = None,
         branch_lineage: dict[str, Any] | None = None,
+        enterprise_trace: bool = True,
     ) -> None:
         self.store = store
         self.session_id = str(session_id or "").strip()
@@ -73,6 +74,7 @@ class ReplayLedgerRecorder:
         self.model = str(model or "").strip() or None
         self.resume_run_id = str(resume_run_id or "").strip() or None
         self.branch_lineage = dict(branch_lineage or {})
+        self.enterprise_trace = bool(enterprise_trace)
         self._resume_consumed = False
         self.current_run_id: str | None = None
         self.turn_id: str | None = None
@@ -588,7 +590,7 @@ class ReplayLedgerRecorder:
             )
             self.store.close_run(self.current_run_id, status, time.time())
             run_id = self.current_run_id
-            if run_id is not None:
+            if run_id is not None and self.enterprise_trace:
                 try:
                     enqueue_completed_run(self.store, run_id)
                 except Exception:

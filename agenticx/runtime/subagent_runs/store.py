@@ -12,8 +12,9 @@ import os
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from agenticx.runtime.subagent_runs.cluster import build_cluster_id
 from agenticx.runtime.subagent_runs.contracts import (
@@ -36,7 +37,9 @@ class SubAgentRunStore:
     TODO(HA): run records stay on local disk even when the session storage
     backend is redis (Plan A scope decision). Moving run timelines into the
     shared backend is a follow-up once multi-replica subagent observability
-    is required.
+    is required. Dispatch mailboxes and context snapshots (``*.mailbox.json``,
+    ``*.context.json``) share the same local-disk scope, so a wake-up is only
+    guaranteed on the host that owns this directory.
     """
 
     _max_activity_entries = 500
@@ -204,6 +207,40 @@ class SubAgentRunStore:
             self._update_index_run(index_data=index_data, record=record)
             self._write_json(self._index_file, index_data)
             return record
+
+    def read_aux_json(self, run_id: str, suffix: str) -> Optional[Dict[str, Any]]:
+        """Read one per-run auxiliary JSON document (mailbox, context snapshot)."""
+        rid = str(run_id or "").strip()
+        if not rid:
+            return None
+        path = self._root / f"{self._safe_name(rid)}.{self._safe_name(suffix)}.json"
+        try:
+            payload = json.loads(path.read_text("utf-8"))
+        except (OSError, ValueError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def write_aux_json(self, run_id: str, suffix: str, payload: Dict[str, Any]) -> None:
+        """Atomically replace one per-run auxiliary JSON document.
+
+        Raises whatever the atomic writer raises so callers can fail closed.
+        """
+        rid = str(run_id or "").strip()
+        if not rid or not isinstance(payload, dict):
+            raise ValueError("run_id and a dict payload are required")
+        with self._lock:
+            self._ensure_root()
+            self._write_json(
+                self._root / f"{self._safe_name(rid)}.{self._safe_name(suffix)}.json",
+                payload,
+            )
+
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        """Hold the per-root lock so a read-modify-write over auxiliary files is atomic."""
+        with self._lock:
+            self._ensure_root()
+            yield
 
     def update_model(
         self,

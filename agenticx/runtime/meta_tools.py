@@ -397,14 +397,25 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "send_message_to_agent",
             "description": (
-                "Send a follow-up instruction to a running or completed sub-agent or delegation (sa-* or dlg-*). "
+                "Send a follow-up instruction to a running or completed sub-agent or delegation "
+                "(sa-* or dlg-*), or to a dispatch (dsp-*). "
                 "Use the agent_id returned by spawn_subagent or delegate_to_avatar."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "agent_id": {"type": "string", "description": "Sub-agent ID (sa-*) or delegation ID (dlg-*)."},
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Sub-agent ID (sa-*), dispatch ID (dsp-*), or delegation ID (dlg-*).",
+                    },
                     "message": {"type": "string", "description": "Follow-up instruction for the agent."},
+                    "message_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional idempotency key of this mail. Re-sending the same message_id to "
+                            "the same sub-agent is a no-op; omit it to derive the key from this tool call."
+                        ),
+                    },
                 },
                 "required": ["agent_id", "message"],
                 "additionalProperties": False,
@@ -2782,6 +2793,15 @@ def _lookup_avatar_session_status(session_manager: Any, query: str) -> Optional[
     }
 
 
+def _mail_message_id(arguments: Dict[str, Any]) -> str:
+    """Return the caller's idempotency key, else the tool call id, else empty."""
+    explicit = str(arguments.get("message_id", "") or "").strip()
+    if explicit:
+        return explicit
+    call_id = str(arguments.get("__tool_call_id", "") or "").strip()
+    return f"call:{call_id}" if call_id else ""
+
+
 async def dispatch_meta_tool_async(
     name: str,
     arguments: Dict[str, Any],
@@ -2905,7 +2925,11 @@ async def dispatch_meta_tool_async(
             )
         if agent_key.lower().startswith("dlg-"):
             return await _send_message_to_delegation(agent_key, msg, session=session, team_manager=team_manager)
-        result = await team_manager.send_message_to_subagent(agent_key, msg)
+        result = await team_manager.send_message_to_subagent(
+            agent_key,
+            msg,
+            message_id=_mail_message_id(arguments),
+        )
         return json.dumps(result, ensure_ascii=False)
 
     if name == "cancel_subagent":

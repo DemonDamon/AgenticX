@@ -144,6 +144,11 @@ def fresh_round_loop_enabled() -> bool:
     return _resolve_bool("AGX_FRESH_ROUND_LOOP", "runtime.fresh_round_loop", False)
 
 
+def dispatch_mailbox_enabled() -> bool:
+    """Persist dispatch records, mail claims, and context snapshots for wake-ups."""
+    return _resolve_bool("AGX_DISPATCH_MAILBOX", "runtime.dispatch_mailbox", True)
+
+
 def cancelled_prefix_finalize_enabled() -> bool:
     """``AGX_CANCELLED_PREFIX_FINALIZE`` / ``runtime.cancelled_prefix_finalize``. Default True."""
     return _resolve_bool(

@@ -20,6 +20,13 @@
       "exclude": ["agenticx/runtime/replay_ledger/", "agenticx/runtime/checkpoint.py"],
       "patterns": ["project_resume_anchor("],
       "baseline": 0
+    },
+    {
+      "id": "dispatch-mailbox-bypass",
+      "description": "Dispatch mailbox and context snapshot files are read and written only through agenticx/runtime/subagent_runs/, which owns the per-root lock and the atomic writer. Lines elsewhere that open *.mailbox.json or *.context.json by path bypass that API. Baseline 0: no such literals exist outside the package at review time.",
+      "exclude": ["agenticx/runtime/subagent_runs/"],
+      "patterns": [".mailbox.json", ".context.json"],
+      "baseline": 0
     }
   ]
 }
