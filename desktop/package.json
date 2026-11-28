@@ -44,7 +44,7 @@
     "mammoth": "^1.13.0",
     "marked": "^18.2.1",
     "mermaid": "^11.13.0",
-    "monaco-editor": "^0.52.2",
+    "monaco-editor": "^0.58.0",
     "node-pty": "^1.1.0",
     "pdfjs-dist": "^6.5.438",
     "prismjs": "^1.29.0",
