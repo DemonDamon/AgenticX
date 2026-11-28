@@ -79,6 +79,54 @@ class HarnessRegistry:
         return out
 
 
+def capability_mismatches(adapter: HarnessAdapter) -> List[str]:
+    """Report declared capabilities that the adapter does not implement.
+
+    Static reflection over the adapter class (including inherited
+    overrides): each mismatch is one human-readable sentence. The
+    consistency tests assert the builtin adapters produce none of these
+    and that a deliberately lying adapter does.
+
+    ``streaming`` accepts either an ``iter_stream_chunks`` override or a
+    callable ``drain_midturn_stream_items`` (the Codex app-server pump
+    is a real streaming implementation that does not use the chunk
+    iterator). ``idempotency`` / ``turn_snapshots`` / ``handoff_injection``
+    have no dedicated method to reflect on, so they are not judged here;
+    their behavior is pinned by the existing turn tests instead.
+    """
+    caps = adapter.capabilities()
+    cls = type(adapter)
+
+    def _overridden(name: str) -> bool:
+        return getattr(cls, name, None) is not getattr(HarnessAdapter, name, None)
+
+    out: List[str] = []
+    if caps.streaming and not (
+        _overridden("iter_stream_chunks")
+        or callable(getattr(adapter, "drain_midturn_stream_items", None))
+    ):
+        out.append(
+            f"{adapter.harness_id}: declares streaming=True but implements "
+            "neither iter_stream_chunks nor drain_midturn_stream_items"
+        )
+    if caps.pty and not (_overridden("write_pty") and _overridden("resize_pty")):
+        out.append(
+            f"{adapter.harness_id}: declares pty=True without both write_pty "
+            "and resize_pty overrides"
+        )
+    if caps.permission and not _overridden("permission"):
+        out.append(
+            f"{adapter.harness_id}: declares permission=True without a "
+            "permission override"
+        )
+    if caps.resume and not _overridden("adopt_thread"):
+        out.append(
+            f"{adapter.harness_id}: declares resume=True without an "
+            "adopt_thread override"
+        )
+    return out
+
+
 _default_registry: Optional[HarnessRegistry] = None
 _default_registry_lock = threading.Lock()
 

@@ -149,6 +149,18 @@ def dispatch_mailbox_enabled() -> bool:
     return _resolve_bool("AGX_DISPATCH_MAILBOX", "runtime.dispatch_mailbox", True)
 
 
+def harness_ledger_events_enabled() -> bool:
+    """``AGX_HARNESS_LEDGER_EVENTS`` / ``runtime.harness_ledger_events``.
+
+    When on, external-harness turns executed through the studio chat
+    routing are recorded into the replay ledger under an isolated
+    namespace (``<owner_session_id>:harness``) via the adapter event
+    outlet. When off, no bridge is attached and no ledger files are
+    written; the turn path is byte-for-byte the pre-04 behavior.
+    """
+    return _resolve_bool("AGX_HARNESS_LEDGER_EVENTS", "runtime.harness_ledger_events", True)
+
+
 def cancelled_prefix_finalize_enabled() -> bool:
     """``AGX_CANCELLED_PREFIX_FINALIZE`` / ``runtime.cancelled_prefix_finalize``. Default True."""
     return _resolve_bool(

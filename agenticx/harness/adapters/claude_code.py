@@ -202,6 +202,7 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
             self.send_user_message(session_id, request.text)
         except KeyError as exc:
             raise SessionNotFoundError(session_id) from exc
+        self._emit_turn_started(session_id, request)
 
         if session.session_kind == "visible_tui":
             ok, parsed, confidence, tail = self.wait_for_visible_tui_result(
@@ -211,7 +212,7 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
             cleaned = (
                 sanitize_claude_code_result_text(parsed) if ok else ""
             )
-            return TurnResult(
+            result = TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=status,
@@ -222,6 +223,8 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
                     "parse_confidence": confidence,
                 },
             )
+            self._emit_turn_finished(session_id, result)
+            return result
 
         ok, tail = self.wait_for_success_result(session_id, request.wait_seconds)
         if ok:
@@ -230,7 +233,7 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
             if usage_meta:
                 detail["usage_metadata"] = usage_meta
                 detail["usage"] = usage_meta
-            return TurnResult(
+            result = TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_SUCCESS,
@@ -238,8 +241,10 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
                 tail=tail,
                 detail=detail,
             )
+            self._emit_turn_finished(session_id, result)
+            return result
         if session.proc.poll() is not None:
-            return TurnResult(
+            result = TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_EXITED,
@@ -250,7 +255,9 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
                     {"mode": "headless", "exit_code": session.exit_code},
                 ),
             )
-        return TurnResult(
+            self._emit_turn_finished(session_id, result)
+            return result
+        result = TurnResult(
             harness=self.harness_id,
             session_id=session_id,
             status=TURN_STATUS_TIMEOUT,
@@ -268,6 +275,8 @@ class ClaudeCodeAdapter(BridgeSessionManager, HarnessAdapter):
                 },
             ),
         )
+        self._emit_turn_finished(session_id, result)
+        return result
 
     # ------------------------------------------------------------------
     # stop

@@ -18,9 +18,15 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterator, List, Optional
 
+import time
+
 from agenticx.harness.types import (
     CapabilityNotSupported,
+    HARNESS_EVENT_TURN_FINISHED,
+    HARNESS_EVENT_TURN_STARTED,
     HarnessCapabilities,
+    HarnessEvent,
+    HarnessEventSink,
     PermissionDecision,
     SessionNotFoundError,
     TurnRequest,
@@ -151,3 +157,105 @@ class HarnessAdapter(ABC):
     def _require_session(self, session_id: str) -> None:
         if self.describe(session_id) is None:
             raise SessionNotFoundError(session_id)
+
+    # ------------------------------------------------------------------
+    # structured event outlet (optional, best-effort)
+    # ------------------------------------------------------------------
+    def _event_sinks(self) -> Dict[str, "HarnessEventSink"]:
+        """Lazily created per-instance sink registry.
+
+        Lazy on purpose: ClaudeCodeAdapter / CodeBuddyAdapter mix in
+        bridge managers whose ``__init__`` runs first and never calls the
+        harness-side ``__init__``, so attribute setup cannot live in an
+        ``__init__`` on this base class.
+        """
+        sinks = self.__dict__.setdefault("_harness_event_sinks", {})
+        if not isinstance(sinks, dict):
+            sinks = {}
+            self.__dict__["_harness_event_sinks"] = sinks
+        return sinks
+
+    def attach_event_sink(
+        self, session_id: str, sink: "HarnessEventSink | None"
+    ) -> bool:
+        """Register (or clear, with ``None``) the event sink of one session.
+
+        Returns True when the outlet is usable for that session. Entries
+        are per surface session id; attaching ``None`` or a new sink
+        replaces the previous entry, so a sink leaked by a crashed turn
+        never outlives the next attach of the same session.
+        """
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        if sink is None:
+            self._event_sinks().pop(sid, None)
+            return True
+        if not callable(sink):
+            return False
+        self._event_sinks()[sid] = sink
+        return True
+
+    def emit_harness_event(
+        self, session_id: str, event_type: str, payload: Dict[str, Any]
+    ) -> None:
+        """Push one structured event to the session's registered sink.
+
+        Best-effort by contract: no sink registered, or a raising sink,
+        never propagates into the turn.
+        """
+        sid = str(session_id or "").strip()
+        sink = self._event_sinks().get(sid)
+        if sink is None:
+            return
+        event = HarnessEvent(
+            type=str(event_type or ""),
+            harness=self.harness_id,
+            session_id=sid,
+            payload=dict(payload or {}),
+            ts=time.time(),
+        )
+        try:
+            sink(event)
+        except Exception:
+            pass
+
+    def _emit_turn_started(self, session_id: str, request: TurnRequest) -> None:
+        """Emit ``turn_started`` for one dispatched turn."""
+        self.emit_harness_event(
+            session_id,
+            HARNESS_EVENT_TURN_STARTED,
+            {
+                "user_text": str(request.text or ""),
+                "wait_seconds": request.wait_seconds,
+                "owner_session_id": str(
+                    getattr(request, "owner_session_id", "") or ""
+                ),
+            },
+        )
+
+    def _emit_turn_finished(self, session_id: str, result: TurnResult) -> None:
+        """Emit ``turn_finished`` with a whitelisted result summary."""
+        detail = result.detail if isinstance(result.detail, dict) else {}
+        summary_keys = (
+            "native_thread_id",
+            "turn_count",
+            "turn_seq",
+            "observed_tools",
+            "tokens",
+            "usage_totals",
+            "exit_code",
+            "mode",
+            "transport",
+        )
+        detail_summary = {key: detail[key] for key in summary_keys if key in detail}
+        self.emit_harness_event(
+            session_id,
+            HARNESS_EVENT_TURN_FINISHED,
+            {
+                "status": str(result.status or ""),
+                "result_text": str(result.result_text or ""),
+                "deduplicated": bool(result.deduplicated),
+                "detail": detail_summary,
+            },
+        )

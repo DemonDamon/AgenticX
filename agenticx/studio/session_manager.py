@@ -1383,6 +1383,16 @@ class SessionManager:
             delete_dispatch_ledger_runs(sid, sessions_root=Path(self._sessions_root))
         except Exception:
             _log.warning("dispatch ledger cleanup failed session=%s", sid, exc_info=True)
+        try:
+            # Namespace id mirrors agenticx/harness/ledger_outlet.py
+            # (harness_ledger_session_id: "<owner>:harness").
+            ReplayLedgerStore(Path(self._sessions_root)).delete_session_runs(
+                f"{sid}:harness"
+            )
+        except Exception:
+            _log.warning(
+                "harness ledger cleanup failed session=%s", sid, exc_info=True
+            )
         purged = self._purge_session_state(sid)
         if managed is not None and not existed_in_persistence:
             return True

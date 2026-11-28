@@ -48,6 +48,7 @@ from agenticx.harness.handoff import (
 from agenticx.harness.handoff.types import HandoffSummary
 from agenticx.harness.spawn_options import adapter_spawn_options
 from agenticx.studio.session_manager import require_safe_session_id
+from agenticx.runtime.harden_flags import harness_ledger_events_enabled
 
 _TURN_WAIT_SECONDS = 240.0
 
@@ -1052,6 +1053,7 @@ def _retry_turn_after_provider_mismatch(
     user_text: str,
     session: Any,
     intended_provider_id: Optional[str],
+    ledger_bridge: Any = None,
 ) -> tuple[str, TurnResult]:
     """Drop a provider-bound native thread and retry once on a blank surface."""
     sid = session_id
@@ -1075,6 +1077,17 @@ def _retry_turn_after_provider_mismatch(
         harness_id,
         intended_provider_id=intended_provider_id,
     )
+    if ledger_bridge is not None:
+        # The retry runs on a fresh surface session; move the event sink
+        # before the turn so the retried turn reaches the same bridge and
+        # opens a second ledger run instead of vanishing.
+        try:
+            adapter.attach_event_sink(surface_sid, None)
+            adapter.attach_event_sink(
+                lease.surface_session_id, ledger_bridge.on_event
+            )
+        except Exception:
+            pass
     outbound = _outbound_text_for_fresh_surface(
         manager,
         sid,
@@ -1091,6 +1104,41 @@ def _retry_turn_after_provider_mismatch(
     )
     result = adapter.turn(lease.surface_session_id, request)
     return lease.surface_session_id, result
+
+
+def _attach_turn_ledger_bridge(
+    adapter: Any,
+    surface_sid: str,
+    *,
+    manager: Any,
+    sid: str,
+    harness_id: str,
+    session: Any,
+) -> Optional[Any]:
+    """Attach the ledger bridge to the adapter outlet; None on any miss."""
+    try:
+        if not harness_ledger_events_enabled():
+            return None
+        from agenticx.harness.ledger_outlet import (
+            build_turn_ledger_bridge,
+            harness_ledger_session_id,
+        )
+
+        sessions_root = getattr(manager, "_sessions_root", None)
+        bridge = build_turn_ledger_bridge(
+            sessions_root=Path(sessions_root) if sessions_root else None,
+            session_id=harness_ledger_session_id(sid),
+            agent_id=harness_id,
+            provider=getattr(session, "provider_name", None),
+            model=getattr(session, "model_name", None),
+        )
+        if bridge is None:
+            return None
+        if not adapter.attach_event_sink(surface_sid, bridge.on_event):
+            return None
+        return bridge
+    except Exception:
+        return None
 
 
 def _run_external_harness_turn_body(
@@ -1134,6 +1182,15 @@ def _run_external_harness_turn_body(
         manager, sid, harness_id, intended_provider_id=intended
     )
     surface_sid = lease.surface_session_id
+
+    ledger_bridge = _attach_turn_ledger_bridge(
+        adapter,
+        surface_sid,
+        manager=manager,
+        sid=sid,
+        harness_id=harness_id,
+        session=session,
+    )
 
     user_text = str(user_text or "").strip()
     outbound = _outbound_text_for_fresh_surface(
@@ -1182,6 +1239,7 @@ def _run_external_harness_turn_body(
             user_text=user_text,
             session=session,
             intended_provider_id=intended,
+            ledger_bridge=ledger_bridge,
         )
         retried_mismatch = True
 
@@ -1249,6 +1307,11 @@ def _run_external_harness_turn_body(
         manager._persist_session_state(sid, session)
     except Exception:
         pass
+    if ledger_bridge is not None:
+        # Normal path detaches here; a turn that raised mid-flight is
+        # cleaned up by the next attach of the same surface session
+        # (sink registry entries are replaced, never accumulated).
+        adapter.attach_event_sink(surface_sid, None)
     return result
 
 

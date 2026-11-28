@@ -27,6 +27,13 @@
       "exclude": ["agenticx/runtime/subagent_runs/"],
       "patterns": [".mailbox.json", ".context.json"],
       "baseline": 0
+    },
+    {
+      "id": "harness-outlet-bypass",
+      "description": "Replay ledger event rows are constructed only inside agenticx/runtime/replay_ledger/ (the recorder and the store own RunEvent). A RunEvent( literal elsewhere bypasses the recorder / harness event outlet and would append unnormalized rows. Baseline 0: no such literal exists outside the package at review time.",
+      "exclude": ["agenticx/runtime/replay_ledger/"],
+      "patterns": ["RunEvent("],
+      "baseline": 0
     }
   ]
 }
