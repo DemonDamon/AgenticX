@@ -161,6 +161,20 @@ def harness_ledger_events_enabled() -> bool:
     return _resolve_bool("AGX_HARNESS_LEDGER_EVENTS", "runtime.harness_ledger_events", True)
 
 
+def skill_profile_gate_enabled() -> bool:
+    """``AGX_SKILL_PROFILE_GATE`` / ``runtime.skill_profile_gate``. Default True.
+
+    When on, skills may declare their static tier (``tier:`` in SKILL.md
+    frontmatter); every install path rejects declared-vs-measured
+    mismatches before writing, the loader refuses to register mismatched
+    skills, and each rejection is audited through the studio safety
+    sinks. When off, no profile check runs anywhere and install/load
+    behavior is byte-for-byte the pre-05 state (legacy skills without a
+    declaration are never affected either way).
+    """
+    return _resolve_bool("AGX_SKILL_PROFILE_GATE", "runtime.skill_profile_gate", True)
+
+
 def cancelled_prefix_finalize_enabled() -> bool:
     """``AGX_CANCELLED_PREFIX_FINALIZE`` / ``runtime.cancelled_prefix_finalize``. Default True."""
     return _resolve_bool(

@@ -75,11 +75,26 @@ def _use_v2(config: GuardConfig | None = None) -> bool:
 
 
 def scan_skill(skill_dir: Path, *, source: str = "agent-created") -> ScanResult:
-    """Scan all text files in a skill directory for security threats."""
+    """Scan all text files in a skill directory for security threats.
+
+    Also compares the declared execution profile (``tier:`` in SKILL.md
+    frontmatter) against the measured tier and attaches the outcome to
+    ``result.profile`` — the shared conclusion every install entry
+    consumes (see profile_gate.py). Applies to both guard engines.
+    """
     cfg = load_guard_config()
     if _use_v2(cfg):
-        return scan_skill_v2(skill_dir, source=source, config=cfg)
-    return scan_skill_v1(skill_dir, source=source)
+        result = scan_skill_v2(skill_dir, source=source, config=cfg)
+    else:
+        result = scan_skill_v1(skill_dir, source=source)
+    if Path(skill_dir).is_dir():
+        from agenticx.skills.profile_gate import check_skill_profile
+
+        try:
+            result.profile = check_skill_profile(Path(skill_dir))
+        except Exception:
+            logger.warning("skill profile check failed", exc_info=True)
+    return result
 
 
 def scan_skill_markdown_text(text: str, *, source: str = "community") -> ScanResult:
@@ -112,6 +127,13 @@ def scan_skill_deep(
         scan_timeout_seconds=cfg.scan_timeout_seconds,
     )
     result = scan_skill_v2(skill_dir, source=source, config=cfg, deep=True)
+    if Path(skill_dir).is_dir():
+        from agenticx.skills.profile_gate import check_skill_profile
+
+        try:
+            result.profile = check_skill_profile(Path(skill_dir))
+        except Exception:
+            logger.warning("skill profile check failed", exc_info=True)
     if cfg.llm_verify and result.findings:
         import asyncio
 
@@ -131,6 +153,7 @@ def scan_skill_deep(
             grade=result.grade,
             tier=result.tier,
             pattern_set_version=result.pattern_set_version,
+            profile=result.profile,
         )
     return result
 
@@ -150,6 +173,12 @@ def scan_result_to_payload(result: ScanResult, skill_name: str = "") -> dict[str
         payload["tier"] = result.tier
     if result.pattern_set_version:
         payload["pattern_set_version"] = result.pattern_set_version
+    if result.profile is not None:
+        payload["profile"] = {
+            "declared": result.profile.declared,
+            "measured": result.profile.measured,
+            "ok": bool(result.profile.ok),
+        }
     return payload
 
 
@@ -174,7 +203,26 @@ def resolve_trust_level(source: str) -> str:
 
 
 def should_allow(result: ScanResult, source: str | None = None) -> tuple[bool, str]:
-    """Determine whether a skill should be installed given its scan result."""
+    """Determine whether a skill should be installed given its scan result.
+
+    A declared-vs-measured tier mismatch is a hard, unconditional block:
+    it precedes the trust-level policy (builtin is rejected too) and no
+    acknowledge_high_risk flow can bypass it.
+    """
+    from agenticx.skills.profile_gate import note_profile_rejection
+
+    profile = getattr(result, "profile", None)
+    if profile is not None and not profile.ok:
+        note_profile_rejection(
+            profile,
+            skill_name="",
+            action="INSTALL_REJECTED",
+            boundary="install_skill",
+        )
+        return False, (
+            f"blocked: tier mismatch (declared {profile.declared}, "
+            f"measured {profile.measured})"
+        )
     effective_source = source or result.source or "agent-created"
     trust = resolve_trust_level(effective_source)
     policy = TRUST_POLICY.get(trust, TRUST_POLICY["community"])
@@ -224,6 +272,11 @@ def format_guard_rejection_message(
         "ERROR: 技能内容被安全策略拦截，无法写入。",
         f"判定：{verdict_label}（来源信任级 {effective_trust}，{len(result.findings)} 条命中）",
     ]
+    profile = getattr(result, "profile", None)
+    if profile is not None and not profile.ok:
+        lines.append(
+            f"档位声明与实测不一致（声明 {profile.declared}，实测 {profile.measured}），已拒绝。"
+        )
     seen: set[str] = set()
     for finding in result.findings[:6]:
         cat = (finding.category or finding.pattern_name or "unknown").strip()
@@ -249,6 +302,11 @@ def format_guard_block_for_user(result: ScanResult, *, source: str | None = None
         "这条技能没能写入：安全扫描判定内容有风险。",
         f"按「{trust_label}」处理，高危项会直接拦截（命中 {n} 处）。",
     ]
+    profile = getattr(result, "profile", None)
+    if profile is not None and not profile.ok:
+        lines.append(
+            f"这条技能的档位声明与实测不一致（声明 {profile.declared}，实测 {profile.measured}）。"
+        )
     seen: set[str] = set()
     for finding in result.findings[:4]:
         cat = (finding.category or finding.pattern_name or "unknown").strip()

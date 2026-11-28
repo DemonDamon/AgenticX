@@ -823,6 +823,42 @@ class SkillBundleLoader:
                             )
                             continue
 
+                        # Execution-profile gate (runtime invariants 05): a
+                        # skill that declares ``tier:`` in frontmatter must
+                        # still measure that tier. A mismatched skill is
+                        # not registered at all, so every serving method
+                        # (list / read / variants / prompt injection) stays
+                        # closed, and the denial is audited persistently.
+                        # Runs before the variants registration on purpose.
+                        try:
+                            from agenticx.skills.profile_gate import (
+                                check_skill_profile,
+                                note_profile_rejection,
+                            )
+
+                            _profile = check_skill_profile(cand_dir)
+                            if _profile is not None and not _profile.ok:
+                                note_profile_rejection(
+                                    _profile,
+                                    skill_name=meta.name,
+                                    action="LOAD_DENIED",
+                                    boundary="load",
+                                )
+                                logger.warning(
+                                    "Skill '%s' tier mismatch (declared %s, measured %s), not registered: %s",
+                                    meta.name,
+                                    _profile.declared,
+                                    _profile.measured,
+                                    cand_md,
+                                )
+                                continue
+                        except Exception:
+                            logger.debug(
+                                "skill profile gate failed for %s",
+                                cand_md,
+                                exc_info=True,
+                            )
+
                         variants = self._skill_variants.setdefault(meta.name, [])
                         if not any(
                             v.source == meta.source and str(v.base_dir) == str(meta.base_dir)

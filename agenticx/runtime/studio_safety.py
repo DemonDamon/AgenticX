@@ -40,6 +40,8 @@ logger = logging.getLogger(__name__)
 
 _EVENTS_NAME = "events.jsonl"
 _EVENTS_MAX_BYTES = 20 * 1024 * 1024
+_GATE_EVENTS_NAME = "extension_gate.jsonl"
+_GATE_EVENTS_MAX_BYTES = 20 * 1024 * 1024
 _LATENCY_WINDOW = 2000
 
 # bash_exec already has its own three-layer defense (read-only verdict /
@@ -92,6 +94,10 @@ def _events_path() -> Path:
     return agx_home() / "safety" / _EVENTS_NAME
 
 
+def _gate_events_path() -> Path:
+    return agx_home() / "safety" / _GATE_EVENTS_NAME
+
+
 def _append_events(records: List[Dict[str, Any]]) -> None:
     """Append event records to the local JSONL sink. Never raises."""
     global _oversize_skips
@@ -142,6 +148,52 @@ def _bridge_enterprise(records: List[Dict[str, Any]]) -> None:
             })
     except Exception:
         logger.debug("safety enterprise bridge failed", exc_info=True)
+
+
+def _append_gate_events(records: List[Dict[str, Any]]) -> None:
+    """Append extension-gate decisions to their own sink. Never raises.
+
+    Extension-profile rejections are rare, high-value security decisions;
+    they get a dedicated append-only file so they are never evicted by
+    pipeline noise (the pipeline sink shares its budget with per-20-call
+    pass-through markers and drops new lines once full).
+    """
+    if not records:
+        return
+    try:
+        path = _gate_events_path()
+        with _lock:
+            if path.is_file() and path.stat().st_size >= _GATE_EVENTS_MAX_BYTES:
+                logger.warning(
+                    "extension gate events file is full (%s bytes); dropping events until rotated",
+                    path.stat().st_size,
+                )
+                return
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                for record in records:
+                    handle.write(
+                        json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+                        + "\n"
+                    )
+                handle.flush()
+    except Exception:
+        logger.debug("extension gate event append failed", exc_info=True)
+
+
+def emit_extension_gate_event(record: Dict[str, Any]) -> None:
+    """Persist one extension execution-profile gate decision (05).
+
+    Two persistent outlets only: the dedicated local sink above and the
+    enterprise outbox via the same bridge as pipeline events. The
+    in-memory ring buffer is deliberately not involved (it is the
+    tool-dispatch pipeline log; the profile gate has its own stage name).
+    Never raises.
+    """
+    payload = dict(record)
+    payload.setdefault("ts", _wall_ts())
+    _append_gate_events([payload])
+    _bridge_enterprise([payload])
 
 
 def _drain_new_events(layer: Any, before_count: int) -> List[Any]:

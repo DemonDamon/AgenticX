@@ -793,9 +793,27 @@ class RegistryHub:
         install_root = install_root.resolve()
         skill_dir = (install_root / validated).resolve()
         skill_dir.relative_to(install_root)
+        stamped = ensure_skill_source(skill_content, source)
+        from agenticx.skills.profile_gate import (
+            SkillProfileMismatchError,
+            check_skill_profile_text,
+            note_profile_rejection,
+        )
+
+        gate = check_skill_profile_text(stamped)
+        if gate is not None and not gate.ok:
+            note_profile_rejection(
+                gate,
+                skill_name=validated,
+                action="INSTALL_REJECTED",
+                boundary="install_registry",
+            )
+            raise SkillProfileMismatchError(
+                f"tier mismatch: declared {gate.declared}, measured {gate.measured} "
+                f"for skill '{validated}'"
+            )
         skill_dir.mkdir(parents=True, exist_ok=True)
         md_path = skill_dir / "SKILL.md"
-        stamped = ensure_skill_source(skill_content, source)
         md_path.write_text(stamped, encoding="utf-8")
         write_skill_provenance(skill_dir, source, extra={"name": validated})
         return md_path
@@ -821,6 +839,24 @@ class RegistryHub:
         install_root = (Path.home() / ".agenticx" / "skills" / "registry").resolve()
         skill_dir = (install_root / validated).resolve()
         skill_dir.relative_to(install_root)
+        from agenticx.skills.profile_gate import (
+            SkillProfileMismatchError,
+            check_skill_profile,
+            note_profile_rejection,
+        )
+
+        gate = check_skill_profile(src)
+        if gate is not None and not gate.ok:
+            note_profile_rejection(
+                gate,
+                skill_name=validated,
+                action="INSTALL_REJECTED",
+                boundary="install_registry",
+            )
+            raise SkillProfileMismatchError(
+                f"tier mismatch: declared {gate.declared}, measured {gate.measured} "
+                f"for skill '{validated}'"
+            )
         if skill_dir.exists():
             shutil.rmtree(skill_dir)
         skill_dir.mkdir(parents=True, exist_ok=True)
