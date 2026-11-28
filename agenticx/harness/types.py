@@ -11,7 +11,7 @@ Author: Damon Li
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 
 class HarnessError(Exception):
@@ -175,3 +175,34 @@ class HarnessDescriptor:
     capabilities: HarnessCapabilities = HarnessCapabilities()
     # Whether the underlying CLI is installed on this machine (UI graying).
     available: bool = False
+
+
+HARNESS_EVENT_TURN_STARTED = "turn_started"
+HARNESS_EVENT_TURN_FINISHED = "turn_finished"
+
+#: Event vocabulary of the structured harness event outlet. v1 carries
+#: turn-level boundaries only: text deltas and per-CLI tool events stay
+#: out of any ledger by design (see the runtime-invariants master plan).
+HARNESS_EVENT_TYPES = frozenset(
+    {HARNESS_EVENT_TURN_STARTED, HARNESS_EVENT_TURN_FINISHED}
+)
+
+
+@dataclass(frozen=True)
+class HarnessEvent:
+    """One structured event emitted through the adapter event outlet.
+
+    Adapters emit these at turn boundaries; sinks translate them into
+    consumers (today: the replay-ledger bridge). The outlet is optional,
+    best-effort, and must never affect the turn itself.
+    """
+
+    type: str
+    harness: str
+    session_id: str
+    payload: Dict[str, Any] = field(default_factory=dict)
+    ts: float = 0.0
+
+
+#: Callable receiving one :class:`HarnessEvent`; it must never raise.
+HarnessEventSink = Callable[["HarnessEvent"], None]

@@ -380,6 +380,15 @@ def install_skill_full_from_repo(
             scan = scan_skill(staging, source="agent-created")
             ok, reason = should_allow(scan, "agent-created")
             if not ok:
+                profile = getattr(scan, "profile", None)
+                if profile is not None and not profile.ok:
+                    # Declared-vs-measured tier mismatch is a hard block:
+                    # acknowledge_high_risk only covers dangerous findings,
+                    # never a lying execution profile.
+                    result.rejected_by_guard.append(
+                        {"name": skill, "reason": reason or "guard rejected"}
+                    )
+                    return result
                 if scan.verdict == "dangerous" and not acknowledge_high_risk:
                     # Mirror the registry install UX: surface the findings and
                     # let the caller retry with acknowledge_high_risk=True.

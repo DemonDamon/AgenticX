@@ -34,6 +34,8 @@ from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.resource_monitor import ResourceMonitor
 from agenticx.runtime.agent_runtime import STOP_MESSAGE
 from agenticx.runtime.subagent_runs import SubAgentRunStore
+from agenticx.runtime.harden_flags import dispatch_mailbox_enabled
+from agenticx.runtime.subagent_runs import dispatch as dispatch_store
 
 _log = logging.getLogger(__name__)
 
@@ -155,6 +157,29 @@ class SubAgentContext:
     pause_retryable: bool = False
     cluster_id: str = ""
     badge_seq: str = ""
+    dispatch_id: str = ""
+
+
+_DISPATCH_ERRORS = {
+    "dispatch_closed": "该子智能体已被取消，委派已关闭",
+    "dispatch_not_registered": "该子智能体不是持久化委派，重启后无法唤醒",
+    "context_unavailable": "该子智能体没有可恢复的上下文，无法唤醒",
+}
+
+
+def _status_from_persisted(status: str) -> SubAgentStatus:
+    """Map a persisted run status to the in-memory status of a restored worker.
+
+    A record still marked ``running`` has no live task after a restart, so it
+    is treated like a paused worker that a mail may resume.
+    """
+    normalized = str(status or "").strip()
+    if normalized in {"running", "pending"}:
+        return SubAgentStatus.PAUSED
+    try:
+        return SubAgentStatus(normalized)
+    except ValueError:
+        return SubAgentStatus.PAUSED
 
 
 class AgentTeamManager:
@@ -586,6 +611,7 @@ class AgentTeamManager:
                 persona_prompt=str(system_prompt or "").strip(),
                 avatar_id=str(avatar_id or "").strip(),
                 inherit_parent_context=bool(inherit_parent_context),
+                dispatch_id=dispatch_store.new_dispatch_id() if dispatch_mailbox_enabled() else "",
             )
             self._agents[agent_id] = context
             context.status = SubAgentStatus.RUNNING
@@ -662,6 +688,10 @@ class AgentTeamManager:
                 error_text="任务已取消",
                 completed_at=context.updated_at,
             )
+            if context.dispatch_id:
+                dispatch_store.set_dispatch_state(
+                    self._run_store, agent_id, dispatch_store.DISPATCH_STATE_CLOSED
+                )
         except Exception as exc:  # noqa: BLE001
             _log.warning("[subagent_runs] cancel update failed for %s: %s", agent_id, exc)
         task = self._tasks.get(agent_id)
@@ -676,8 +706,13 @@ class AgentTeamManager:
         )
         return {"ok": True, "agent_id": agent_id, "status": context.status.value}
 
-    async def send_message_to_subagent(self, agent_id: str, message: str) -> Dict[str, Any]:
-
+    async def send_message_to_subagent(
+        self,
+        agent_id: str,
+        message: str,
+        *,
+        message_id: str = "",
+    ) -> Dict[str, Any]:
         context = self._agents.get(agent_id)
         if context is None:
             archived = self._archived_agents.pop(agent_id, None)
@@ -693,7 +728,22 @@ class AgentTeamManager:
                 if aid not in self._agents:
                     self._agents[aid] = context
                 agent_id = aid
+        restored = False
+        restore_error = ""
+        if context is None and dispatch_mailbox_enabled():
+            # Cross-restart path: the worker exists only in the persisted run store.
+            context, restore_error = self._restore_dispatch_context(agent_id)
+            if context is not None:
+                agent_id = context.agent_id
+                self._agents[agent_id] = context
+                restored = True
         if context is None:
+            if restore_error and restore_error != "not_found":
+                return {
+                    "ok": False,
+                    "error": restore_error,
+                    "message": _DISPATCH_ERRORS.get(restore_error, f"无法唤醒子智能体: {agent_id}"),
+                }
             _log.warning(
                 "send_message_to_subagent: agent_id=%s not in _agents (keys=%s)",
                 agent_id,
@@ -703,6 +753,38 @@ class AgentTeamManager:
         text = message.strip()
         if not text:
             return {"ok": False, "error": "empty_message", "message": "消息不能为空"}
+
+        mail: Dict[str, Any] = {}
+        mail_id = ""
+        if context.dispatch_id:
+            running_turn = context.status == SubAgentStatus.RUNNING
+            mail_id = str(message_id or "").strip() or uuid.uuid4().hex
+            try:
+                accepted, mail = dispatch_store.claim_mail(
+                    self._run_store,
+                    context.agent_id,
+                    dispatch_id=context.dispatch_id,
+                    message_id=mail_id,
+                    text=text,
+                    consumed_by="running_turn" if running_turn else "wake_turn",
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("[dispatch] mail claim failed for %s: %s", context.agent_id, exc)
+                return {"ok": False, "error": "mailbox_unavailable", "message": "邮件未能持久化，未执行"}
+            if not accepted:
+                return {
+                    "ok": True,
+                    "duplicate": True,
+                    "agent_id": context.agent_id,
+                    "dispatch_id": context.dispatch_id,
+                    "message_id": mail_id,
+                    "status": context.status.value,
+                    "consumed_at": mail.get("consumed_at"),
+                }
+            if not running_turn:
+                dispatch_store.set_dispatch_state(
+                    self._run_store, context.agent_id, dispatch_store.DISPATCH_STATE_RUNNING
+                )
 
         if context.status == SubAgentStatus.RUNNING:
             session = self._agent_sessions.get(agent_id)
@@ -722,6 +804,7 @@ class AgentTeamManager:
                     context,
                     allowed_tools=allowed_tools,
                     resume_input=text,
+                    wake_mail=mail,
                 )
             )
             self._tasks[agent_id] = task
@@ -745,7 +828,13 @@ class AgentTeamManager:
                 agent_id=agent_id,
             )
         )
-        return {"ok": True, "agent_id": agent_id, "status": context.status.value}
+        result: Dict[str, Any] = {"ok": True, "agent_id": agent_id, "status": context.status.value}
+        if context.dispatch_id:
+            result["dispatch_id"] = context.dispatch_id
+            result["message_id"] = mail_id
+        if restored:
+            result["restored"] = True
+        return result
 
     def _ensure_agent_session(self, context: SubAgentContext) -> StudioSession:
         """Ensure an active session exists for the agent, rebuilding if necessary."""
@@ -1167,6 +1256,7 @@ class AgentTeamManager:
             "pending_confirm": pending_confirm,
             "pending_clarification": pending_clarification,
             "avatar_id": context.avatar_id or None,
+            "dispatch_id": context.dispatch_id or "",
         }
 
     def _archive_context(self, context: SubAgentContext) -> None:
@@ -1209,9 +1299,7 @@ class AgentTeamManager:
                 avatar_id=context.avatar_id or "",
                 source_tool_call_id=context.source_tool_call_id or "",
                 started_at=context.updated_at or time.time(),
-                detail_refs={
-                    "scratchpad_key": f"subagent_result::{context.agent_id}",
-                },
+                detail_refs=self._run_store_detail_refs(context),
             )
             context.cluster_id = record.cluster_id
             context.badge_seq = record.badge_seq
@@ -1257,12 +1345,166 @@ class AgentTeamManager:
         except Exception as exc:  # noqa: BLE001
             _log.warning("[subagent_runs] close_run failed for %s: %s", context.agent_id, exc)
 
+    def _run_store_detail_refs(self, context: SubAgentContext) -> Dict[str, Any]:
+        """Build the detail refs persisted with a newly opened run record."""
+        detail_refs: Dict[str, Any] = {"scratchpad_key": f"subagent_result::{context.agent_id}"}
+        if context.dispatch_id:
+            detail_refs[dispatch_store.DISPATCH_DETAIL_KEY] = dispatch_store.build_dispatch_detail(context)
+        return detail_refs
+
+    def _dispatch_suspend(self, context: SubAgentContext) -> None:
+        """Persist the suspended state and context snapshot of one dispatch at turn end."""
+        if not context.dispatch_id:
+            return
+        closed = context.status == SubAgentStatus.CANCELLED or context.cleanup == "delete"
+        if closed:
+            dispatch_store.set_dispatch_state(
+                self._run_store, context.agent_id, dispatch_store.DISPATCH_STATE_CLOSED
+            )
+            return
+        try:
+            dispatch_store.write_context_snapshot(
+                self._run_store,
+                context.agent_id,
+                {
+                    "agent_messages": list(context.agent_messages),
+                    "artifacts": {str(key): value for key, value in context.artifacts.items()},
+                    "context_files": dict(context.context_files),
+                    "attachments": dict(context.attachments),
+                    "allowed_tool_names": list(context.allowed_tool_names),
+                    "final_text": context.final_text,
+                    "failure_count": context.failure_count,
+                    "escalation_level": context.escalation_level,
+                    "pause_detector": context.pause_detector,
+                    "pause_retryable": context.pause_retryable,
+                    "written_at": time.time(),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[dispatch] context snapshot failed for %s: %s", context.agent_id, exc)
+            return
+        dispatch_store.set_dispatch_state(
+            self._run_store, context.agent_id, dispatch_store.DISPATCH_STATE_WAITING
+        )
+
+    def _restore_dispatch_context(self, query: str) -> tuple[Optional[SubAgentContext], str]:
+        """Rebuild a worker context from its persisted dispatch after a restart.
+
+        Returns ``(context, "")`` on success, else ``(None, error_code)``.
+        """
+        try:
+            record, _match = dispatch_store.find_dispatch(self._run_store, query)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[dispatch] lookup failed for %s: %s", query, exc)
+            return None, "not_found"
+        if record is None:
+            return None, "not_found"
+        dispatch = dispatch_store.dispatch_of(record)
+        if not dispatch.get("dispatch_id"):
+            return None, "dispatch_not_registered"
+        if (
+            dispatch.get("state") == dispatch_store.DISPATCH_STATE_CLOSED
+            or record.status == SubAgentStatus.CANCELLED.value
+        ):
+            return None, "dispatch_closed"
+        snapshot = dispatch_store.read_context_snapshot(self._run_store, record.run_id)
+        if snapshot is None:
+            return None, "context_unavailable"
+        try:
+            messages = [dict(row) for row in (snapshot.get("agent_messages") or []) if isinstance(row, dict)]
+            artifacts = {Path(str(key)): str(value) for key, value in (snapshot.get("artifacts") or {}).items()}
+            context = SubAgentContext(
+                agent_id=record.run_id,
+                name=record.name,
+                role=record.role or "worker",
+                task=record.task,
+                source_tool_call_id=record.source_tool_call_id or "",
+                status=_status_from_persisted(record.status),
+                parent_agent_id=str(dispatch.get("parent_agent_id") or "meta"),
+                depth=int(dispatch.get("depth") or 1),
+                mode=str(dispatch.get("mode") or "run"),
+                cleanup=str(dispatch.get("cleanup") or "keep"),
+                run_timeout_seconds=(
+                    int(dispatch["run_timeout_seconds"])
+                    if dispatch.get("run_timeout_seconds") is not None
+                    else 600
+                ),
+                attachments={
+                    str(key): str(value) for key, value in (snapshot.get("attachments") or {}).items()
+                },
+                allowed_tool_names=[str(name) for name in (snapshot.get("allowed_tool_names") or [])],
+                spawn_tree_path=str(dispatch.get("spawn_tree_path") or ""),
+                provider_name=str(record.provider or ""),
+                model_name=str(record.model or ""),
+                output_files=list(record.output_files or []),
+                workspace_dir=str(dispatch.get("workspace_dir") or ""),
+                persona_prompt=str(record.persona or ""),
+                avatar_id=str(record.avatar_id or ""),
+                inherit_parent_context=bool(dispatch.get("inherit_parent_context", True)),
+                failure_count=int(snapshot.get("failure_count") or 0),
+                escalation_level=int(snapshot.get("escalation_level") or 0),
+                result_file=str(record.result_file or ""),
+                pause_detector=str(snapshot.get("pause_detector") or ""),
+                pause_retryable=bool(snapshot.get("pause_retryable")),
+                cluster_id=record.cluster_id,
+                badge_seq=record.badge_seq,
+                dispatch_id=str(dispatch.get("dispatch_id") or ""),
+            )
+            context.agent_messages = messages
+            context.artifacts = artifacts
+            context.context_files = {
+                str(key): str(value) for key, value in (snapshot.get("context_files") or {}).items()
+            }
+            context.final_text = str(snapshot.get("final_text") or "")
+            context.result_summary = str(record.result_summary or "")
+            context.error_text = str(record.error_text or "")
+            context.created_at = float(record.created_at or time.time())
+            context.updated_at = float(record.updated_at or time.time())
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[dispatch] context rebuild failed for %s: %s", record.run_id, exc)
+            return None, "context_unavailable"
+        return context, ""
+
+    def _build_wake_recorder(
+        self,
+        context: SubAgentContext,
+        provider: Optional[str],
+        model: Optional[str],
+    ) -> Optional[Any]:
+        """Build the ledger recorder of one wake-up turn, isolated in the worker's namespace."""
+        if not context.dispatch_id or not self.owner_session_id:
+            return None
+        try:
+            from agenticx.runtime.replay_ledger.contracts import validate_ledger_id
+            from agenticx.runtime.replay_ledger.recorder import ReplayLedgerRecorder
+            from agenticx.runtime.replay_ledger.store import ReplayLedgerStore
+
+            sessions_root = dispatch_store.ledger_root_for(self._run_store)
+            if sessions_root is None:
+                return None
+            session_id = validate_ledger_id(
+                dispatch_store.dispatch_ledger_session_id(self.owner_session_id, context.agent_id),
+                "session_id",
+            )
+            return ReplayLedgerRecorder(
+                store=ReplayLedgerStore(sessions_root),
+                session_id=session_id,
+                agent_id=context.agent_id,
+                provider=str(provider or "").strip() or None,
+                model=str(model or "").strip() or None,
+                enterprise_trace=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[dispatch] wake ledger recorder unavailable for %s: %s", context.agent_id, exc)
+            return None
+
     async def _run_subagent(
         self,
         context: SubAgentContext,
         *,
         allowed_tools: Sequence[Dict[str, Any]],
         resume_input: Optional[str] = None,
+        wake_mail: Optional[Dict[str, Any]] = None,
     ) -> None:
         existing_session = self._agent_sessions.get(context.agent_id)
         if context.mode == "session" and existing_session is not None:
@@ -1295,6 +1537,11 @@ class AgentTeamManager:
             loop_critical_threshold=16,
             team_manager=self,
             clarify_gate=context.clarify_gate,
+            run_recorder=(
+                self._build_wake_recorder(context, resolved_provider, resolved_model)
+                if wake_mail is not None
+                else None
+            ),
         )
         system_prompt = self._build_subagent_system_prompt(context, session)
         started_at = time.time()
@@ -1556,6 +1803,7 @@ class AgentTeamManager:
                 escalated = await self._auto_escalate(context, allowed_tools=allowed_tools)
                 if escalated:
                     return
+            self._dispatch_suspend(context)
             self._run_store_close(context, produced_files)
 
             if self.summary_sink is not None:

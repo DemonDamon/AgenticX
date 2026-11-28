@@ -40,6 +40,20 @@ TRUST_POLICY: dict[str, tuple[str, str, str]] = {
 
 
 @dataclass
+class SkillProfileCheck:
+    """Declared-vs-measured skill tier comparison (execution profile gate).
+
+    ``ok`` is False when the SKILL.md ``tier:`` declaration does not match
+    the tier measured from the current directory content.
+    """
+
+    declared: str
+    measured: str
+    ok: bool
+    reason: str = ""
+
+
+@dataclass
 class ScanFinding:
     severity: ScanVerdict
     pattern_name: str
@@ -59,6 +73,7 @@ class ScanResult:
     grade: str | None = None
     tier: str | None = None
     pattern_set_version: str = ""
+    profile: SkillProfileCheck | None = None
 
 
 def verdict_rank(v: ScanVerdict) -> int:

@@ -82,6 +82,7 @@ from agenticx.cli.agent_tools import (
 )
 from agenticx.runtime.meta_tools import META_LEADER_LABEL_SCRATCH_KEY, visible_meta_agent_tools
 from agenticx.runtime.replay_ledger.recorder import ReplayLedgerRecorder, recorder_for_session
+from agenticx.runtime.replay_ledger.reattach import parse_ledger_cursor, read_reattach_replay
 from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.prompts.meta_agent import _build_taskspaces_context, build_meta_agent_system_prompt
 from agenticx.runtime.group_context import GroupChatContext
@@ -5615,6 +5616,43 @@ def create_studio_app() -> FastAPI:
                         yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
                     if rows:
                         yield 'data: {"type":"done","data":{"reason":"replayed_from_store"}}\n\n'
+                        return
+                # Ledger fallback: a turn cut by a crash leaves its run open in
+                # the local replay ledger, which the in-memory hub and the
+                # in-process bus do not survive. Replay it with namespaced cursors.
+                from agenticx.runtime.harden_flags import ledger_reattach_enabled
+
+                if ledger_reattach_enabled():
+                    ledger_cursor = parse_ledger_cursor(since, last_event_id)
+                    try:
+                        replay = await asyncio.to_thread(
+                            read_reattach_replay,
+                            str(manager._sessions_root),
+                            sid,
+                            str(getattr(managed, "execution_state", "") or ""),
+                            after=ledger_cursor,
+                        )
+                    except Exception:
+                        replay = None
+                    if replay is not None:
+                        client_cursor = str(since or last_event_id or "").strip()
+                        if client_cursor and (
+                            ledger_cursor is None or ledger_cursor[0] != replay["run_id"]
+                        ):
+                            gap = SseEvent(
+                                type="replay_gap",
+                                data={
+                                    "since": client_cursor,
+                                    "oldest_buffered": replay["rows"][0][0] if replay["rows"] else None,
+                                    "source": "ledger",
+                                },
+                            )
+                            yield f"data: {json.dumps(gap.model_dump(), ensure_ascii=False)}\n\n"
+                        for cursor, ledger_event in replay["rows"]:
+                            yield f"id: {cursor}\n"
+                            for line in _runtime_event_to_sse_lines(ledger_event):
+                                yield line
+                        yield 'data: {"type":"done","data":{"reason":"replayed_from_ledger"}}\n\n'
                         return
                 yield 'data: {"type":"done","data":{"reason":"not_running"}}\n\n'
                 return

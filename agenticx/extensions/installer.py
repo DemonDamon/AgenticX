@@ -192,12 +192,22 @@ def scan_bundle_source(source: Path) -> Dict[str, Any]:
 
     per_skill: List[Dict[str, Any]] = []
     verdicts: List[ScanVerdict] = []
+    profile_rejects: List[Dict[str, Any]] = []
     for skill_ref in manifest.skills:
         skill_md = skill_ref.resolved_path(manifest.source_dir)
         skill_dir = skill_md.parent
         sr = scan_skill(skill_dir, source="community")
         per_skill.append(scan_result_to_payload(sr, skill_dir.name))
         verdicts.append(sr.verdict)
+        profile = getattr(sr, "profile", None)
+        if profile is not None and not profile.ok:
+            profile_rejects.append(
+                {
+                    "skill": skill_dir.name,
+                    "declared": profile.declared,
+                    "measured": profile.measured,
+                }
+            )
 
     overall = merge_verdicts(verdicts)
     return {
@@ -205,6 +215,7 @@ def scan_bundle_source(source: Path) -> Dict[str, Any]:
         "bundle_name": manifest.name,
         "overall": overall,
         "skills": per_skill,
+        "profile_rejects": profile_rejects,
     }
 
 
@@ -270,6 +281,41 @@ def install_bundle(
             success=False,
             error="non_high_risk_confirm_required",
             error_code="non_high_risk_confirm_required",
+            scan_summary=summary,
+        )
+
+    profile_rejects = list(scan_raw.get("profile_rejects") or [])
+    if profile_rejects:
+        # Hard, unconditional bundle rejection: no skill, registry entry,
+        # or MCP merge happens for a bundle with a lying skill. MCP server
+        # configs carry no tier semantics (not skill content, not scanned
+        # by the guard) — they are out of profile scope by design.
+        try:
+            from agenticx.skills.guard_types import SkillProfileCheck
+            from agenticx.skills.profile_gate import note_profile_rejection
+
+            for reject in profile_rejects:
+                note_profile_rejection(
+                    SkillProfileCheck(
+                        declared=str(reject.get("declared") or ""),
+                        measured=str(reject.get("measured") or ""),
+                        ok=False,
+                        reason="",
+                    ),
+                    skill_name=str(reject.get("skill") or ""),
+                    action="BUNDLE_REJECTED",
+                    boundary="install_bundle",
+                )
+        except Exception:
+            logger.warning("bundle profile audit failed", exc_info=True)
+        error = "tier mismatch: " + ", ".join(
+            f"{r.get('skill')} (declared {r.get('declared')}, measured {r.get('measured')})"
+            for r in profile_rejects
+        )
+        return InstallResult(
+            success=False,
+            error=error,
+            error_code="tier_mismatch",
             scan_summary=summary,
         )
 

@@ -1,0 +1,39 @@
+{
+  "rules": [
+    {
+      "id": "ledger-read-bypass",
+      "description": "Replay ledger events are read only through agenticx/runtime/replay_ledger/. Lines elsewhere that open events.jsonl by path bypass the store API. Literal patterns on purpose: studio_safety.py keeps a same-named safety audit log that is not a ledger read.",
+      "exclude": ["agenticx/runtime/replay_ledger/"],
+      "patterns": ["run_dir / \"events.jsonl\"", "runs/*/events.jsonl"],
+      "baseline": 2
+    },
+    {
+      "id": "checkpoint-save-bypass",
+      "description": "save_agent_state( is called only from agenticx/runtime/checkpoint.py; agenticx/studio/storage/ holds the interface and the backend implementations.",
+      "exclude": ["agenticx/studio/storage/", "agenticx/runtime/checkpoint.py"],
+      "patterns": ["save_agent_state("],
+      "baseline": 0
+    },
+    {
+      "id": "resume-anchor-bypass",
+      "description": "The ledger-projected resume anchor is entered only through load_resume_anchor, which keeps recovery layering (HA mode reads the checkpoint store) and the AGX_RESUME_FROM_LEDGER switch. A direct project_resume_anchor( call elsewhere skips both.",
+      "exclude": ["agenticx/runtime/replay_ledger/", "agenticx/runtime/checkpoint.py"],
+      "patterns": ["project_resume_anchor("],
+      "baseline": 0
+    },
+    {
+      "id": "dispatch-mailbox-bypass",
+      "description": "Dispatch mailbox and context snapshot files are read and written only through agenticx/runtime/subagent_runs/, which owns the per-root lock and the atomic writer. Lines elsewhere that open *.mailbox.json or *.context.json by path bypass that API. Baseline 0: no such literals exist outside the package at review time.",
+      "exclude": ["agenticx/runtime/subagent_runs/"],
+      "patterns": [".mailbox.json", ".context.json"],
+      "baseline": 0
+    },
+    {
+      "id": "harness-outlet-bypass",
+      "description": "Replay ledger event rows are constructed only inside agenticx/runtime/replay_ledger/ (the recorder and the store own RunEvent). A RunEvent( literal elsewhere bypasses the recorder / harness event outlet and would append unnormalized rows. Baseline 0: no such literal exists outside the package at review time.",
+      "exclude": ["agenticx/runtime/replay_ledger/"],
+      "patterns": ["RunEvent("],
+      "baseline": 0
+    }
+  ]
+}

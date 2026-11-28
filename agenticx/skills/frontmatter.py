@@ -37,6 +37,19 @@ def _frontmatter_get_scalar(fm_text: str, key: str) -> Optional[str]:
     return match.group(1).strip()
 
 
+def get_frontmatter_scalar(content: str, key: str) -> Optional[str]:
+    """Return one scalar frontmatter field of a SKILL.md, or ``None``.
+
+    Public read-only accessor over the same ``key: value`` line grammar the
+    normalizer uses; unknown keys never raise. Introduced for the execution
+    profile gate (``tier:``), usable by any future manifest-level field.
+    """
+    fm_block = _extract_frontmatter_block(content)
+    if fm_block is None:
+        return None
+    return _frontmatter_get_scalar(fm_block, key)
+
+
 def _set_or_insert_frontmatter_field(fm_text: str, key: str, value: str) -> Tuple[str, bool]:
     """Return updated frontmatter body and whether a change was made.
 

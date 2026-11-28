@@ -37,6 +37,7 @@ from agenticx.runtime.replay_ledger.contracts import (
     RUN_STATUSES,
     ReplayRunRecord,
     RunEvent,
+    is_payload_summary,
     validate_ledger_id,
 )
 from agenticx.studio.storage.factory import _default_sessions_root
@@ -514,6 +515,13 @@ class ReplayLedgerStore:
             except Exception:
                 pass
             return None
+
+    def resolve_payload(self, event: RunEvent) -> Any:
+        """Return the full event payload, following the blob when the row holds a summary."""
+        if not is_payload_summary(event.payload) or not event.payload_ref:
+            return event.payload
+        resolved = self.read_blob(event.run_id, event.payload_ref)
+        return resolved if resolved is not None else event.payload
 
     def write_checkpoint(
         self,

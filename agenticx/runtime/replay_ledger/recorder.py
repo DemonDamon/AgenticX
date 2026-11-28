@@ -18,9 +18,12 @@ from agenticx.runtime.enterprise_trace import enqueue_completed_run
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.replay_ledger.contracts import (
     EVENT_TYPES,
+    MAX_INLINE_PAYLOAD_BYTES,
     ReplayRunRecord,
     RunEvent,
     WorkspaceSnapshotRef,
+    canonical_json_bytes,
+    summarize_payload,
 )
 from agenticx.runtime.replay_ledger.effects import classify_tool_effect
 from agenticx.runtime.replay_ledger.context_checkpoint import (
@@ -62,6 +65,7 @@ class ReplayLedgerRecorder:
         model: str | None,
         resume_run_id: str | None = None,
         branch_lineage: dict[str, Any] | None = None,
+        enterprise_trace: bool = True,
     ) -> None:
         self.store = store
         self.session_id = str(session_id or "").strip()
@@ -70,6 +74,7 @@ class ReplayLedgerRecorder:
         self.model = str(model or "").strip() or None
         self.resume_run_id = str(resume_run_id or "").strip() or None
         self.branch_lineage = dict(branch_lineage or {})
+        self.enterprise_trace = bool(enterprise_trace)
         self._resume_consumed = False
         self.current_run_id: str | None = None
         self.turn_id: str | None = None
@@ -375,6 +380,17 @@ class ReplayLedgerRecorder:
                     logger.warning("replay checkpoint capture failed", exc_info=True)
             elif not event.unbranchable_reason:
                 event.unbranchable_reason = reason or None
+        if event.payload_ref is None:
+            raw_payload = canonical_json_bytes(event.payload)
+            if raw_payload is not None and len(raw_payload) > MAX_INLINE_PAYLOAD_BYTES:
+                try:
+                    event.payload_ref = self.store.write_blob(
+                        self.current_run_id, event.payload
+                    )
+                except Exception:
+                    event.payload_ref = None
+                else:
+                    event.payload = summarize_payload(raw_payload)
         try:
             stored = self.store.append_event(self.current_run_id, event)
         except Exception:
@@ -574,7 +590,7 @@ class ReplayLedgerRecorder:
             )
             self.store.close_run(self.current_run_id, status, time.time())
             run_id = self.current_run_id
-            if run_id is not None:
+            if run_id is not None and self.enterprise_trace:
                 try:
                     enqueue_completed_run(self.store, run_id)
                 except Exception:

@@ -6,9 +6,13 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from agenticx.runtime.replay_ledger.upcast import upcast_event_row
 
 SCHEMA_VERSION = 1
 LEDGER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
@@ -255,15 +259,14 @@ class RunEvent:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RunEvent":
         """Deserialize and validate a persisted event."""
+        data = upcast_event_row(data, target_version=SCHEMA_VERSION)
         seq = int(data.get("seq", 0) or 0)
         if seq < 1:
             raise ValueError("seq must be at least 1")
         effect_class = str(data.get("effect_class", "none") or "none").strip()
         if effect_class not in EFFECT_CLASSES:
             effect_class = "unknown"
-        schema_version = int(
-            data.get("schema_version", SCHEMA_VERSION) or SCHEMA_VERSION
-        )
+        schema_version = int(data["schema_version"])
         branchable = bool(data.get("branchable", False))
         reason = str(data.get("unbranchable_reason", "") or "").strip() or None
         if schema_version != SCHEMA_VERSION:
@@ -297,3 +300,36 @@ class RunEvent:
             unbranchable_reason=reason,
             schema_version=schema_version,
         )
+
+
+MAX_INLINE_PAYLOAD_BYTES = 4096
+PAYLOAD_SUMMARY_HEAD_BYTES = 256
+
+
+def canonical_json_bytes(value: Any) -> bytes | None:
+    """Encode a JSON value exactly like ``write_blob`` does; None if unserializable."""
+    try:
+        return json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        return None
+
+
+def summarize_payload(raw: bytes) -> dict[str, Any]:
+    """Build the inline summary kept on the row when the full payload moves to a blob."""
+    return {
+        "truncated": True,
+        "head": raw[:PAYLOAD_SUMMARY_HEAD_BYTES].decode("utf-8", errors="ignore"),
+        "length": len(raw),
+        "digest": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def is_payload_summary(payload: Any) -> bool:
+    """Whether an inline payload is a summary whose full value lives in a blob."""
+    return (
+        isinstance(payload, dict)
+        and payload.get("truncated") is True
+        and isinstance(payload.get("digest"), str)
+    )

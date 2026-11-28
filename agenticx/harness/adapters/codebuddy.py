@@ -205,14 +205,17 @@ class CodeBuddyAdapter(WbBridgeSessionManager, HarnessAdapter):
             self.send_user_message(session_id, outbound, idempotency_key=key)
         except KeyError as exc:
             raise SessionNotFoundError(session_id) from exc
+        self._emit_turn_started(session_id, request)
         status, snap = self.wait_for_turn(session_id, request.wait_seconds)
-        return self._turn_result(
+        result = self._turn_result(
             session_id,
             status,
             snap,
             deduplicated=False,
             user_text=request.text,
         )
+        self._emit_turn_finished(session_id, result)
+        return result
 
     def _turn_result(
         self,

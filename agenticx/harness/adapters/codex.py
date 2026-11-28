@@ -333,16 +333,19 @@ class CodexAdapter(ExecCliHarnessAdapter):
         if preferred_transport() == "exec":
             return super().turn(session_id, request)
         try:
-            return self._app_server_turn(session_id, request)
+            result = self._app_server_turn(session_id, request)
         except AppServerUnavailable:
             session = self._get(session_id)
             # Handshake/startup failed: drop the broken process and use
-            # exec --json rather than failing the user's turn.
+            # exec --json rather than failing the user's turn. The exec
+            # engine emits its own turn events on this fallback path.
             self._close_app_server(session)
             with self._lock:
                 if session.state == "running":
                     session.state = "idle"
             return super().turn(session_id, request)
+        self._emit_turn_finished(session_id, result)
+        return result
 
     def _app_server_turn(
         self, session_id: str, request: TurnRequest
@@ -425,6 +428,7 @@ class CodexAdapter(ExecCliHarnessAdapter):
             turn = started.get("turn") if isinstance(started, dict) else None
             if isinstance(turn, dict) and turn.get("id"):
                 rpc.acc["turn_id"] = str(turn["id"])
+            self._emit_turn_started(session_id, request)
             wait = request.wait_seconds if request.wait_seconds > 0 else None
             try:
                 rpc.wait_for_turn(wait)

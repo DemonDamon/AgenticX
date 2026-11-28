@@ -202,6 +202,9 @@ class ExecCliHarnessAdapter(HarnessAdapter):
                 session.state = "idle"
             raise
         session.proc = proc
+        # Emitted after a successful spawn: a missing executable means no
+        # turn ever started, so it must not announce one.
+        self._emit_turn_started(session_id, request)
 
         lines = queue.Queue()  # type: queue.Queue[Optional[str]]
         reader_error: List[str] = []
@@ -291,7 +294,7 @@ class ExecCliHarnessAdapter(HarnessAdapter):
             timeout_detail = dict(detail, wait_seconds=request.wait_seconds)
             if visible_tail and not timeout_detail.get("terminal_detail"):
                 timeout_detail["terminal_detail"] = visible_tail[:500]
-            return TurnResult(
+            result = TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_TIMEOUT,
@@ -299,13 +302,15 @@ class ExecCliHarnessAdapter(HarnessAdapter):
                 tail=tail,
                 detail=timeout_detail,
             )
+            self._emit_turn_finished(session_id, result)
+            return result
         if error_text:
             err_detail = dict(detail, error=error_text[:500])
             if not err_detail.get("terminal_detail") and not err_detail.get(
                 "error_visible_text"
             ):
                 err_detail["terminal_detail"] = error_text[:500]
-            return TurnResult(
+            result = TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_ERROR,
@@ -313,13 +318,15 @@ class ExecCliHarnessAdapter(HarnessAdapter):
                 tail=tail,
                 detail=err_detail,
             )
+            self._emit_turn_finished(session_id, result)
+            return result
         if exit_code not in (0, None):
             fail_detail = dict(detail)
             if visible_tail and not fail_detail.get("terminal_detail") and not fail_detail.get(
                 "error_visible_text"
             ):
                 fail_detail["terminal_detail"] = visible_tail[:500]
-            return TurnResult(
+            result = TurnResult(
                 harness=self.harness_id,
                 session_id=session_id,
                 status=TURN_STATUS_ERROR,
@@ -327,7 +334,9 @@ class ExecCliHarnessAdapter(HarnessAdapter):
                 tail=tail,
                 detail=fail_detail,
             )
-        return TurnResult(
+            self._emit_turn_finished(session_id, result)
+            return result
+        result = TurnResult(
             harness=self.harness_id,
             session_id=session_id,
             status=TURN_STATUS_SUCCESS,
@@ -335,6 +344,8 @@ class ExecCliHarnessAdapter(HarnessAdapter):
             tail=tail,
             detail=detail,
         )
+        self._emit_turn_finished(session_id, result)
+        return result
 
     # ------------------------------------------------------------------
     # native thread adoption (SP4 resume tier)

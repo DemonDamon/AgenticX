@@ -144,11 +144,63 @@ def fresh_round_loop_enabled() -> bool:
     return _resolve_bool("AGX_FRESH_ROUND_LOOP", "runtime.fresh_round_loop", False)
 
 
+def dispatch_mailbox_enabled() -> bool:
+    """Persist dispatch records, mail claims, and context snapshots for wake-ups."""
+    return _resolve_bool("AGX_DISPATCH_MAILBOX", "runtime.dispatch_mailbox", True)
+
+
+def harness_ledger_events_enabled() -> bool:
+    """``AGX_HARNESS_LEDGER_EVENTS`` / ``runtime.harness_ledger_events``.
+
+    When on, external-harness turns executed through the studio chat
+    routing are recorded into the replay ledger under an isolated
+    namespace (``<owner_session_id>:harness``) via the adapter event
+    outlet. When off, no bridge is attached and no ledger files are
+    written; the turn path is byte-for-byte the pre-04 behavior.
+    """
+    return _resolve_bool("AGX_HARNESS_LEDGER_EVENTS", "runtime.harness_ledger_events", True)
+
+
+def skill_profile_gate_enabled() -> bool:
+    """``AGX_SKILL_PROFILE_GATE`` / ``runtime.skill_profile_gate``. Default True.
+
+    When on, skills may declare their static tier (``tier:`` in SKILL.md
+    frontmatter); every install path rejects declared-vs-measured
+    mismatches before writing, the loader refuses to register mismatched
+    skills, and each rejection is audited through the studio safety
+    sinks. When off, no profile check runs anywhere and install/load
+    behavior is byte-for-byte the pre-05 state (legacy skills without a
+    declaration are never affected either way).
+    """
+    return _resolve_bool("AGX_SKILL_PROFILE_GATE", "runtime.skill_profile_gate", True)
+
+
 def cancelled_prefix_finalize_enabled() -> bool:
     """``AGX_CANCELLED_PREFIX_FINALIZE`` / ``runtime.cancelled_prefix_finalize``. Default True."""
     return _resolve_bool(
         "AGX_CANCELLED_PREFIX_FINALIZE", "runtime.cancelled_prefix_finalize", True
     )
+
+
+def resume_from_ledger_enabled() -> bool:
+    """``AGX_RESUME_FROM_LEDGER`` / ``runtime.resume_from_ledger``. Default True.
+
+    When on, standalone crash recovery projects its anchor from the replay
+    ledger and only falls back to the stored checkpoint when the ledger has no
+    open run. When off, recovery reads the checkpoint alone. HA mode always
+    reads the checkpoint and ignores this switch.
+    """
+    return _resolve_bool("AGX_RESUME_FROM_LEDGER", "runtime.resume_from_ledger", True)
+
+
+def ledger_reattach_enabled() -> bool:
+    """``AGX_LEDGER_REATTACH`` / ``runtime.ledger_reattach``. Default True.
+
+    When on, the read-only session stream falls back to the local replay
+    ledger when neither the event hub nor the coordination bus can serve a
+    reconnecting client. When off, the endpoint answers ``not_running`` as before.
+    """
+    return _resolve_bool("AGX_LEDGER_REATTACH", "runtime.ledger_reattach", True)
 
 
 def group_meta_direct_tools_enabled() -> bool:
