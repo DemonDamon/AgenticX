@@ -1,0 +1,49 @@
+name: E2E runtime invariants
+
+on:
+  pull_request:
+    paths:
+      - "tests/e2e/test_e2e_runtime_invariants.py"
+      - "agenticx/runtime/**"
+      - "agenticx/skills/**"
+      - "agenticx/harness/**"
+      - "agenticx/studio/**"
+      - "agenticx/extensions/**"
+      - "agenticx/tools/skill_bundle.py"
+      - ".github/workflows/e2e-invariants.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-runtime-invariants-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Runtime invariants end-to-end (real server, kill/restart)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      LITELLM_LOCAL_MODEL_COST_MAP: "true"
+      HF_HUB_OFFLINE: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      AWS_EC2_METADATA_DISABLED: "true"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Install the branch's locked runtime and test tools
+        run: >-
+          python -m pip install -r requirements.lock -c requirements.lock
+          "pytest==8.4.2" "pytest-asyncio==0.26.0"
+      - name: Run the end-to-end acceptance suite
+        run: >-
+          python -m pytest tests/e2e/test_e2e_runtime_invariants.py -q
+          -o addopts= -p no:cacheprovider
