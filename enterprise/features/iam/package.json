@@ -17,6 +17,6 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/react": "19.3.0"
+    "@types/react": "19.3.1"
   }
 }
