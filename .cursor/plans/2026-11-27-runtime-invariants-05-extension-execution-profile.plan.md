@@ -100,7 +100,7 @@ Parent-Plan: `.cursor/plans/pending/2026-11-27-runtime-invariants-master.plan.md
 
 「逐方法鉴权」的实现落点：把门放在 `scan()` 的候选循环里、**variants 登记（`:826-831`）之前**（而不是 `get_skill_content` 内逐次校验），理由：(a) `get_skill_content` 的注入消费方（`process_llm_request`）绝不能把拒绝文案当指令注入，返回 None 是既有安全分支；(b) scan 一次一测（只测声明了档位的技能，成本受控），逐 read 一测会让注入路径在每轮 LLM 调用上都做目录扫描；(c) 挡在登记前保证 `get_skill_variants` 也不泄漏。复用既有 gate-check 的代码形态（`_check_gate` 块 `:870-876` 同款 warning+continue）。备选「在 `get_skill_content` 里逐调用鉴权」被否：注入路径语义危险 + 成本高，且 `_skills` 已挡时它是死代码。
 
-master plan 原文「执行类调用逐方法鉴权」与「只在安装与加载边界」的 reconciliation（写进 Design D-5，需实施者原样理解）：Orca 参考的是「host API 按能力域逐方法授权」；AgenticX 技能的 host API 就是 loader 的服务面（list/read/variants/inject），四个方法各自独立消费 `_skills`——把不一致技能挡在 `_skills` 之外，等于每个方法都通过了同一道档位鉴权，而校验动作只发生在安装与加载两个边界，运行期（bash_exec 等）不再拦。
+master plan 原文「执行类调用逐方法鉴权」与「只在安装与加载边界」的 reconciliation（写进 Design D-5，需实施者原样理解）：参考实现取的是「host API 按能力域逐方法授权」；AgenticX 技能的 host API 就是 loader 的服务面（list/read/variants/inject），四个方法各自独立消费 `_skills`——把不一致技能挡在 `_skills` 之外，等于每个方法都通过了同一道档位鉴权，而校验动作只发生在安装与加载两个边界，运行期（bash_exec 等）不再拦。
 
 ### 4. 审计落盘
 
