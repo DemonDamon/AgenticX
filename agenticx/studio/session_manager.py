@@ -1280,7 +1280,7 @@ class SessionManager:
             for record in run_store.list_runs():
                 if str(getattr(record, "status", "")) == "running":
                     try:
-                        run_store.update_status(record.run_id, "interrupted")
+                        run_store.update_status(record.run_id, status="interrupted")
                     except Exception:
                         pass
         except Exception:
