@@ -35,7 +35,7 @@
     "@agenticx/iam-core": "workspace:*",
     "@types/node": "^20.19.0",
     "mysql2": "^3.14.1",
-    "jsdom": "26.1.0",
+    "jsdom": "31.0.1",
     "pg": "^8.20.0",
     "playwright": "^1.59.1",
     "tsx": "^4.21.0",
