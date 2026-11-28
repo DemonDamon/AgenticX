@@ -40,7 +40,7 @@
     "i18next": "^27.2.2",
     "js-yaml": "^5.5.0",
     "lottie-react": "^3.1.2",
-    "lucide-react": "^1.77.0",
+    "lucide-react": "^1.79.0",
     "mammoth": "^1.13.0",
     "marked": "^18.2.1",
     "mermaid": "^11.13.0",
