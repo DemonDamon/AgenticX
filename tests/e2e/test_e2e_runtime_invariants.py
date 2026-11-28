@@ -523,6 +523,11 @@ def _run_child(script: str, home: Path, tmp: Path, extra_env: Dict[str, str]) ->
         "AGX_HOME": str(home / ".agenticx"),
         "PYTHONUNBUFFERED": "1",
         "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+        # The child script lives in a temp dir, so the repo must stay
+        # importable without the package being installed (CI case).
+        "PYTHONPATH": os.pathsep.join(
+            [str(REPO_ROOT)] + [p for p in [os.environ.get("PYTHONPATH")] if p]
+        ),
     }
     env.update(extra_env)
     proc = subprocess.run(
