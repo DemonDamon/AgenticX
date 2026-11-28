@@ -116,7 +116,7 @@ jobs:
 
       - name: Log in to GHCR
         if: steps.publish_policy.outputs.should_push == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
